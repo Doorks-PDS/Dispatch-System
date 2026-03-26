@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Doorks</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="topbar-left">
+        <button id="headerCalendarBtn" class="header-calendar-btn" title="Back to Calendar">📅</button>
+      </div>
+      <div class="brand">Doorks</div>
+      <div class="topbar-right">
+        <span class="chip" id="activeModeChip">Calendar</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="layout">
+    <aside class="sidebar">
+
+      
+
+      <section class="panel">
+        <div class="panel-hd static"><span>Job Flow</span></div>
+        <div class="panel-bd" style="display:block;">
+          <div class="navcol">
+            <button class="navbtn" id="navJobFlow">
+              <span>Job Flow</span>
+              <small>By Status</small>
+              <span class="badge" id="badgeJobFlow" style="display:none;">0</span>
+            </button>
+
+            <button class="navbtn" id="navEstimatePage" style="display:none;">
+              <span>Estimate</span>
+              <small>PDF</small>
+            </button>
+
+            <button class="navbtn" id="navInvoicePage" style="display:none;">
+              <span>Invoice</span>
+              <small>PDF</small>
+            </button>
+
+            <button class="navbtn" id="navCustomers">
+              <span>Customers</span>
+              <small>Database</small>
+            </button>
+
+            <button class="navbtn" id="navEstimateInvoice">
+              <span>Estimate / Invoice</span>
+              <small>Generator</small>
+            </button>
+
+            <button class="navbtn" id="navContacts" style="display:none;">
+              <span>Contacts</span>
+              <small>Database</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd static"><span>Office Flow</span></div>
+        <div class="panel-bd" style="display:block;">
+          <div class="navcol">
+            <button class="navbtn" id="navDataCenter">
+              <span>Data Center</span>
+              <small>Productivity Dashboard</small>
+            </button>
+
+            <button class="navbtn" id="navPayroll">
+              <span>Payroll</span>
+              <small>Monthly Totals</small>
+            </button>
+
+            <button class="navbtn" id="navEmployees">
+              <span>Employees</span>
+              <small>Users</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-hd static"><span>Chat</span></div>
+        <div class="panel-bd" style="display:block;">
+          <div class="navcol">
+            <button class="navbtn navbtn-atlas" id="navAtlas">
+              <span>Atlas</span>
+              <small>Tech Support</small>
+            </button>
+
+            <button class="navbtn navbtn-moses" id="navMoses">
+              <span>Moses</span>
+              <small>Office Support</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <button class="panel-hd" id="formsToggle" type="button">
+          <span>Forms</span>
+          <span class="chev" id="formsChev">&#9656;</span>
+        </button>
+        <div class="panel-bd" id="formsBody" style="display:none;">
+          <div class="navcol">
+            <button class="navbtn" id="navFormsSignOff">
+              <span>Sign Off</span>
+              <small>PDF + Signature</small>
+            </button>
+
+            <button class="navbtn" id="navFormsTimeCard">
+              <span>Time Card</span>
+              <small>Fillable</small>
+            </button>
+
+            <button class="navbtn" id="navTakeoffs">
+              <span>Takeoffs</span>
+              <small>Downloads</small>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <button class="panel-hd" id="loginToggle" type="button">
+          <span>Login</span>
+          <span class="chev" id="loginChev">&#9656;</span>
+        </button>
+        <div class="panel-bd" id="loginBody" style="display:none;">
+          <div class="row" style="display:grid; gap:10px;">
+            <input id="usernameInput" class="input" placeholder="Username" autocomplete="username" />
+            <input id="passwordInput" type="password" class="input" placeholder="Password" autocomplete="current-password" />
+            <div id="pinStepWrap" style="display:none; gap:10px;">
+              <input id="pinInput" type="password" inputmode="numeric" maxlength="4" class="input" placeholder="4-digit PIN" autocomplete="one-time-code" />
+            </div>
+            <div class="row">
+              <button id="loginBtn" class="btn btn-orange">Next</button>
+              <button id="pinBtn" class="btn btn-orange" type="button" style="display:none;">Verify PIN</button>
+              <button id="logoutBtn" class="btn" type="button" style="display:none;">Log Out</button>
+            </div>
+            <div class="hint" id="loginStatus">Log in to access Doorks.</div>
+          </div>
+        </div>
+      </section>
+
+    </aside>
+
+    <section class="workspace">
+      <div class="workspace-hd">
+        <div class="workspace-title" id="workspaceTitle">Calendar</div>
+        <div class="workspace-actions" id="workspaceActions"></div>
+      </div>
+      <div class="workspace-bd" id="workspaceBody"></div>
+    </section>
+  </main>
+
+  <button
+    id="navNotifications"
+    class="btn btn-orange"
+    type="button"
+    title="Priority Door Systems Notifications"
+    style="position:fixed; right:20px; bottom:20px; z-index:9999; border-radius:999px; min-width:64px; min-height:64px; box-shadow:0 8px 24px rgba(0,0,0,.25);"
+  >
+    <span style="display:flex; align-items:center; justify-content:center; gap:8px; font-weight:700;">
+      <span>PDS</span>
+      <span class="badge" id="badgeNotifications" style="display:none;">0</span>
+    </span>
+  </button>
+
+  <script src="/static/app.js?v=34"></script>
+</body>
+</html>

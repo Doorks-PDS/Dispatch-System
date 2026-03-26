@@ -1,0 +1,433 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Doorks • Atlas</title>
+
+  <style>
+    :root {
+      --bg: #0b0f14;
+      --panel: rgba(17, 24, 38, 0.70);   /* more transparent */
+      --panel2: rgba(15, 22, 35, 0.64);  /* more transparent */
+      --border: rgba(31, 42, 58, 0.55);  /* softer */
+      --text: #e8eef6;
+      --muted: #a9b7c6;
+      --orange: #f97316;
+      --orange2: #fb923c;
+      --ok: #22c55e;
+      --err: #ef4444;
+
+      font-family: -apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background:
+        radial-gradient(1200px 700px at 30% -10%, rgba(249,115,22,.14), transparent 60%),
+        radial-gradient(900px 500px at 90% 0%, rgba(251,146,60,.09), transparent 55%),
+        rgba(11,15,20,0.92);
+      color: var(--text);
+    }
+
+    .wrap { max-width: 980px; margin: 0 auto; padding: 18px; }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 10px 28px rgba(0,0,0,.28);
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      height: calc(100vh - 36px);
+      min-height: 520px;
+      backdrop-filter: blur(10px);
+    }
+
+    /* header */
+    .header {
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(249,115,22,.10), rgba(249,115,22,0) 70%);
+    }
+
+    .brandRow {
+      display:flex;
+      gap: 12px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+
+    .logoBox{
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, var(--orange), var(--orange2));
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      box-shadow: 0 10px 20px rgba(249,115,22,.18);
+      flex: 0 0 auto;
+    }
+
+    .logoBox svg { width: 22px; height: 22px; }
+
+    .brandText h1 {
+      margin: 0;
+      font-size: 22px;
+      letter-spacing: .2px;
+      line-height: 1.1;
+    }
+    .brandText .sub {
+      margin-top: 4px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    /* chat */
+    .chat {
+      flex: 1;
+      overflow: auto;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .msg {
+      border: 1px solid var(--border);
+      background: var(--panel2);
+      border-radius: 16px;
+      padding: 12px 12px 10px;
+      max-width: 92%;
+      backdrop-filter: blur(10px);
+    }
+    .msg.user { margin-left: auto; background: rgba(14,19,32,0.60); }
+    .msg.atlas { margin-right: auto; background: rgba(13,23,39,0.60); }
+
+    .meta {
+      font-size: 12px;
+      color: var(--muted);
+      margin-bottom: 6px;
+      display:flex;
+      justify-content:space-between;
+      gap:10px;
+      flex-wrap:wrap;
+    }
+
+    .content {
+      white-space: pre-wrap;
+      line-height: 1.40;
+      font-size: 14px;
+    }
+
+    /* clickable links */
+    .content a { color: #93c5fd; text-decoration: none; }
+    .content a:hover { text-decoration: underline; }
+
+    /* bottom bar */
+    .controls {
+      border-top: 1px solid rgba(0,0,0,.15);
+      background: linear-gradient(135deg, rgba(249,115,22,.92), rgba(251,146,60,.86));
+      padding: 12px 14px;
+    }
+
+    .row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    .status {
+      font-size: 12px;
+      color: rgba(255,255,255,.94);
+      font-weight: 700;
+      display:flex;
+      align-items:center;
+      gap:8px;
+    }
+
+    .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: rgba(255,255,255,.7);
+    }
+    .dot.ok { background: rgba(34,197,94,.95); }
+    .dot.err { background: rgba(239,68,68,.95); }
+    .dot.think { background: rgba(255,255,255,.9); animation: pulse 1.0s infinite; }
+    @keyframes pulse { 0%{opacity:.35} 50%{opacity:1} 100%{opacity:.35} }
+
+    input, select, button {
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,.22);
+      background: rgba(12,16,24,.88);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 14px;
+      outline: none;
+      backdrop-filter: blur(10px);
+    }
+
+    input {
+      flex: 1;
+      min-width: 240px;
+    }
+
+    select { min-width: 88px; }
+
+    button {
+      cursor: pointer;
+      background: rgba(12,16,24,.94);
+      font-weight: 750;
+    }
+    button:hover { filter: brightness(1.08); }
+
+    .right { margin-left:auto; display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+
+    /* file picker in orange area */
+    .fileWrap {
+      display:flex;
+      gap:10px;
+      align-items:center;
+      flex-wrap:wrap;
+    }
+    .fileLabel {
+      display:inline-flex;
+      align-items:center;
+      gap:8px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid rgba(0,0,0,.22);
+      background: rgba(12,16,24,.88);
+      cursor:pointer;
+      user-select:none;
+      font-size: 14px;
+      font-weight: 750;
+    }
+    .fileLabel:hover { filter: brightness(1.08); }
+    #files { display:none; }
+  </style>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+
+      <div class="header">
+        <div class="brandRow">
+          <div class="logoBox" title="Doorks">
+            <!-- orange door icon -->
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M7 3h10v18H7V3Z" stroke="white" stroke-width="1.8" opacity=".95"/>
+              <path d="M10 4.6v14.8" stroke="white" stroke-width="1.4" opacity=".75"/>
+              <circle cx="14.6" cy="12" r="0.9" fill="white" opacity=".95"/>
+            </svg>
+          </div>
+
+          <div class="brandText">
+            <h1><span style="color: var(--orange);">Doorks</span> • Atlas</h1>
+            <div class="sub">AI Assisted Tech Support</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="chat" id="chat"></div>
+
+      <div class="controls">
+        <div class="row" style="margin-bottom:10px;">
+          <div class="status" id="status">
+            <span class="dot" id="dot"></span>
+            <span id="statusText">Ready</span>
+          </div>
+
+          <div class="right">
+            <div class="fileWrap">
+              <label class="fileLabel" for="files">📎 Choose files</label>
+              <input id="files" type="file" multiple accept="image/*,.pdf,.txt,.doc,.docx"/>
+              <button id="uploadBtn" title="Upload selected files">Upload</button>
+            </div>
+
+            <button id="down" title="Thumbs down">👎</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <input id="q" placeholder="Ask Atlas… (e.g., 'MC521 Pro FIS for single slider')" />
+          <select id="mode">
+            <option value="tech" selected>tech</option>
+            <option value="office">office</option>
+          </select>
+          <button id="ask">Ask</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+  // ====== key prompt (same as your old flow) ======
+  const API_KEY = localStorage.getItem("atlas_key") || prompt("Enter x-api-key (tech):", "tech123") || "tech123";
+  localStorage.setItem("atlas_key", API_KEY);
+
+  // Keep a session id for continuity/history, but DO NOT force-topic-lock.
+  let sessionId = localStorage.getItem("atlas_session_id") || null;
+
+  // Only treat the *immediate next* message as a follow-up if Atlas asked a question.
+  let lastAtlasAskedQuestion = false;
+
+  function setStatus(state, text) {
+    const dot = document.getElementById("dot");
+    const st = document.getElementById("statusText");
+    st.textContent = text;
+
+    dot.className = "dot";
+    if (state === "ok") dot.classList.add("ok");
+    else if (state === "err") dot.classList.add("err");
+    else if (state === "think") dot.classList.add("think");
+  }
+
+  function escapeHtml(s) {
+    return s
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  function linkify(text) {
+    const escaped = escapeHtml(text);
+    const urlRegex = /(https?:\/\/[^\s)]+)|(www\.[^\s)]+)/g;
+    return escaped.replace(urlRegex, (m) => {
+      const href = m.startsWith("http") ? m : `https://${m}`;
+      return `<a href="${href}" target="_blank" rel="noopener noreferrer">${m}</a>`;
+    });
+  }
+
+  function addMessage(role, text, extraMeta) {
+    const chat = document.getElementById("chat");
+    const msg = document.createElement("div");
+    msg.className = "msg " + (role === "user" ? "user" : "atlas");
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+
+    const left = document.createElement("div");
+    left.textContent = role === "user" ? "You" : "Atlas";
+
+    const right = document.createElement("div");
+    right.textContent = extraMeta || "";
+
+    meta.appendChild(left);
+    meta.appendChild(right);
+
+    const content = document.createElement("div");
+    content.className = "content";
+    content.innerHTML = linkify(text);
+
+    msg.appendChild(meta);
+    msg.appendChild(content);
+    chat.appendChild(msg);
+
+    requestAnimationFrame(() => { chat.scrollTop = chat.scrollHeight; });
+  }
+
+  async function ask() {
+    const input = document.getElementById("q");
+    const q = input.value.trim();
+    const mode = document.getElementById("mode").value;
+    if (!q) return;
+
+    addMessage("user", q);
+    setStatus("think", "Thinking…");
+
+    // clear user question after asked (your request)
+    input.value = "";
+    input.focus();
+
+    // Only a hint; backend should remain free to answer without “manual reliance”.
+    const followup_hint = lastAtlasAskedQuestion ? "followup" : "new";
+    lastAtlasAskedQuestion = false;
+
+    const res = await fetch(`/atlas/chat?include_sources=false&debug=false`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": API_KEY
+      },
+      body: JSON.stringify({ q, mode, session_id: sessionId, followup_hint })
+    });
+
+    const raw = await res.text();
+    let data = null;
+    try { data = JSON.parse(raw); } catch(e) {}
+
+    if (!res.ok) {
+      setStatus("err", "Server error");
+      addMessage("atlas", data?.detail || raw, "error");
+      return;
+    }
+
+    if (data?.conversation_id) {
+      sessionId = data.conversation_id;
+      localStorage.setItem("atlas_session_id", sessionId);
+    }
+
+    setStatus("ok", "Ready");
+    const answer = data?.answer_md || "(No answer generated.)";
+    addMessage("atlas", answer);
+
+    // simple follow-up gate: only one cycle
+    if (answer.includes("\nQuestion") || answer.includes("\nQuestion:") || answer.includes("Question\n")) {
+      lastAtlasAskedQuestion = true;
+    }
+  }
+
+  async function upload() {
+    const el = document.getElementById("files");
+    const files = el.files;
+    if (!files || !files.length) return;
+
+    const fd = new FormData();
+    for (const f of files) fd.append("files", f);
+
+    setStatus("think", "Uploading…");
+
+    const res = await fetch("/atlas/upload", {
+      method: "POST",
+      headers: { "x-api-key": API_KEY },
+      body: fd
+    });
+
+    if (!res.ok) {
+      const t = await res.text();
+      setStatus("err", "Upload failed");
+      addMessage("atlas", t, "upload error");
+      return;
+    }
+
+    const data = await res.json();
+    const names = (data.saved || []).map(x => x.filename).join(", ");
+    setStatus("ok", "Ready");
+    addMessage("atlas", `Uploaded: ${names || "(files saved)"}`, "upload");
+  }
+
+  document.getElementById("ask").onclick = () => ask();
+  document.getElementById("q").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") ask();
+  });
+
+  document.getElementById("uploadBtn").onclick = () => upload();
+
+  document.getElementById("down").onclick = () => {
+    addMessage("atlas", "Noted. (Feedback received)", "feedback");
+  };
+
+  setStatus("ok", "Ready");
+</script>
+
+</body>
+</html>

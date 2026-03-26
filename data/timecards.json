@@ -1,0 +1,28 @@
+[
+  {
+    "id": "f50b4a559b0f40f49593d9a7877ae279",
+    "user": "Jason Brewster",
+    "date": "2026-03-05",
+    "start_time": "08:00",
+    "end_time": "16:30",
+    "lunch_taken": true,
+    "lunch_start": "12:30",
+    "lunch_end": "",
+    "notes": "",
+    "hours": 8.5,
+    "billed_hours": 8.5
+  },
+  {
+    "id": "eb9e638e0cb3423496074bab02786109",
+    "user": "Jason Brewster",
+    "date": "2026-03-04",
+    "start_time": "08:00",
+    "end_time": "16:30",
+    "lunch_taken": true,
+    "lunch_start": "12:00",
+    "lunch_end": "12:30",
+    "notes": "",
+    "hours": 8.0,
+    "billed_hours": 8.0
+  }
+]

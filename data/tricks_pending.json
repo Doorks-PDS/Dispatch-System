@@ -1,0 +1,181 @@
+[
+  {
+    "id": "764b107e-684d-47c2-bc77-fc19a9f9500d",
+    "title": "Trick of the Trade",
+    "problem": "Door not latching",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 68,
+    "source_query": "Door not latching",
+    "created_at": "2026-01-29T02:24:20.100743+00:00"
+  },
+  {
+    "id": "afa81b05-1772-4d33-ab16-f39f715d6661",
+    "title": "Trick of the Trade",
+    "problem": "door dragging",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 54,
+    "source_query": "door dragging",
+    "created_at": "2026-01-28T22:48:34.411133+00:00"
+  },
+  {
+    "id": "05b9f3df-86d5-4ae9-a505-cbb10999b2f3",
+    "title": "Trick of the Trade",
+    "problem": "door not locking",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 37,
+    "source_query": "door not locking",
+    "created_at": "2026-01-28T22:48:11.268661+00:00"
+  },
+  {
+    "id": "19978664-4077-47c7-88ec-6e2363ce0c63",
+    "title": "Trick of the Trade",
+    "problem": "panic is not working",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 18,
+    "source_query": "panic is not working",
+    "created_at": "2026-01-28T22:44:09.857574+00:00"
+  },
+  {
+    "id": "f5fef145-152f-4401-8f03-3941522698c8",
+    "title": "Trick of the Trade",
+    "problem": "roll up door stuck",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 69,
+    "source_query": "roll up door stuck",
+    "created_at": "2026-01-28T22:43:36.448833+00:00"
+  },
+  {
+    "id": "8f6c3971-80d3-4f39-95b5-ce4853914410",
+    "title": "Trick of the Trade",
+    "problem": "automatic door not opening",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 18,
+    "source_query": "automatic door not opening",
+    "created_at": "2026-01-28T22:42:54.215853+00:00"
+  },
+  {
+    "id": "9f2c633a-d08d-499a-b25c-ea663f24fa2d",
+    "title": "Trick of the Trade",
+    "problem": "automatic door not working",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 23,
+    "source_query": "automatic door not working",
+    "created_at": "2026-01-28T22:42:35.494871+00:00"
+  },
+  {
+    "id": "a9a4538f-0c8d-4129-9b9d-37f036e11dae",
+    "title": "Trick of the Trade",
+    "problem": "door not latching",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 68,
+    "source_query": "door not latching",
+    "created_at": "2026-01-28T22:40:59.491088+00:00"
+  },
+  {
+    "id": "50b6f8e7-333c-4345-9b0e-27cdf1575930",
+    "title": "Trick of the Trade",
+    "problem": "door not latching",
+    "recommendation": "Recommended: See above",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 394,
+    "source_query": "door not latching",
+    "created_at": "2026-01-28T22:08:42.993127+00:00"
+  },
+  {
+    "id": "pending_1",
+    "title": "Trick of the Trade",
+    "problem": "door not latching",
+    "recommendation": "Storefront door is not latching\n\nSee above",
+    "confidence": 0.924,
+    "frequency": 202,
+    "source_query": "door not latching",
+    "created_at": "2026-01-28T19:30:50.821873+00:00"
+  },
+  {
+    "id": "pending_2",
+    "title": "Trick of the Trade",
+    "problem": "door latching",
+    "recommendation": "Storefront door is not latching\n\nSee above",
+    "confidence": 0.924,
+    "frequency": 202,
+    "source_query": "door latching",
+    "created_at": "2026-01-28T20:48:52.734128+00:00"
+  },
+  {
+    "id": "12",
+    "title": "Trick of the Trade",
+    "problem": "door slamming",
+    "recommendation": "Based on high-frequency matches in the tech notes. Review top matches and formalize the fix steps.",
+    "confidence": 0.621,
+    "confidence_pct": 100,
+    "frequency": 184,
+    "source_query": "door slamming",
+    "created_at": "",
+    "status": "pending"
+  },
+  {
+    "id": "13",
+    "title": "Trick of the Trade",
+    "problem": "door not closing",
+    "recommendation": "Based on high-frequency matches in the tech notes. Review top matches and formalize the fix steps.",
+    "confidence": 0.5622,
+    "confidence_pct": 100,
+    "frequency": 381,
+    "source_query": "door not closing",
+    "created_at": "",
+    "status": "pending"
+  },
+  {
+    "id": "15",
+    "title": "Trick of the Trade",
+    "problem": "door Arm fell off",
+    "recommendation": "Likely repeat issue based on historical notes. Review top matches and apply the same fix pattern.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 119,
+    "source_query": "door Arm fell off",
+    "created_at": "",
+    "status": "pending"
+  },
+  {
+    "id": "15",
+    "title": "Trick of the Trade",
+    "problem": "door closer leaking",
+    "recommendation": "Based on high-frequency matches in the tech notes. Review top matches and formalize the fix steps.",
+    "confidence": 0.6976,
+    "confidence_pct": 100,
+    "frequency": 588,
+    "source_query": "door closer leaking",
+    "created_at": "",
+    "status": "pending"
+  },
+  {
+    "id": "16",
+    "title": "Trick of the Trade",
+    "problem": "rsd not opening",
+    "recommendation": "Recommendation (Draft): Use the top historical matches to confirm symptom and apply the most common fix pattern.\n\nConfirm:\n- Confirm the symptom matches the door in front of you (use top matches as reference).\n\nFix Steps:\n- Apply the most common repair pattern shown in the top historical matches.\n\nVerify:\n- Cycle-test and document final settings/parts used.",
+    "confidence": 1.0,
+    "confidence_pct": 100,
+    "frequency": 182,
+    "source_query": "RSD not opening",
+    "created_at": "",
+    "status": "pending"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "name": "MC521 ghosting/cycling often obstruction/rollers",
+    "priority": 10,
+    "when_any": [
+      "mc521",
+      "ghosting",
+      "cycling",
+      "opening and closing intermittently"
+    ],
+    "then": {
+      "override_symptom_class": "auto_door_cycling",
+      "add_causes": [
+        "Obstruction detected due to worn rollers/guides/track bind (common)"
+      ],
+      "add_diagnostics": [
+        "Power off and slide door by hand; inspect roller wheels/guides/track"
+      ],
+      "add_fix_path": [
+        "Service/replace rollers and guides before replacing controller/motor again"
+      ],
+      "add_notes": [
+        "If electronics replacements didn’t fix cycling, suspect mechanical obstruction first."
+      ]
+    },
+    "id": "r_1770239168_1",
+    "enabled": true
+  }
+]

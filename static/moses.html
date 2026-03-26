@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Doorks — Moses</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="sideTop">
+        <label class="field">
+          <span>API Key</span>
+          <input id="apiKey" type="password" placeholder="office key"/>
+        </label>
+
+        <div class="btnRow">
+          <button class="btn" id="newChat">+ New Chat</button>
+          <button class="btn ghost" id="formsBtn">Forms</button>
+        </div>
+
+        <div class="uploadBox">
+          <div class="smallMuted">Upload photo / PDF (adds a link into your message)</div>
+          <div class="uploadRow">
+            <input id="uploadFile" type="file" />
+            <button class="btn primary" id="uploadBtn" style="width:auto; min-width:110px;">Upload</button>
+          </div>
+          <div id="attachmentsPreview" class="attachmentsPreview"></div>
+        </div>
+
+        <div class="notice">
+          Proposal by default if you type "proposal - ..."<br/>
+          Invoice if you type "invoice - ..."<br/><br/>
+          Teach: Make this a trick of the trade: …
+        </div>
+
+        <div id="status" class="status"></div>
+      </div>
+
+      <div class="threads" id="threads"></div>
+
+      <div class="sidebarFooter">
+        <div class="status">Enter = send • Shift+Enter = new line</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="header">
+        <div class="headerLeft">
+          <div class="titleBlock">
+            <div class="h1">Moses</div>
+            <div class="h2">Office Assistant</div>
+          </div>
+        </div>
+
+        <div class="brandBubble">
+          <div class="logoCircle" aria-hidden="true">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+              <path d="M8 3h9a2 2 0 0 1 2 2v16H8V3z" stroke="rgba(255,154,61,.95)" stroke-width="2" />
+              <path d="M8 21H5V3h3" stroke="rgba(255,154,61,.95)" stroke-width="2" />
+              <path d="M13 7h4" stroke="rgba(255,154,61,.95)" stroke-width="2"/>
+              <path d="M13 11h4" stroke="rgba(255,154,61,.95)" stroke-width="2"/>
+              <path d="M13 15h4" stroke="rgba(255,154,61,.95)" stroke-width="2"/>
+            </svg>
+          </div>
+          <div class="doorks">DOORKS</div>
+        </div>
+
+        <div class="headerRight">
+          <div class="toggle">
+            <a class="pill" href="/ui">Atlas</a>
+            <a class="pill active" href="/ui/moses">Moses</a>
+          </div>
+        </div>
+      </header>
+
+      <section class="chat" id="chat"></section>
+
+      <footer class="composer">
+        <textarea id="q" placeholder="proposal - notes…   or   invoice - notes…"></textarea>
+        <button class="searchBtn" id="send">Search</button>
+      </footer>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+  <script>
+    new DoorksUI({ mode: "office", pageName: "moses", officeOnly: true, enableForms: true, enableUpload: true });
+  </script>
+</body>
+</html>
