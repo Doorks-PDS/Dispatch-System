@@ -64,6 +64,7 @@ from app.routers.timeoff import router as timeoff_router
 
 from app.routers.data import router as data_router
 from app.routers.auth import router as auth_router
+from app.routers.admin import router as admin_router
 from app.services.user_store import UsersStore
 
 TECH_KEYS = {os.getenv("DOORKS_TECH_KEY", "tech123")}
@@ -175,6 +176,7 @@ app.include_router(documents_router)
 app.include_router(crm_router)
 app.include_router(timeoff_router)
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):

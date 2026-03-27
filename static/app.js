@@ -37,6 +37,7 @@
   const navDataCenter = el("navDataCenter");
   const navPayroll = el("navPayroll");
   const navEmployees = el("navEmployees");
+  const navDataUpload = el("navDataUpload");
   let navSaddleback = el("navSaddleback");
  
   const navNotifications = el("navNotifications");
@@ -184,7 +185,7 @@
     [
       navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff,
       navJobFlow, navAllJobs, navPartsList, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
-      navDataCenter, navPayroll, navEmployees, navSaddleback,
+      navDataCenter, navPayroll, navEmployees, navDataUpload, navSaddleback,
       navNotifications, navAtlas, navMoses
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
   }
@@ -763,6 +764,24 @@
     await fetchJSON(`/timecards/${itemId}`, { method: "DELETE" });
   }
 
+  async function uploadAdminDataFile(file) {
+    const form = new FormData();
+    form.append("file", file);
+    const res = await fetch("/admin/upload-data-file", {
+      method: "POST",
+      credentials: "same-origin",
+      body: form,
+    });
+    const text = await res.text();
+    let data = {};
+    try { data = JSON.parse(text); } catch {}
+    if (!res.ok) {
+      throw new Error(data.detail || text || "Upload failed");
+    }
+    return data;
+  }
+
+
   const PTO_BANK_KEY = "doorks_pto_bank_v1";
 
   function getPtoBankMap() {
@@ -942,12 +961,12 @@
   }
 
   function accessForRole(role) {
-    const all = { calendar: true, forms: true, jobFlow: true, office: true, chat: true, notifications: true, atlas: true, moses: true, payroll: true, employees: true, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: true };
+    const all = { calendar: true, forms: true, jobFlow: true, office: true, chat: true, notifications: true, atlas: true, moses: true, payroll: true, employees: true, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: true, dataUpload: true };
     if (role === "office_admin") return all;
-    if (role === "office") return { ...all, chat: false, atlas: false, moses: false };
-    if (role === "lead") return { calendar: true, forms: true, jobFlow: true, office: true, chat: false, notifications: true, atlas: false, moses: false, payroll: false, employees: false, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: false };
-    if (role === "tech") return { calendar: true, forms: true, jobFlow: true, office: false, chat: false, notifications: true, atlas: false, moses: false, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false };
-    return { calendar: false, forms: false, jobFlow: false, office: false, chat: false, notifications: false, atlas: false, moses: false, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false };
+    if (role === "office") return { ...all, chat: false, atlas: false, moses: false, dataUpload: false };
+    if (role === "lead") return { calendar: true, forms: true, jobFlow: true, office: true, chat: false, notifications: true, atlas: false, moses: false, payroll: false, employees: false, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: false, dataUpload: false };
+    if (role === "tech") return { calendar: true, forms: true, jobFlow: true, office: false, chat: false, notifications: true, atlas: false, moses: false, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false, dataUpload: false };
+    return { calendar: false, forms: false, jobFlow: false, office: false, chat: false, notifications: false, atlas: false, moses: false, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false, dataUpload: false };
   }
 
   function applyRoleAccess(role) {
@@ -961,6 +980,7 @@
     setVisible(navDataCenter, !!role && perms.dataCenter);
     setVisible(navPayroll, !!role && perms.payroll);
     setVisible(navEmployees, !!role && perms.employees);
+    setVisible(navDataUpload, role === "office_admin" && !!perms.dataUpload);
     setVisible(navSaddleback, role === "office_admin" && !!perms.saddleback);
     setVisible(navAtlas, !!role && perms.atlas);
     setVisible(navMoses, !!role && perms.moses);
