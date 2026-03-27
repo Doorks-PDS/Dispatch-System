@@ -6093,6 +6093,72 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navContacts) navContacts.addEventListener("click", renderContactsView);
   if (navPartsList) navPartsList.addEventListener("click", renderPartsListView);
  
+
+function renderDataUploadView() {
+    setNavActive(navDataUpload);
+    setActiveChip("Office Flow");
+    setWorkspace("Data Upload");
+    clearWorkspaceActions();
+
+    const root = document.createElement("div");
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <h3>Admin Data Upload</h3>
+      <div class="hint">Upload only billable_time.csv or tech_notes.csv to the live Render disk.</div>
+      <div class="grid2" style="margin-top:12px;">
+        <div>
+          <div class="label">billable_time.csv</div>
+          <input class="input" id="upload_billable" type="file" accept=".csv" />
+          <button class="btn btn-orange" id="upload_billable_btn" style="margin-top:10px;">Upload billable_time.csv</button>
+          <div class="hint" id="upload_billable_status" style="margin-top:8px;"></div>
+        </div>
+        <div>
+          <div class="label">tech_notes.csv</div>
+          <input class="input" id="upload_notes" type="file" accept=".csv" />
+          <button class="btn btn-orange" id="upload_notes_btn" style="margin-top:10px;">Upload tech_notes.csv</button>
+          <div class="hint" id="upload_notes_status" style="margin-top:8px;"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px; padding:14px;">
+        <div style="font-weight:900; margin-bottom:6px;">How to use</div>
+        <div class="hint">Choose the exact file, upload it, then restart the Render service once so Atlas and Moses pick up the newest data.</div>
+      </div>
+    `;
+
+    const wireUploader = (inputId, buttonId, statusId, expectedName) => {
+      const input = card.querySelector(inputId);
+      const button = card.querySelector(buttonId);
+      const status = card.querySelector(statusId);
+      button.addEventListener("click", async () => {
+        try {
+          const file = input.files && input.files[0];
+          if (!file) {
+            status.textContent = "Choose a CSV first.";
+            return;
+          }
+          if (file.name !== expectedName) {
+            status.textContent = `Please choose ${expectedName}.`;
+            return;
+          }
+          status.textContent = "Uploading...";
+          const result = await uploadAdminDataFile(file);
+          status.textContent = `Uploaded ${result.filename} successfully. Restart Render once to refresh references.`;
+          input.value = "";
+        } catch (e) {
+          status.textContent = e.message || String(e);
+        }
+      });
+    };
+
+    wireUploader("#upload_billable", "#upload_billable_btn", "#upload_billable_status", "billable_time.csv");
+    wireUploader("#upload_notes", "#upload_notes_btn", "#upload_notes_status", "tech_notes.csv");
+
+    root.appendChild(card);
+    workspaceBody.innerHTML = "";
+    workspaceBody.appendChild(root);
+  }
+
 function renderSaddlebackView() {
     setNavActive(navSaddleback);
     setActiveChip("Office Flow");
@@ -6483,6 +6549,7 @@ function renderSaddlebackView() {
   if (navDataCenter) navDataCenter.addEventListener("click", renderDataCenterView);
   if (navPayroll) navPayroll.addEventListener("click", renderPayrollView);
   if (navEmployees) navEmployees.addEventListener("click", renderEmployeesView);
+  if (navDataUpload) navDataUpload.addEventListener("click", renderDataUploadView);
   if (navSaddleback) navSaddleback.addEventListener("click", renderSaddlebackView);
  
   if (navAtlas) navAtlas.addEventListener("click", () => renderChatView("tech"));
