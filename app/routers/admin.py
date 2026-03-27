@@ -5,9 +5,9 @@ from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File
 from app.services.trick_store import (
-    load_pending,
-    load_approved,
-    approve_trick
+    get_pending,
+    get_approved,
+    approve_pending
 )
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
@@ -33,32 +33,28 @@ def _data_dir(request: Request) -> Path:
 
 @router.get("/pending")
 def get_pending_tricks():
+    pending = get_pending()
     return {
-        "count": len(load_pending()),
-        "pending": load_pending()
+        "count": len(pending),
+        "pending": pending
     }
 
 
 @router.get("/approved")
 def get_approved_tricks():
+    approved = get_approved()
     return {
-        "count": len(load_approved()),
-        "approved": load_approved()
+        "count": len(approved),
+        "approved": approved
     }
 
 
 @router.post("/approve")
-def approve_pending_trick(query: str):
-    pending = load_pending()
-    if not any(t.get("query") == query for t in pending):
-        raise HTTPException(status_code=404, detail="Pending trick not found")
-
-    approve_trick(query)
-
-    return {
-        "status": "approved",
-        "query": query
-    }
+def approve_pending_trick(pending_id: str):
+    result = approve_pending(pending_id)
+    if not result.get("ok"):
+        raise HTTPException(status_code=404, detail=result.get("error") or "Pending trick not found")
+    return result
 
 
 @router.post("/upload-data-file")
