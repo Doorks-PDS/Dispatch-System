@@ -6119,10 +6119,22 @@ function renderDataUploadView() {
           <button class="btn btn-orange" id="upload_notes_btn" style="margin-top:10px;">Upload tech_notes.csv</button>
           <div class="hint" id="upload_notes_status" style="margin-top:8px;"></div>
         </div>
+        <div>
+          <div class="label">customers.csv</div>
+          <input class="input" id="upload_customers" type="file" accept=".csv" />
+          <button class="btn btn-orange" id="upload_customers_btn" style="margin-top:10px;">Upload customers.csv</button>
+          <div class="hint" id="upload_customers_status" style="margin-top:8px;"></div>
+        </div>
+        <div>
+          <div class="label">contacts.csv</div>
+          <input class="input" id="upload_contacts" type="file" accept=".csv" />
+          <button class="btn btn-orange" id="upload_contacts_btn" style="margin-top:10px;">Upload contacts.csv</button>
+          <div class="hint" id="upload_contacts_status" style="margin-top:8px;"></div>
+        </div>
       </div>
       <div class="card" style="margin-top:14px; padding:14px;">
         <div style="font-weight:900; margin-bottom:6px;">How to use</div>
-        <div class="hint">Choose the exact file, upload it, then restart the Render service once so Atlas and Moses pick up the newest data.</div>
+        <div class="hint">billable_time.csv and tech_notes.csv overwrite those live files directly. customers.csv and contacts.csv are converted into customers_db.json and contacts_db.json on the live Render disk. Restart the Render service once after upload to refresh references.</div>
       </div>
     `;
 
@@ -6153,6 +6165,8 @@ function renderDataUploadView() {
 
     wireUploader("#upload_billable", "#upload_billable_btn", "#upload_billable_status", "billable_time.csv");
     wireUploader("#upload_notes", "#upload_notes_btn", "#upload_notes_status", "tech_notes.csv");
+    wireUploader("#upload_customers", "#upload_customers_btn", "#upload_customers_status", "customers.csv");
+    wireUploader("#upload_contacts", "#upload_contacts_btn", "#upload_contacts_status", "contacts.csv");
 
     root.appendChild(card);
     workspaceBody.innerHTML = "";
