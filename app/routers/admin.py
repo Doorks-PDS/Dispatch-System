@@ -165,11 +165,11 @@ async def upload_data_file(request: Request, file: UploadFile = File(...)):
         elif cfg["type"] == "customers_csv":
             items = _convert_customers_csv(file_bytes)
             with tmp_target.open("w", encoding="utf-8") as fh:
-                json.dump(items, fh, indent=2, ensure_ascii=False)
+                json.dump({"items": items}, fh, indent=2, ensure_ascii=False)
         elif cfg["type"] == "contacts_csv":
             items = _convert_contacts_csv(file_bytes)
             with tmp_target.open("w", encoding="utf-8") as fh:
-                json.dump(items, fh, indent=2, ensure_ascii=False)
+                json.dump({"items": items}, fh, indent=2, ensure_ascii=False)
         else:
             raise HTTPException(status_code=500, detail="Unsupported upload config")
         tmp_target.replace(target)
