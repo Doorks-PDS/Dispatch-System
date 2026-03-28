@@ -475,6 +475,17 @@
   async function apiDeleteJob(jobId) {
     await fetchJSON(`/calendar/jobs/${jobId}`, { method: "DELETE" });
   }
+
+  async function apiPromoteLegacyJob(recordId, dateValue) {
+    const qs = new URLSearchParams();
+    if (dateValue) qs.set("date", dateValue);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const data = await fetchJSON(`/data/legacy/${encodeURIComponent(recordId)}/promote${suffix}`, {
+      method: "POST",
+    });
+    return data.job;
+  }
+
  
   async function apiAddCompletion(jobId, payload) {
     const data = await fetchJSON(`/calendar/jobs/${jobId}/completion`, {
@@ -2954,6 +2965,32 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div style="margin-top:10px;"><div class="label">Additional Recommendations</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.additional_recommendations || "")}</div></div>
             <div style="margin-top:10px;"><div class="label">Parts Used</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.parts_used || "")}</div></div>
           `;
+          const actions = document.createElement("div");
+          actions.style.display = "flex";
+          actions.style.gap = "8px";
+          actions.style.marginTop = "12px";
+
+          const promoteBtn = document.createElement("button");
+          promoteBtn.className = "btn btn-orange";
+          promoteBtn.textContent = "Create Dispatch";
+          promoteBtn.addEventListener("click", async () => {
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiPromoteLegacyJob(job.id, chosen);
+              alert(`Dispatch ${created.job_number || ""} created.`);
+              drawerBody.innerHTML = "";
+              const local = document.createElement("div");
+              drawerBody.appendChild(local);
+              renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+          actions.appendChild(promoteBtn);
+          card.appendChild(actions);
+
           drawerBody.appendChild(card);
         });
         return;
@@ -6131,10 +6168,16 @@ function renderDataUploadView() {
           <button class="btn btn-orange" id="upload_contacts_btn" style="margin-top:10px;">Upload contacts.csv</button>
           <div class="hint" id="upload_contacts_status" style="margin-top:8px;"></div>
         </div>
+        <div>
+          <div class="label">Jobs.csv</div>
+          <input class="input" id="upload_jobs" type="file" accept=".csv" />
+          <button class="btn btn-orange" id="upload_jobs_btn" style="margin-top:10px;">Upload Jobs.csv</button>
+          <div class="hint" id="upload_jobs_status" style="margin-top:8px;"></div>
+        </div>
       </div>
       <div class="card" style="margin-top:14px; padding:14px;">
         <div style="font-weight:900; margin-bottom:6px;">How to use</div>
-        <div class="hint">billable_time.csv and tech_notes.csv overwrite those live files directly. customers.csv and contacts.csv are converted into customers_db.json and contacts_db.json on the live Render disk. Restart the Render service once after upload to refresh references.</div>
+        <div class="hint">billable_time.csv and tech_notes.csv overwrite those live files directly. customers.csv and contacts.csv are converted into customers_db.json and contacts_db.json on the live Render disk. Jobs.csv is stored directly and used by All Jobs for legacy fields like estimate, invoice, PO, contact, technician, and notes. Restart the Render service once after upload to refresh references.</div>
       </div>
     `;
 
@@ -6167,6 +6210,7 @@ function renderDataUploadView() {
     wireUploader("#upload_notes", "#upload_notes_btn", "#upload_notes_status", "tech_notes.csv");
     wireUploader("#upload_customers", "#upload_customers_btn", "#upload_customers_status", "customers.csv");
     wireUploader("#upload_contacts", "#upload_contacts_btn", "#upload_contacts_status", "contacts.csv");
+    wireUploader("#upload_jobs", "#upload_jobs_btn", "#upload_jobs_status", "Jobs.csv");
 
     root.appendChild(card);
     workspaceBody.innerHTML = "";

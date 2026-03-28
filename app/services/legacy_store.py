@@ -65,6 +65,8 @@ class LegacyStore:
         rows.extend(self._load_legacy_json())
         rows.extend(self._load_csv(self.data_dir / "Billable_Time.csv", "BILLABLE_UPGRADED"))
         rows.extend(self._load_csv(self.data_dir / "billable_time.csv", "BILLABLE"))
+        rows.extend(self._load_csv(self.data_dir / "Jobs.csv", "JOBS"))
+        rows.extend(self._load_csv(self.data_dir / "jobs.csv", "JOBS"))
         rows.extend(self._load_csv(self.data_dir / "tech_notes.csv", "TECH_NOTES"))
         self.records = self._merge_rows(rows)
 
@@ -159,6 +161,7 @@ class LegacyStore:
             or rec.get("customer_name")
             or rec.get("Company Name")
             or rec.get("Contact - Customer - Company Name")
+            or rec.get("Customer - Company Name")
             or rec.get("Job - Customer")
             or ""
         )

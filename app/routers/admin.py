@@ -19,6 +19,8 @@ ALLOWED_UPLOADS = {
     "tech_notes.csv": {"type": "raw", "target": "tech_notes.csv"},
     "customers.csv": {"type": "customers_csv", "target": "customers_db.json"},
     "contacts.csv": {"type": "contacts_csv", "target": "contacts_db.json"},
+    "Jobs.csv": {"type": "raw", "target": "Jobs.csv"},
+    "jobs.csv": {"type": "raw", "target": "Jobs.csv"},
 }
 
 
@@ -150,7 +152,7 @@ async def upload_data_file(request: Request, file: UploadFile = File(...)):
     filename = str(file.filename or "").strip()
     cfg = ALLOWED_UPLOADS.get(filename)
     if not cfg:
-        raise HTTPException(status_code=400, detail="Allowed files: billable_time.csv, tech_notes.csv, customers.csv, contacts.csv")
+        raise HTTPException(status_code=400, detail="Allowed files: billable_time.csv, tech_notes.csv, customers.csv, contacts.csv, Jobs.csv")
 
     data_dir = _data_dir(request)
     data_dir.mkdir(parents=True, exist_ok=True)

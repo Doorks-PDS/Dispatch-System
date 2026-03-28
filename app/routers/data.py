@@ -213,6 +213,38 @@ def list_all_jobs(
     return {"ok": True, "jobs": deduped[: max(1, min(int(limit), 5000))]}
 
 
+@router.post("/legacy/{record_id}/promote")
+def promote_legacy_job(
+    request: Request,
+    record_id: str,
+    x_api_key: Optional[str] = Header(default=None),
+    date: Optional[str] = None,
+):
+    _require_key(request, x_api_key)
+    legacy = _legacy(request)
+    cal = _calendar(request)
+
+    row = legacy.get(record_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Legacy job not found")
+
+    payload = {
+        "kind": "dispatch",
+        "date": (date or row.get("date") or datetime.utcnow().strftime("%Y-%m-%d")),
+        "status": "Dispatch",
+        "customer": row.get("customer") or row.get("customer_name") or "",
+        "contact": row.get("contact") or row.get("contact_name") or "",
+        "address": row.get("address") or "",
+        "estimate_number": row.get("estimate_number") or row.get("estimate_no") or "",
+        "invoice_number": row.get("invoice_number") or row.get("invoice_no") or "",
+        "po_number": row.get("po_number") or row.get("po_no") or "",
+        "job_notes": row.get("job_notes") or row.get("description") or row.get("tech_notes") or "",
+        "office_notes": row.get("work_performed") or "",
+    }
+    job = cal.create_job(payload)
+    return {"ok": True, "job": job}
+
+
 class PartPayload(BaseModel):
     id: str = ""
     manufacturer: str = ""
