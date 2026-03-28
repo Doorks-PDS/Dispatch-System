@@ -1350,6 +1350,33 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
   function wireGoogleAddressAutocomplete(input) {
     return false;
   }
+
+  async function fetchAddressSuggestions(query) {
+    const q = String(query || "").trim();
+    if (q.length < 4) return [];
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?format=jsonv2&addressdetails=1&countrycodes=us&limit=6&q=${encodeURIComponent(q)}`;
+      const res = await fetch(url, { headers: { "Accept": "application/json" } });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function parseAddressSuggestion(item) {
+    const addr = item && item.address ? item.address : {};
+    const city = addr.city || addr.town || addr.village || addr.hamlet || "";
+    const state = addr.state_code || addr.state || "";
+    const zip = addr.postcode || "";
+    return {
+      formatted_address: String(item && item.display_name || "").split(", United States")[0],
+      city,
+      state,
+      zip,
+    };
+  }
  
   function wireAddressSuggestions(input, addresses = []) {
     if (!input) return;
@@ -2815,11 +2842,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           liveContacts.splice(0, liveContacts.length, ...(Array.isArray(loaded) ? loaded : []));
           renderNewJobContacts();
           const exact = liveContacts.find(c => normalizeText(c.name) === normalizeText(newJobContactInput.value));
-          if (!exact && (forceClear || company)) {
-            newJobContactInput.value = "";
-            newJobPhoneInput.value = "";
-            newJobEmailInput.value = "";
+          if (!liveContacts.length) {
+            if (forceClear || company) {
+              newJobContactInput.value = "";
+              newJobPhoneInput.value = "";
+              newJobEmailInput.value = "";
+            }
+            return;
           }
+          const chosen = exact || liveContacts[0];
+          newJobContactInput.value = chosen.name || "";
+          newJobPhoneInput.value = pickContactPhone(chosen) || "";
+          newJobEmailInput.value = chosen.email || "";
         };
         wireContactAutofill({
           contacts: liveContacts,
@@ -2960,7 +2994,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
-      if (sourceLabel.startsWith("LEGACY") || !job.id) {
+      if ((sourceLabel && sourceLabel !== "CURRENT") || !job.id) {
         openDrawer(`Legacy Job ${job.job_number || "Details"}`, async (drawerBody) => {
           const card = document.createElement("div");
           card.className = "card";
