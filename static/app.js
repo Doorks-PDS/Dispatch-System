@@ -4798,128 +4798,290 @@ function renderCustomersView() {
     setActiveChip("Work Flow");
     setWorkspace("Customers / Contacts");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `<h3>Customers / Contacts</h3><div class="hint">Manage customers and contacts in one place.</div>`;
+    const hero = document.createElement("div");
+    hero.className = "card";
+    hero.innerHTML = `<h3>Customers / Contacts</h3><div class="hint">Search customers, open a customer record, and view all linked contacts in one place.</div>`;
 
-    const tabs = document.createElement("div");
-    tabs.style.display = "flex";
-    tabs.style.gap = "8px";
-    tabs.style.marginTop = "12px";
-    const btnCustomers = document.createElement("button");
-    btnCustomers.className = "btn btn-orange";
-    btnCustomers.textContent = "Customers";
-    const btnContacts = document.createElement("button");
-    btnContacts.className = "btn";
-    btnContacts.textContent = "Contacts";
-    tabs.append(btnCustomers, btnContacts);
+    const controls = document.createElement("div");
+    controls.className = "card";
+    controls.style.marginTop = "12px";
+    controls.innerHTML = `
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <button class="btn btn-orange" id="cc_add_customer">Add Customer</button>
+        <button class="btn" id="cc_add_contact">Add Contact</button>
+        <input class="input" id="cc_search" placeholder="Search customer, contact, phone, email, address, notes" style="max-width:420px; margin-left:auto;" />
+        <button class="btn" id="cc_search_btn">Search</button>
+        <button class="btn" id="cc_clear_btn">Clear</button>
+      </div>
+    `;
 
-    const body = document.createElement("div");
-    body.style.marginTop = "14px";
+    const list = document.createElement("div");
+    list.style.display = "grid";
+    list.style.gap = "8px";
+    list.style.marginTop = "12px";
 
-    let activeTab = "customers";
+    let query = "";
 
-    async function renderCustomersTab() {
-      btnCustomers.className = "btn btn-orange";
-      btnContacts.className = "btn";
-      const items = await apiListCustomers().catch(() => []);
-      body.innerHTML = "";
-      const addRow = document.createElement("div");
-      addRow.style.marginBottom = "12px";
-      addRow.innerHTML = `<div class="hint">Add a customer and optional primary contact details.</div><div style="margin-top:8px;"><button class="btn btn-orange" id="cust_add">Add Customer</button></div>`;
-      body.appendChild(addRow);
-      const list = document.createElement("div");
-      list.style.display = "grid";
-      list.style.gap = "8px";
-      if (!items.length) list.innerHTML = `<div class="hint">No customers yet.</div>`;
-      items.forEach(c => {
-        const row = document.createElement("div");
-        row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>`;
-        list.appendChild(row);
-      });
-      body.appendChild(list);
-      addRow.querySelector("#cust_add").addEventListener("click", async () => {
-        const name = (prompt("Customer name:") || "").trim();
-        if (!name) return;
-        const contactName = (prompt("Primary contact name (optional):") || "").trim();
-        const contactPhone = (prompt("Primary contact phone (optional):") || "").trim();
-        const contactEmail = (prompt("Primary contact email (optional):") || "").trim();
-        await apiCreateCustomer({ company_name: name });
-        if (contactName || contactPhone || contactEmail) {
+    function openContactDrawer(contact, customer = null) {
+      openDrawer(contact.name || "Contact", async (drawerBody) => {
+        const customers = await apiListCustomers().catch(() => []);
+        const linkedCustomer = customer || customers.find(c => String(c.id || "") === String(contact.customer_id || "")) || null;
+
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <h3 style="margin:0;">${escapeHtml(contact.name || "")}</h3>
+          <div class="hint" style="margin-top:6px;">${escapeHtml(linkedCustomer?.company_name || contact.company_name || "")}</div>
+          <div class="grid2" style="margin-top:12px;">
+            <div><div class="label">Phone</div><div class="field">${escapeHtml(contact.phone_number || "")}</div></div>
+            <div><div class="label">Cell</div><div class="field">${escapeHtml(contact.cell_phone || "")}</div></div>
+            <div><div class="label">Email</div><div class="field">${escapeHtml(contact.email || "")}</div></div>
+            <div><div class="label">Title</div><div class="field">${escapeHtml(contact.title || "")}</div></div>
+          </div>
+          <div style="margin-top:10px;"><div class="label">Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(contact.notes || "")}</div></div>
+        `;
+
+        const actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.gap = "8px";
+        actions.style.marginTop = "12px";
+
+        const editBtn = document.createElement("button");
+        editBtn.className = "btn";
+        editBtn.textContent = "Edit Contact";
+        editBtn.addEventListener("click", async () => {
           try {
-            await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail });
-          } catch {}
-        }
-        renderCustomersTab();
+            const name = prompt("Name:", contact.name || "") ?? contact.name;
+            if (!String(name || "").trim()) return;
+            const company_name = prompt("Company:", linkedCustomer?.company_name || contact.company_name || "") ?? (linkedCustomer?.company_name || contact.company_name || "");
+            const phone_number = prompt("Phone:", contact.phone_number || "") ?? contact.phone_number;
+            const cell_phone = prompt("Cell:", contact.cell_phone || "") ?? contact.cell_phone;
+            const email = prompt("Email:", contact.email || "") ?? contact.email;
+            const title = prompt("Title:", contact.title || "") ?? contact.title;
+            const notes = prompt("Notes:", contact.notes || "") ?? contact.notes;
+            const matched = customers.find(c => normalizeText(c.company_name) === normalizeText(company_name));
+            await apiUpdateContact(contact.id, { name, company_name, customer_id: matched?.id || "", phone_number, cell_phone, email, title, notes });
+            if (currentView && currentView.refresh) await currentView.refresh();
+          } catch (e) { alert(e.message || String(e)); }
+        });
+        actions.appendChild(editBtn);
+        card.appendChild(actions);
+
+        drawerBody.appendChild(card);
       });
     }
 
-    async function renderContactsTab() {
-      btnCustomers.className = "btn";
-      btnContacts.className = "btn btn-orange";
-      const [items, customers] = await Promise.all([apiListContacts().catch(() => []), apiListCustomers().catch(() => [])]);
-      body.innerHTML = "";
-      const companyListId = `contact-company-${Math.random().toString(36).slice(2)}`;
-      const form = document.createElement("div");
-      form.className = "card";
-      form.innerHTML = `
-        <div class="grid2">
-          <div><div class="label">Name</div><input class="input" id="cont_name" /></div>
-          <div><div class="label">Company</div><input class="input" id="cont_company" list="${companyListId}" placeholder="Link to existing customer" /></div>
-          <div><div class="label">Phone</div><input class="input" id="cont_phone" /></div>
-          <div><div class="label">Email</div><input class="input" id="cont_email" /></div>
-        </div>
-      `;
-      form.appendChild(buildCustomerDatalist(companyListId, customers));
-      const actions = document.createElement("div");
-      actions.style.display = "flex";
-      actions.style.gap = "8px";
-      actions.style.marginTop = "10px";
-      const add = document.createElement("button");
-      add.className = "btn btn-orange";
-      add.textContent = "Add Contact";
-      actions.appendChild(add);
-      form.appendChild(actions);
-      body.appendChild(form);
-      const list = document.createElement("div");
-      list.style.display = "grid";
-      list.style.gap = "8px";
-      list.style.marginTop = "12px";
-      if (!items.length) list.innerHTML = `<div class="hint">No contacts yet.</div>`;
-      items.forEach(c => {
+    function openCustomerDrawer(customer, contacts) {
+      openDrawer(customer.company_name || "Customer", (drawerBody) => {
+        const linked = (contacts || []).filter(c => {
+          const cid = String(c.customer_id || "").trim();
+          return (cid && cid === String(customer.id || "").trim()) || companyMatches(c.company_name, customer.company_name);
+        });
+
+        const card = document.createElement("div");
+        card.className = "card";
+        card.innerHTML = `
+          <h3 style="margin:0;">${escapeHtml(customer.company_name || "")}</h3>
+          <div class="hint" style="margin-top:6px;">${escapeHtml([customer.address, customer.city, customer.state, customer.zip_code].filter(Boolean).join(", "))}</div>
+          <div class="grid2" style="margin-top:12px;">
+            <div><div class="label">Phone</div><div class="field">${escapeHtml(customer.phone_number || "")}</div></div>
+            <div><div class="label">Email</div><div class="field">${escapeHtml(customer.email || "")}</div></div>
+          </div>
+          <div style="margin-top:10px;"><div class="label">Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(customer.notes || "")}</div></div>
+          <div style="margin-top:14px;"><div class="label">Contacts</div></div>
+        `;
+
+        const linkedWrap = document.createElement("div");
+        linkedWrap.style.display = "grid";
+        linkedWrap.style.gap = "8px";
+        linkedWrap.style.marginTop = "8px";
+        if (!linked.length) {
+          linkedWrap.innerHTML = `<div class="hint">No linked contacts yet.</div>`;
+        } else {
+          linked.forEach(contact => {
+            const row = document.createElement("div");
+            row.className = "jobrow";
+            row.style.cursor = "pointer";
+            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(contact.name || "")}</div></div><div class="jobrow-addr">${escapeHtml(contact.phone_number || contact.cell_phone || "")}${contact.email ? ` - ${escapeHtml(contact.email)}` : ""}</div>`;
+            row.addEventListener("click", () => openContactDrawer(contact, customer));
+            linkedWrap.appendChild(row);
+          });
+        }
+        card.appendChild(linkedWrap);
+
+        const actions = document.createElement("div");
+        actions.style.display = "flex";
+        actions.style.gap = "8px";
+        actions.style.marginTop = "12px";
+
+        const editBtn = document.createElement("button");
+        editBtn.className = "btn";
+        editBtn.textContent = "Edit Customer";
+        editBtn.addEventListener("click", async () => {
+          try {
+            const company_name = prompt("Company Name:", customer.company_name || "") ?? customer.company_name;
+            if (!String(company_name || "").trim()) return;
+            const address = prompt("Address:", customer.address || "") ?? customer.address;
+            const city = prompt("City:", customer.city || "") ?? customer.city;
+            const state = prompt("State:", customer.state || "") ?? customer.state;
+            const zip_code = prompt("ZIP:", customer.zip_code || "") ?? customer.zip_code;
+            const phone_number = prompt("Phone:", customer.phone_number || "") ?? customer.phone_number;
+            const email = prompt("Email:", customer.email || "") ?? customer.email;
+            const notes = prompt("Notes:", customer.notes || "") ?? customer.notes;
+            await apiUpdateCustomer(customer.id, { company_name, address, city, state, zip_code, phone_number, email, notes });
+            if (currentView && currentView.refresh) await currentView.refresh();
+          } catch (e) { alert(e.message || String(e)); }
+        });
+
+        const addContactBtn = document.createElement("button");
+        addContactBtn.className = "btn btn-orange";
+        addContactBtn.textContent = "Add Contact";
+        addContactBtn.addEventListener("click", async () => {
+          try {
+            const name = (prompt("Contact name:") || "").trim();
+            if (!name) return;
+            const phone_number = (prompt("Phone:", "") || "").trim();
+            const cell_phone = (prompt("Cell:", "") || "").trim();
+            const email = (prompt("Email:", "") || "").trim();
+            const title = (prompt("Title:", "") || "").trim();
+            const notes = (prompt("Notes:", "") || "").trim();
+            await apiCreateContact({ name, company_name: customer.company_name || "", customer_id: customer.id || "", phone_number, cell_phone, email, title, notes });
+            if (currentView && currentView.refresh) await currentView.refresh();
+          } catch (e) { alert(e.message || String(e)); }
+        });
+
+        actions.append(editBtn, addContactBtn);
+        card.appendChild(actions);
+        drawerBody.appendChild(card);
+      });
+    }
+
+    async function renderList() {
+      const [customers, contacts] = await Promise.all([
+        apiListCustomers().catch(() => []),
+        apiListContacts().catch(() => []),
+      ]);
+      list.innerHTML = "";
+      const q = normalizeText(query);
+      let rows = customers.slice();
+      if (q) {
+        rows = rows.filter(customer => {
+          const linked = contacts.filter(c => {
+            const cid = String(c.customer_id || "").trim();
+            return (cid && cid === String(customer.id || "").trim()) || companyMatches(c.company_name, customer.company_name);
+          });
+          const customerHit = [customer.company_name, customer.address, customer.city, customer.state, customer.zip_code, customer.phone_number, customer.email, customer.notes].some(v => normalizeText(v).includes(q));
+          const contactHit = linked.some(c => [c.name, c.company_name, c.phone_number, c.cell_phone, c.email, c.title, c.notes].some(v => normalizeText(v).includes(q)));
+          return customerHit || contactHit;
+        });
+      }
+
+      if (!rows.length) {
+        list.innerHTML = `<div class="hint">No customers found.</div>`;
+        return;
+      }
+
+      rows.forEach(customer => {
+        const linked = contacts.filter(c => {
+          const cid = String(c.customer_id || "").trim();
+          return (cid && cid === String(customer.id || "").trim()) || companyMatches(c.company_name, customer.company_name);
+        });
         const row = document.createElement("div");
         row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(c.name || "")}</div><div class="hint">${escapeHtml(c.company_name || "")}</div></div><div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>`;
-        list.appendChild(row);
-      });
-      body.appendChild(list);
-      add.addEventListener("click", async () => {
-        await apiCreateContact({
-          name: form.querySelector("#cont_name").value.trim(),
-          company_name: form.querySelector("#cont_company").value.trim(),
-          phone_number: form.querySelector("#cont_phone").value.trim(),
-          email: form.querySelector("#cont_email").value.trim(),
+        row.style.cursor = "pointer";
+        row.innerHTML = `
+          <div class="jobrow-top">
+            <div class="jobrow-name">${escapeHtml(customer.company_name || "")}</div>
+            <div class="hint">${linked.length} contact${linked.length === 1 ? "" : "s"}</div>
+          </div>
+          <div class="jobrow-addr">${escapeHtml([customer.address, customer.city, customer.state, customer.zip_code].filter(Boolean).join(", "))}</div>
+          <div class="hint" style="margin-top:6px;">${escapeHtml(customer.phone_number || "")}${customer.email ? ` - ${escapeHtml(customer.email)}` : ""}</div>
+        `;
+
+        const preview = document.createElement("div");
+        preview.style.display = "grid";
+        preview.style.gap = "4px";
+        preview.style.marginTop = "8px";
+        linked.slice(0, 4).forEach(contact => {
+          const line = document.createElement("div");
+          line.className = "hint";
+          line.style.paddingLeft = "8px";
+          line.textContent = `${contact.name || ""}${contact.phone_number || contact.cell_phone ? ` - ${contact.phone_number || contact.cell_phone}` : ""}`;
+          preview.appendChild(line);
         });
-        renderContactsTab();
+        if (linked.length > 4) {
+          const more = document.createElement("div");
+          more.className = "hint";
+          more.style.paddingLeft = "8px";
+          more.textContent = `+ ${linked.length - 4} more`;
+          preview.appendChild(more);
+        }
+        row.appendChild(preview);
+        row.addEventListener("click", () => openCustomerDrawer(customer, contacts));
+        list.appendChild(row);
       });
     }
 
-    btnCustomers.addEventListener("click", ()=>{ activeTab = "customers"; renderCustomersTab(); });
-    btnContacts.addEventListener("click", ()=>{ activeTab = "contacts"; renderContactsTab(); });
+    controls.querySelector("#cc_search_btn").addEventListener("click", async () => {
+      query = controls.querySelector("#cc_search").value || "";
+      await renderList();
+    });
+    controls.querySelector("#cc_clear_btn").addEventListener("click", async () => {
+      query = "";
+      controls.querySelector("#cc_search").value = "";
+      await renderList();
+    });
+    controls.querySelector("#cc_search").addEventListener("keydown", async (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        query = controls.querySelector("#cc_search").value || "";
+        await renderList();
+      }
+    });
 
-    root.appendChild(card);
-    root.appendChild(tabs);
-    root.appendChild(body);
+    controls.querySelector("#cc_add_customer").addEventListener("click", async () => {
+      const company_name = (prompt("Customer name:") || "").trim();
+      if (!company_name) return;
+      const address = (prompt("Address (optional):") || "").trim();
+      const city = (prompt("City (optional):") || "").trim();
+      const state = (prompt("State (optional):") || "").trim();
+      const zip_code = (prompt("ZIP (optional):") || "").trim();
+      const phone_number = (prompt("Phone (optional):") || "").trim();
+      const email = (prompt("Email (optional):") || "").trim();
+      const notes = (prompt("Notes (optional):") || "").trim();
+      const created = await apiCreateCustomer({ company_name, address, city, state, zip_code, phone_number, email, notes });
+      if (created && created.id) {
+        try { await apiUpdateCustomer(created.id, { company_name, address, city, state, zip_code, phone_number, email, notes }); } catch {}
+      }
+      await renderList();
+    });
+
+    controls.querySelector("#cc_add_contact").addEventListener("click", async () => {
+      const customers = await apiListCustomers().catch(() => []);
+      const name = (prompt("Contact name:") || "").trim();
+      if (!name) return;
+      const company_name = (prompt("Company:", "") || "").trim();
+      const matched = customers.find(c => normalizeText(c.company_name) === normalizeText(company_name));
+      const phone_number = (prompt("Phone:", "") || "").trim();
+      const cell_phone = (prompt("Cell:", "") || "").trim();
+      const email = (prompt("Email:", "") || "").trim();
+      const title = (prompt("Title:", "") || "").trim();
+      const notes = (prompt("Notes:", "") || "").trim();
+      await apiCreateContact({ name, company_name, customer_id: matched?.id || "", phone_number, cell_phone, email, title, notes });
+      await renderList();
+    });
+
+    root.appendChild(hero);
+    root.appendChild(controls);
+    root.appendChild(list);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
 
-    currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : renderContactsTab() };
-    renderCustomersTab();
+    currentView = { refresh: renderList };
+    renderList();
   }
-
   function renderContactsView() {
     renderCustomersView();
   }
@@ -6376,6 +6538,11 @@ function renderSaddlebackView() {
       return card;
     }
 
+    function exportSdcRows(filename, headers, rows) {
+      downloadCsv(filename, headers, rows);
+    }
+
+
     function renderOrders() {
       host.innerHTML = "";
       btnOrders.className = "btn btn-orange";
@@ -6406,7 +6573,7 @@ function renderSaddlebackView() {
           </div>
           <div style="grid-column:1 / -1;"><div class="label">Notes</div><input class="input" id="sdc_order_notes" placeholder="Notes" /></div>
         </div>
-        <div style="margin-top:12px;"><button class="btn btn-orange" id="sdc_save_order">Save Order</button></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="sdc_save_order">Save Order</button><button class="btn" id="sdc_export_orders">Export Orders CSV</button></div>
       `;
       host.appendChild(form);
 
@@ -6470,6 +6637,11 @@ function renderSaddlebackView() {
       });
       searchInput.addEventListener("input", renderOrderList);
 
+      form.querySelector("#sdc_export_orders").addEventListener("click", () => {
+        const rows = state.orders.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.channel, x.customer, x.address, x.ref, x.item, x.status, x.notes, x.total, x.shipping, x.tax, x.channel_fee, x.profit]);
+        exportSdcRows("saddleback_orders.csv", ["Date","Channel","Customer","Address","Order ID","Item","Status","Notes","Total Amount","Shipping Cost","Sales Tax","Channel Fee","Profit"], rows);
+      });
+
       form.querySelector("#sdc_save_order").addEventListener("click", () => {
         const row = {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -6511,9 +6683,14 @@ function renderSaddlebackView() {
           <div><div class="label">Amount</div><input class="input" id="sdc_exp_amt" type="number" step="0.01" placeholder="0.00" /></div>
           <div style="grid-column:1 / -1;"><div class="label">Notes</div><input class="input" id="sdc_exp_notes" placeholder="Notes" /></div>
         </div>
-        <div style="margin-top:12px;"><button class="btn btn-orange" id="sdc_save_exp">Save Expense</button></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="sdc_save_exp">Save Expense</button><button class="btn" id="sdc_export_exp">Export Expenses CSV</button></div>
       `;
       host.appendChild(form);
+      form.querySelector("#sdc_export_exp").addEventListener("click", () => {
+        const rows = state.expenses.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.category, x.vendor, x.amount, x.notes]);
+        exportSdcRows("saddleback_expenses.csv", ["Date","Category","Vendor","Amount","Notes"], rows);
+      });
+
       form.querySelector("#sdc_save_exp").addEventListener("click", () => {
         const row = {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
