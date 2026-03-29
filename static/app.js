@@ -103,7 +103,7 @@
 
   if (navCustomers) {
     const bits = navCustomers.querySelectorAll("span, small");
-    if (bits[0]) bits[0].textContent = "Customers / Contacts";
+    if (bits[0]) bits[0].textContent = "Customers";
     if (bits[1]) bits[1].textContent = "Database";
   }
   if (navContacts) navContacts.style.display = "none";
@@ -832,7 +832,7 @@
     return Number(map[String(employee || "").trim()] || 0);
   }
 
-  const ROLLUP_PROFILE_KEY = "doorks_rollup_profile_v1";
+  const ROLLUP_PROFILE_KEY = "doorks_rollup_profile_v2";
 
   function getRollupProfileMap() {
     try {
@@ -844,21 +844,61 @@
     }
   }
 
-  function getRollupProfile(employee) {
-    const map = getRollupProfileMap();
-    const row = map[String(employee || "").trim()] || {};
+  function normalizeRollupProfileRow(row) {
+    const base = row && typeof row === "object" ? row : {};
+    const history = base.history && typeof base.history === "object" ? base.history : {};
     return {
-      wage: Number(row.wage || 0),
-      multiplier: Number(row.multiplier || 0),
+      wage: Number(base.wage || 0),
+      multiplier: Number(base.multiplier || 0),
+      history,
     };
   }
 
-  function setRollupProfile(employee, wage, multiplier) {
+  function rollupMonthOf(dateValue) {
+    const s = String(dateValue || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(s)) return s;
+    if (/^\d{2}-\d{2}-\d{4}$/.test(s)) {
+      const [m, d, y] = s.split("-");
+      return `${y}-${m}`;
+    }
+    return monthKey(new Date());
+  }
+
+  function getRollupProfile(employee, effectiveMonth = monthKey(new Date())) {
+    const map = getRollupProfileMap();
+    const raw = normalizeRollupProfileRow(map[String(employee || "").trim()] || {});
+    const months = Object.keys(raw.history || {}).sort();
+    let applied = { wage: Number(raw.wage || 0), multiplier: Number(raw.multiplier || 0) };
+    months.forEach(m => {
+      if (m <= effectiveMonth) {
+        const h = raw.history[m] || {};
+        applied = {
+          wage: Number(h.wage ?? applied.wage ?? 0),
+          multiplier: Number(h.multiplier ?? applied.multiplier ?? 0),
+        };
+      }
+    });
+    return applied;
+  }
+
+  function setRollupProfile(employee, wage, multiplier, effectiveMonth = monthKey(new Date())) {
     const name = String(employee || "").trim();
     if (!name) return;
     const map = getRollupProfileMap();
-    map[name] = { wage: Number(wage || 0), multiplier: Number(multiplier || 0) };
+    const row = normalizeRollupProfileRow(map[name] || {});
+    row.wage = Number(wage || 0);
+    row.multiplier = Number(multiplier || 0);
+    row.history[effectiveMonth] = {
+      wage: Number(wage || 0),
+      multiplier: Number(multiplier || 0),
+    };
+    map[name] = row;
     localStorage.setItem(ROLLUP_PROFILE_KEY, JSON.stringify(map));
+  }
+
+  function getRollupProfileForDate(employee, dateValue) {
+    return getRollupProfile(employee, rollupMonthOf(dateValue));
   }
 
   function ptoHoursFromItem(item) {
@@ -4457,7 +4497,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const totalJobs = rollUps.length;
       const uniqueTechs = Object.keys(techTotals).length;
       const totalCost = Object.entries(techTotals).reduce((sum, [tech, data]) => {
-        const prof = getRollupProfile(tech);
+        const prof = getRollupProfile(tech, currentMonth);
         return sum + (Number(data.total || 0) * Number(prof.wage || 0));
       }, 0);
 
@@ -4467,7 +4507,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       exportBtn.addEventListener("click", () => {
         let csv = "Date,Customer,Address,Technician,Hours,Job Status,Job Number,Door Location,Source,Wage,Total Cost\n";
         detailRows.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(r => {
-          const prof = getRollupProfile(r.technician);
+          const prof = getRollupProfileForDate(r.technician, r.date || currentMonth);
           const cost = Number(r.hours || 0) * Number(prof.wage || 0);
           const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
           csv += [esc(r.date), esc(r.customer), esc(r.address), esc(r.technician), Number(r.hours || 0).toFixed(2), esc(r.status), esc(r.job_number), esc(r.door_location), esc(r.source), Number(prof.wage || 0).toFixed(2), cost.toFixed(2)].join(",") + "\n";
@@ -4527,7 +4567,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           .slice()
           .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
           .forEach(r => {
-            const prof = getRollupProfile(r.technician);
+            const prof = getRollupProfileForDate(r.technician, r.date || currentMonth);
             const cost = Number(r.hours || 0) * Number(prof.wage || 0);
             const row = document.createElement("div");
             row.className = "jobrow";
@@ -4564,7 +4604,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         rightList.innerHTML = `<div class="hint">No technician hours logged yet.</div>`;
       } else {
         techRows.forEach(([tech, data]) => {
-          const prof = getRollupProfile(tech);
+          const prof = getRollupProfile(tech, currentMonth);
           const totalCostTech = data.total * Number(prof.wage || 0);
 
           const row = document.createElement("div");
@@ -4592,7 +4632,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             if (wage === null) return;
             const wageNum = Number(wage || 0);
             if (Number.isNaN(wageNum)) return alert("Enter a valid wage.");
-            setRollupProfile(tech, wageNum, 1);
+            setRollupProfile(tech, wageNum, 1, currentMonth);
             renderActiveTab();
           });
 
@@ -4603,7 +4643,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             e.stopPropagation();
             let csv = "Date,Customer,Address,Technician,Hours,Job Status,Job Number,Door Location,Source,Wage,Total Cost\n";
             detailRows.filter(r => r.technician === tech).forEach(r => {
-              const p = getRollupProfile(tech);
+              const p = getRollupProfileForDate(tech, r.date || currentMonth);
               const cost = Number(r.hours || 0) * Number(p.wage || 0);
               const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
               csv += [esc(r.date), esc(r.customer), esc(r.address), esc(r.technician), Number(r.hours || 0).toFixed(2), esc(r.status), esc(r.job_number), esc(r.door_location), esc(r.source), Number(p.wage || 0).toFixed(2), cost.toFixed(2)].join(",") + "\n";
@@ -6732,9 +6772,13 @@ function renderSaddlebackView() {
           <div><div class="label">Amount</div><input class="input" id="sdc_pur_amt" type="number" step="0.01" placeholder="0.00" /></div>
           <div><div class="label">Tax Paid</div><input class="input" id="sdc_pur_tax" type="number" step="0.01" placeholder="0.00" /></div>
         </div>
-        <div style="margin-top:12px;"><button class="btn btn-orange" id="sdc_save_pur">Save Purchase</button></div>
+        <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="sdc_save_pur">Save Purchase</button><button class="btn" id="sdc_export_pur">Export Purchases CSV</button></div>
       `;
       host.appendChild(form);
+      form.querySelector("#sdc_export_pur").addEventListener("click", () => {
+        const rows = state.purchases.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.vendor, x.item, x.order_ref, x.amount, x.tax_paid]);
+        exportSdcRows("saddleback_purchases.csv", ["Date","Vendor","Material / Item","Linked Order","Amount","Tax Paid"], rows);
+      });
       form.querySelector("#sdc_save_pur").addEventListener("click", () => {
         const row = {
           id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
@@ -6765,6 +6809,16 @@ function renderSaddlebackView() {
       host.innerHTML = "";
       btnTaxes.className = "btn btn-orange";
       btnOrders.className = btnExpenses.className = btnPurchases.className = "btn";
+
+      const exportRow = document.createElement("div");
+      exportRow.style.display = "flex";
+      exportRow.style.gap = "8px";
+      exportRow.style.marginBottom = "12px";
+      const exportBtn = document.createElement("button");
+      exportBtn.className = "btn";
+      exportBtn.textContent = "Export Tax Snapshot CSV";
+      exportRow.appendChild(exportBtn);
+      host.appendChild(exportRow);
 
       const wrap = document.createElement("div");
       wrap.style.display = "grid";
@@ -6805,6 +6859,11 @@ function renderSaddlebackView() {
         purchases: months[key].purchases,
         net: months[key].revenue - months[key].expenses - months[key].purchases,
       }));
+
+      exportBtn.addEventListener("click", () => {
+        const rows = monthly.map(x => [x.month, x.revenue, x.expenses, x.purchases, x.net]);
+        exportSdcRows("saddleback_tax_snapshot.csv", ["Month","Revenue","Expenses","Purchases","Net"], rows);
+      });
 
       host.appendChild(renderTable(monthly, [
         { key: "month", label: "Month" },
