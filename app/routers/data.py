@@ -229,11 +229,10 @@ def promote_legacy_job(
     if not row:
         raise HTTPException(status_code=404, detail="Legacy job not found")
 
-    promote_kind = "sales_lead" if str(kind or "").strip().lower() == "sales_lead" else "dispatch"
     payload = {
-        "kind": promote_kind,
+        "kind": "sales_lead" if str(kind or "").strip().lower() == "sales_lead" else "dispatch",
         "date": (date or row.get("date") or datetime.utcnow().strftime("%Y-%m-%d")),
-        "status": "Sales Lead" if promote_kind == "sales_lead" else "Dispatch",
+        "status": "Sales Lead" if str(kind or "").strip().lower() == "sales_lead" else "Dispatch",
         "customer": row.get("customer") or row.get("customer_name") or "",
         "contact": row.get("contact") or row.get("contact_name") or "",
         "address": row.get("address") or "",

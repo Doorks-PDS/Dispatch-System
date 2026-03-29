@@ -475,18 +475,6 @@
   async function apiDeleteJob(jobId) {
     await fetchJSON(`/calendar/jobs/${jobId}`, { method: "DELETE" });
   }
-
-  async function apiPromoteLegacyJob(recordId, dateValue, kind = "dispatch") {
-    const qs = new URLSearchParams();
-    if (dateValue) qs.set("date", dateValue);
-    if (kind) qs.set("kind", kind);
-    const suffix = qs.toString() ? `?${qs.toString()}` : "";
-    const data = await fetchJSON(`/data/legacy/${encodeURIComponent(recordId)}/promote${suffix}`, {
-      method: "POST",
-    });
-    return data.job;
-  }
-
  
   async function apiAddCompletion(jobId, payload) {
     const data = await fetchJSON(`/calendar/jobs/${jobId}/completion`, {
@@ -639,29 +627,11 @@
     });
     return data.item;
   }
-
-  async function apiUpdateCustomer(id, payload) {
-    const data = await fetchJSON(`/crm/customers/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return data.item;
-  }
  
   async function apiListContacts(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/crm/contacts?${qs.toString()}`);
     return data.items || [];
-  }
-
-  async function apiUpdateContact(id, payload) {
-    const data = await fetchJSON(`/crm/contacts/${encodeURIComponent(id)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    return data.item;
   }
  
   async function apiListParts(params = {}) {
@@ -2801,35 +2771,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.appendChild(buildCustomerDatalist(customerListId, customers));
         card.appendChild(buildContactDatalist(contactListId, contacts));
         const newJobCustomerInput = row1.querySelector("#nj_customer");
-        const findSelectedCustomer = () => customers.find(c => normalizeText(c.company_name) === normalizeText(newJobCustomerInput.value)) || null;
         const newJobContactInput = row2.querySelector("#nj_contact");
         const newJobPhoneInput = row2.querySelector("#nj_phone");
         const newJobEmailInput = row3.querySelector("#nj_email");
         const newJobContactList = card.querySelector(`#${contactListId}`);
+        const findSelectedCustomer = () => {
+          const selected = normalizeText(newJobCustomerInput.value);
+          return customers.find(c => normalizeText(c.company_name) === selected) || null;
+        };
         let liveContacts = Array.isArray(contacts) ? [...contacts] : [];
         const renderNewJobContacts = () => {
           if (!newJobContactList) return;
           newJobContactList.innerHTML = liveContacts.map(c => `<option value="${escapeHtml(c.name || "")}" label="${escapeHtml(c.company_name ? `${c.name || ""}  -  ${c.company_name}` : (c.name || ""))}"></option>`).join("");
         };
         const refreshNewJobContacts = async (forceClear = false) => {
-          const company = newJobCustomerInput.value.trim();
           const selectedCustomer = findSelectedCustomer();
+          const company = newJobCustomerInput.value.trim();
           const params = selectedCustomer && selectedCustomer.id ? { customer_id: selectedCustomer.id } : (company ? { company_name: company } : {});
-          const loaded = await apiListContacts(params).catch(() => []);
+          const loaded = await apiListContacts(params).catch(() => contacts);
           liveContacts.splice(0, liveContacts.length, ...(Array.isArray(loaded) ? loaded : []));
           renderNewJobContacts();
-          const currentName = String(newJobContactInput.value || "").trim();
-          if (!liveContacts.length) {
-            newJobContactInput.value = "";
-            newJobPhoneInput.value = "";
-            newJobEmailInput.value = "";
-            return;
-          }
-          const exact = liveContacts.find(c => normalizeText(c.name) === normalizeText(currentName));
-          if (exact) {
-            newJobPhoneInput.value = pickContactPhone(exact) || "";
-            newJobEmailInput.value = exact.email || "";
-          } else if (forceClear) {
+          const exact = liveContacts.find(c => normalizeText(c.name) === normalizeText(newJobContactInput.value));
+          if (!exact && (forceClear || company)) {
             newJobContactInput.value = "";
             newJobPhoneInput.value = "";
             newJobEmailInput.value = "";
@@ -2979,13 +2942,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const card = document.createElement("div");
           card.className = "card";
           card.innerHTML = `
-            <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
-              <div>
-                <h3 style="margin:0;">${escapeHtml(job.customer || job.customer_name || "Legacy Job")}</h3>
-                <div class="hint" style="margin-top:6px;">${escapeHtml(job.job_number || "")}${job.date ? ` - ${escapeHtml(job.date)}` : ""}${job.source ? ` - ${escapeHtml(String(job.source).toUpperCase())}` : ""}</div>
-              </div>
-              <div id="legacy_promote_actions" style="display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end;"></div>
-            </div>
+            <h3 style="margin:0;">${escapeHtml(job.customer || job.customer_name || "Legacy Job")}</h3>
+            <div class="hint" style="margin-top:6px;">${escapeHtml(job.job_number || "")}${job.date ? ` - ${escapeHtml(job.date)}` : ""}${job.source ? ` - ${escapeHtml(String(job.source).toUpperCase())}` : ""}</div>
             <div class="grid2" style="margin-top:12px;">
               <div><div class="label">Customer</div><div class="field">${escapeHtml(job.customer || job.customer_name || "")}</div></div>
               <div><div class="label">Job #</div><div class="field">${escapeHtml(job.job_number || "")}</div></div>
@@ -3002,30 +2960,54 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div style="margin-top:10px;"><div class="label">Additional Recommendations</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.additional_recommendations || "")}</div></div>
             <div style="margin-top:10px;"><div class="label">Parts Used</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.parts_used || "")}</div></div>
           `;
-          const actions = card.querySelector("#legacy_promote_actions");
-          const makePromoteBtn = (label, kind, primary = false) => {
-            const btn = document.createElement("button");
-            btn.className = primary ? "btn btn-orange" : "btn";
-            btn.textContent = label;
-            btn.addEventListener("click", async () => {
-              try {
-                const defaultDate = new Date().toISOString().slice(0, 10);
-                const chosen = prompt(`${label} date (YYYY-MM-DD):`, defaultDate) || defaultDate;
-                const created = await apiPromoteLegacyJob(job.id, chosen, kind);
-                alert(`${label} created.`);
-                drawerBody.innerHTML = "";
-                const local = document.createElement("div");
-                drawerBody.appendChild(local);
-                renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
-                await refresh();
-              } catch (e) {
-                alert(e.message || String(e));
-              }
-            });
-            return btn;
-          };
-          actions.appendChild(makePromoteBtn("Create Dispatch", "dispatch", true));
-          actions.appendChild(makePromoteBtn("Create Sales Lead", "sales_lead", false));
+          const actions = document.createElement("div");
+          actions.style.display = "flex";
+          actions.style.gap = "8px";
+          actions.style.marginTop = "12px";
+          actions.style.justifyContent = "flex-end";
+
+          const promoteBtn = document.createElement("button");
+          promoteBtn.className = "btn btn-orange";
+          promoteBtn.textContent = "Create Dispatch";
+          promoteBtn.addEventListener("click", async () => {
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiPromoteLegacyJob(job.id, chosen);
+              alert(`Dispatch ${created.job_number || ""} created.`);
+              drawerBody.innerHTML = "";
+              const local = document.createElement("div");
+              drawerBody.appendChild(local);
+              renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          const leadBtn = document.createElement("button");
+          leadBtn.className = "btn";
+          leadBtn.textContent = "Create Sales Lead";
+          leadBtn.addEventListener("click", async () => {
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiCreateSalesLeadFromLegacy(job.id, chosen);
+              alert(`Sales Lead ${created.job_number || ""} created.`);
+              drawerBody.innerHTML = "";
+              const local = document.createElement("div");
+              drawerBody.appendChild(local);
+              renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          actions.appendChild(leadBtn);
+          actions.appendChild(promoteBtn);
+          card.appendChild(actions);
+
           drawerBody.appendChild(card);
         });
         return;
@@ -3098,6 +3080,48 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="jobrow-addr">${escapeHtml(j.date || j.date_display || "")} - ${escapeHtml(j.address || "")}</div>
           <div class="hint" style="margin-top:6px; font-weight:900;">Estimate: ${formatDocRefDisplay(estimate)} | Invoice: ${formatDocRefDisplay(invoice)} | PO: ${formatDocRefDisplay(poNumber)}</div>
         `;
+        if (sourceLabel !== "CURRENT") {
+          const actionRow = document.createElement("div");
+          actionRow.style.display = "flex";
+          actionRow.style.gap = "8px";
+          actionRow.style.marginTop = "8px";
+
+          const importBtn = document.createElement("button");
+          importBtn.className = "btn btn-orange";
+          importBtn.textContent = "Import Dispatch";
+          importBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiPromoteLegacyJob(j.id, chosen);
+              alert(`Dispatch ${created.job_number || ""} created.`);
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          const leadBtn = document.createElement("button");
+          leadBtn.className = "btn";
+          leadBtn.textContent = "Import Sales Lead";
+          leadBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiCreateSalesLeadFromLegacy(j.id, chosen);
+              alert(`Sales Lead ${created.job_number || ""} created.`);
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          actionRow.appendChild(importBtn);
+          actionRow.appendChild(leadBtn);
+          row.appendChild(actionRow);
+        }
         row.addEventListener("click", () => openAnyJobCard(j));
         list.appendChild(row);
       });
@@ -3224,7 +3248,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
-      if ((sourceLabel && sourceLabel !== "CURRENT") || !job.id) {
+      if (sourceLabel.startsWith("LEGACY") || !job.id) {
         openDrawer(`Legacy Job ${job.job_number || "Details"}`, async (drawerBody) => {
           const card = document.createElement("div");
           card.className = "card";
@@ -4769,17 +4793,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     workspaceBody.innerHTML=""; workspaceBody.appendChild(root); currentView={ refresh: renderActiveTab }; renderActiveTab();
   }
  
-
 function renderCustomersView() {
     setNavActive(navCustomers);
     setActiveChip("Work Flow");
     setWorkspace("Customers / Contacts");
     clearWorkspaceActions();
-
+ 
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<h3>Customers / Contacts</h3><div class="hint">Search, view, edit, and connect customers and contacts in one place.</div>`;
+    card.innerHTML = `<h3>Customers / Contacts</h3><div class="hint">Manage customers and contacts in one place.</div>`;
 
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
@@ -4797,215 +4820,38 @@ function renderCustomersView() {
     body.style.marginTop = "14px";
 
     let activeTab = "customers";
-    let query = "";
-
-    function openCustomerDrawer(customer, contacts) {
-      openDrawer(customer.company_name || "Customer", (drawerBody) => {
-        const card = document.createElement("div");
-        card.className = "card";
-        const linked = (contacts || []).filter(c => {
-          const cid = String(c.customer_id || "").trim();
-          return (cid && cid === String(customer.id || "").trim()) ||
-            companyMatches(c.company_name, customer.company_name);
-        });
-        card.innerHTML = `
-          <h3 style="margin:0;">${escapeHtml(customer.company_name || "")}</h3>
-          <div class="hint" style="margin-top:6px;">${escapeHtml([customer.address, customer.city, customer.state, customer.zip_code].filter(Boolean).join(", "))}</div>
-          <div class="grid2" style="margin-top:12px;">
-            <div><div class="label">Phone</div><div class="field">${escapeHtml(customer.phone_number || "")}</div></div>
-            <div><div class="label">Email</div><div class="field">${escapeHtml(customer.email || "")}</div></div>
-          </div>
-          <div style="margin-top:10px;"><div class="label">Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(customer.notes || "")}</div></div>
-          <div style="margin-top:14px;"><div class="label">Known Contacts</div></div>
-        `;
-        const list = document.createElement("div");
-        list.style.display = "grid";
-        list.style.gap = "8px";
-        list.style.marginTop = "8px";
-        if (!linked.length) {
-          const empty = document.createElement("div");
-          empty.className = "hint";
-          empty.textContent = "No linked contacts yet.";
-          list.appendChild(empty);
-        } else {
-          linked.forEach(c => {
-            const row = document.createElement("div");
-            row.className = "jobrow";
-            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(c.name || "")}</div></div><div class="jobrow-addr">${escapeHtml(c.phone_number || c.cell_phone || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div><div class="hint" style="margin-top:6px;">${escapeHtml(c.title || "")}${c.notes ? ` - ${escapeHtml(c.notes)}` : ""}</div>`;
-            row.style.cursor = "pointer";
-            row.addEventListener("click", () => openContactDrawer(c, customer));
-            list.appendChild(row);
-          });
-        }
-        const actions = document.createElement("div");
-        actions.style.display = "flex";
-        actions.style.gap = "8px";
-        actions.style.marginTop = "12px";
-        const edit = document.createElement("button");
-        edit.className = "btn";
-        edit.textContent = "Edit Customer";
-        edit.addEventListener("click", async () => {
-          try {
-            const company_name = prompt("Company Name:", customer.company_name || "") ?? customer.company_name;
-            if (!String(company_name || "").trim()) return;
-            const address = prompt("Address:", customer.address || "") ?? customer.address;
-            const city = prompt("City:", customer.city || "") ?? customer.city;
-            const state = prompt("State:", customer.state || "") ?? customer.state;
-            const zip_code = prompt("ZIP:", customer.zip_code || "") ?? customer.zip_code;
-            const phone_number = prompt("Phone:", customer.phone_number || "") ?? customer.phone_number;
-            const email = prompt("Email:", customer.email || "") ?? customer.email;
-            const notes = prompt("Notes:", customer.notes || "") ?? customer.notes;
-            await apiUpdateCustomer(customer.id, { company_name, address, city, state, zip_code, phone_number, email, notes });
-            if (currentView && currentView.refresh) currentView.refresh();
-          } catch (e) { alert(e.message || String(e)); }
-        });
-        const addContact = document.createElement("button");
-        addContact.className = "btn btn-orange";
-        addContact.textContent = "Add Contact";
-        addContact.addEventListener("click", async () => {
-          try {
-            const name = (prompt("Contact name:") || "").trim();
-            if (!name) return;
-            const phone_number = (prompt("Phone:", "") || "").trim();
-            const cell_phone = (prompt("Cell:", "") || "").trim();
-            const email = (prompt("Email:", "") || "").trim();
-            const title = (prompt("Title:", "") || "").trim();
-            const notes = (prompt("Notes:", "") || "").trim();
-            await apiCreateContact({ name, company_name: customer.company_name || "", customer_id: customer.id || "", phone_number, cell_phone, email, title, notes });
-            if (currentView && currentView.refresh) currentView.refresh();
-          } catch (e) { alert(e.message || String(e)); }
-        });
-        actions.append(edit, addContact);
-        card.appendChild(list);
-        card.appendChild(actions);
-        drawerBody.appendChild(card);
-      });
-    }
-
-    function openContactDrawer(contact, customer = null) {
-      openDrawer(contact.name || "Contact", async (drawerBody) => {
-        const customers = await apiListCustomers().catch(() => []);
-        const card = document.createElement("div");
-        card.className = "card";
-        const linkedCustomer = customer || customers.find(c => String(c.id || "") === String(contact.customer_id || ""));
-        card.innerHTML = `
-          <h3 style="margin:0;">${escapeHtml(contact.name || "")}</h3>
-          <div class="hint" style="margin-top:6px;">${escapeHtml(linkedCustomer?.company_name || contact.company_name || "")}</div>
-          <div class="grid2" style="margin-top:12px;">
-            <div><div class="label">Phone</div><div class="field">${escapeHtml(contact.phone_number || "")}</div></div>
-            <div><div class="label">Cell</div><div class="field">${escapeHtml(contact.cell_phone || "")}</div></div>
-            <div><div class="label">Email</div><div class="field">${escapeHtml(contact.email || "")}</div></div>
-            <div><div class="label">Title</div><div class="field">${escapeHtml(contact.title || "")}</div></div>
-          </div>
-          <div style="margin-top:10px;"><div class="label">Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(contact.notes || "")}</div></div>
-        `;
-        const actions = document.createElement("div");
-        actions.style.display = "flex";
-        actions.style.gap = "8px";
-        actions.style.marginTop = "12px";
-        const edit = document.createElement("button");
-        edit.className = "btn";
-        edit.textContent = "Edit Contact";
-        edit.addEventListener("click", async () => {
-          try {
-            const name = prompt("Name:", contact.name || "") ?? contact.name;
-            if (!String(name || "").trim()) return;
-            const company_name = prompt("Company:", linkedCustomer?.company_name || contact.company_name || "") ?? (linkedCustomer?.company_name || contact.company_name || "");
-            const phone_number = prompt("Phone:", contact.phone_number || "") ?? contact.phone_number;
-            const cell_phone = prompt("Cell:", contact.cell_phone || "") ?? contact.cell_phone;
-            const email = prompt("Email:", contact.email || "") ?? contact.email;
-            const title = prompt("Title:", contact.title || "") ?? contact.title;
-            const notes = prompt("Notes:", contact.notes || "") ?? contact.notes;
-            const matched = customers.find(c => normalizeText(c.company_name) === normalizeText(company_name));
-            await apiUpdateContact(contact.id, { name, company_name, customer_id: matched?.id || "", phone_number, cell_phone, email, title, notes });
-            if (currentView && currentView.refresh) currentView.refresh();
-          } catch (e) { alert(e.message || String(e)); }
-        });
-        actions.appendChild(edit);
-        card.appendChild(actions);
-        drawerBody.appendChild(card);
-      });
-    }
 
     async function renderCustomersTab() {
       btnCustomers.className = "btn btn-orange";
       btnContacts.className = "btn";
-      const [customers, contacts] = await Promise.all([apiListCustomers().catch(() => []), apiListContacts().catch(() => [])]);
+      const items = await apiListCustomers().catch(() => []);
       body.innerHTML = "";
-      const tools = document.createElement("div");
-      tools.className = "card";
-      tools.innerHTML = `
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-          <button class="btn btn-orange" id="cust_add">Add Customer</button>
-          <input class="input" id="cust_search" placeholder="Search company, address, phone, email, notes" style="max-width:420px; margin-left:auto;" />
-          <button class="btn" id="cust_search_btn">Search</button>
-        </div>
-      `;
-      body.appendChild(tools);
+      const addRow = document.createElement("div");
+      addRow.style.marginBottom = "12px";
+      addRow.innerHTML = `<div class="hint">Add a customer and optional primary contact details.</div><div style="margin-top:8px;"><button class="btn btn-orange" id="cust_add">Add Customer</button></div>`;
+      body.appendChild(addRow);
       const list = document.createElement("div");
       list.style.display = "grid";
       list.style.gap = "8px";
-      list.style.marginTop = "12px";
-      const q = String(query || "").trim().toLowerCase();
-      const rows = q ? customers.filter(c => [c.company_name, c.address, c.city, c.state, c.zip_code, c.phone_number, c.email, c.notes].some(v => String(v || "").toLowerCase().includes(q))) : customers;
-      if (!rows.length) list.innerHTML = `<div class="hint">No customers found.</div>`;
-      rows.forEach(customer => {
-        const linked = contacts.filter(c => {
-          const cid = String(c.customer_id || "").trim();
-          return (cid && cid === String(customer.id || "").trim()) || companyMatches(c.company_name, customer.company_name);
-        });
+      if (!items.length) list.innerHTML = `<div class="hint">No customers yet.</div>`;
+      items.forEach(c => {
         const row = document.createElement("div");
         row.className = "jobrow";
-        row.style.cursor = "pointer";
-        row.innerHTML = `
-          <div class="jobrow-top">
-            <div class="jobrow-name">${escapeHtml(customer.company_name || "")}</div>
-            <div class="hint">${linked.length} contact${linked.length === 1 ? "" : "s"}</div>
-          </div>
-          <div class="jobrow-addr">${escapeHtml([customer.address, customer.city, customer.state, customer.zip_code].filter(Boolean).join(", "))}</div>
-          <div class="hint" style="margin-top:6px;">${escapeHtml(customer.phone_number || "")}${customer.email ? ` - ${escapeHtml(customer.email)}` : ""}</div>
-        `;
-        const nested = document.createElement("div");
-        nested.style.display = "grid";
-        nested.style.gap = "6px";
-        nested.style.marginTop = "8px";
-        linked.slice(0, 5).forEach(c => {
-          const chip = document.createElement("div");
-          chip.className = "hint";
-          chip.style.paddingLeft = "8px";
-          chip.textContent = `${c.name || ""}${c.phone_number || c.cell_phone ? ` - ${c.phone_number || c.cell_phone}` : ""}`;
-          nested.appendChild(chip);
-        });
-        if (linked.length > 5) {
-          const more = document.createElement("div");
-          more.className = "hint";
-          more.style.paddingLeft = "8px";
-          more.textContent = `+ ${linked.length - 5} more`;
-          nested.appendChild(more);
-        }
-        row.appendChild(nested);
-        row.addEventListener("click", () => openCustomerDrawer(customer, contacts));
+        row.innerHTML = `<div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>`;
         list.appendChild(row);
       });
       body.appendChild(list);
-      tools.querySelector("#cust_search").value = query;
-      const custSearch = tools.querySelector("#cust_search");
-      const runCustSearch = () => { query = custSearch.value || ""; renderCustomersTab(); };
-      tools.querySelector("#cust_search_btn").addEventListener("click", runCustSearch);
-      custSearch.addEventListener("keydown", (e) => { if (e.key === "Enter") runCustSearch(); });
-      tools.querySelector("#cust_add").addEventListener("click", async () => {
-        const company_name = (prompt("Customer name:") || "").trim();
-        if (!company_name) return;
-        const address = (prompt("Address (optional):") || "").trim();
-        const city = (prompt("City (optional):") || "").trim();
-        const state = (prompt("State (optional):") || "").trim();
-        const zip_code = (prompt("ZIP (optional):") || "").trim();
-        const phone_number = (prompt("Phone (optional):") || "").trim();
-        const email = (prompt("Email (optional):") || "").trim();
-        const notes = (prompt("Notes (optional):") || "").trim();
-        const created = await apiCreateCustomer({ company_name, address, city, state, zip_code, phone_number, email, notes });
-        if (created && created.id) {
-          try { await apiUpdateCustomer(created.id, { company_name, address, city, state, zip_code, phone_number, email, notes }); } catch {}
+      addRow.querySelector("#cust_add").addEventListener("click", async () => {
+        const name = (prompt("Customer name:") || "").trim();
+        if (!name) return;
+        const contactName = (prompt("Primary contact name (optional):") || "").trim();
+        const contactPhone = (prompt("Primary contact phone (optional):") || "").trim();
+        const contactEmail = (prompt("Primary contact email (optional):") || "").trim();
+        await apiCreateCustomer({ company_name: name });
+        if (contactName || contactPhone || contactEmail) {
+          try {
+            await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail });
+          } catch {}
         }
         renderCustomersTab();
       });
@@ -5014,60 +4860,55 @@ function renderCustomersView() {
     async function renderContactsTab() {
       btnCustomers.className = "btn";
       btnContacts.className = "btn btn-orange";
-      const [contacts, customers] = await Promise.all([apiListContacts().catch(() => []), apiListCustomers().catch(() => [])]);
+      const [items, customers] = await Promise.all([apiListContacts().catch(() => []), apiListCustomers().catch(() => [])]);
       body.innerHTML = "";
-      const tools = document.createElement("div");
-      tools.className = "card";
       const companyListId = `contact-company-${Math.random().toString(36).slice(2)}`;
-      tools.innerHTML = `
-        <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
-          <button class="btn btn-orange" id="cont_add">Add Contact</button>
-          <input class="input" id="cont_search" placeholder="Search name, company, phone, email, title, notes" style="max-width:420px; margin-left:auto;" />
-          <button class="btn" id="cont_search_btn">Search</button>
+      const form = document.createElement("div");
+      form.className = "card";
+      form.innerHTML = `
+        <div class="grid2">
+          <div><div class="label">Name</div><input class="input" id="cont_name" /></div>
+          <div><div class="label">Company</div><input class="input" id="cont_company" list="${companyListId}" placeholder="Link to existing customer" /></div>
+          <div><div class="label">Phone</div><input class="input" id="cont_phone" /></div>
+          <div><div class="label">Email</div><input class="input" id="cont_email" /></div>
         </div>
       `;
-      body.appendChild(tools);
-
-      const rowsWrap = document.createElement("div");
-      rowsWrap.style.display = "grid";
-      rowsWrap.style.gap = "8px";
-      rowsWrap.style.marginTop = "12px";
-      const q = String(query || "").trim().toLowerCase();
-      const rows = q ? contacts.filter(c => [c.name, c.company_name, c.phone_number, c.cell_phone, c.email, c.title, c.notes].some(v => String(v || "").toLowerCase().includes(q))) : contacts;
-      if (!rows.length) rowsWrap.innerHTML = `<div class="hint">No contacts found.</div>`;
-      rows.forEach(contact => {
+      form.appendChild(buildCustomerDatalist(companyListId, customers));
+      const actions = document.createElement("div");
+      actions.style.display = "flex";
+      actions.style.gap = "8px";
+      actions.style.marginTop = "10px";
+      const add = document.createElement("button");
+      add.className = "btn btn-orange";
+      add.textContent = "Add Contact";
+      actions.appendChild(add);
+      form.appendChild(actions);
+      body.appendChild(form);
+      const list = document.createElement("div");
+      list.style.display = "grid";
+      list.style.gap = "8px";
+      list.style.marginTop = "12px";
+      if (!items.length) list.innerHTML = `<div class="hint">No contacts yet.</div>`;
+      items.forEach(c => {
         const row = document.createElement("div");
         row.className = "jobrow";
-        row.style.cursor = "pointer";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(contact.name || "")}</div><div class="hint">${escapeHtml(contact.company_name || "")}</div></div><div class="jobrow-addr">${escapeHtml(contact.phone_number || contact.cell_phone || "")}${contact.email ? ` - ${escapeHtml(contact.email)}` : ""}</div><div class="hint" style="margin-top:6px;">${escapeHtml(contact.title || "")}${contact.notes ? ` - ${escapeHtml(contact.notes)}` : ""}</div>`;
-        const linkedCustomer = customers.find(c => String(c.id || "") === String(contact.customer_id || "")) || null;
-        row.addEventListener("click", () => openContactDrawer(contact, linkedCustomer));
-        rowsWrap.appendChild(row);
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(c.name || "")}</div><div class="hint">${escapeHtml(c.company_name || "")}</div></div><div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>`;
+        list.appendChild(row);
       });
-      body.appendChild(rowsWrap);
-
-      tools.querySelector("#cont_search").value = query;
-      const contSearch = tools.querySelector("#cont_search");
-      const runContSearch = () => { query = contSearch.value || ""; renderContactsTab(); };
-      tools.querySelector("#cont_search_btn").addEventListener("click", runContSearch);
-      contSearch.addEventListener("keydown", (e) => { if (e.key === "Enter") runContSearch(); });
-      tools.querySelector("#cont_add").addEventListener("click", async () => {
-        const name = (prompt("Contact name:") || "").trim();
-        if (!name) return;
-        const company_name = (prompt("Company:", "") || "").trim();
-        const matched = customers.find(c => normalizeText(c.company_name) === normalizeText(company_name));
-        const phone_number = (prompt("Phone:", "") || "").trim();
-        const cell_phone = (prompt("Cell:", "") || "").trim();
-        const email = (prompt("Email:", "") || "").trim();
-        const title = (prompt("Title:", "") || "").trim();
-        const notes = (prompt("Notes:", "") || "").trim();
-        await apiCreateContact({ name, company_name, customer_id: matched?.id || "", phone_number, cell_phone, email, title, notes });
+      body.appendChild(list);
+      add.addEventListener("click", async () => {
+        await apiCreateContact({
+          name: form.querySelector("#cont_name").value.trim(),
+          company_name: form.querySelector("#cont_company").value.trim(),
+          phone_number: form.querySelector("#cont_phone").value.trim(),
+          email: form.querySelector("#cont_email").value.trim(),
+        });
         renderContactsTab();
       });
     }
 
-    btnCustomers.addEventListener("click", ()=>{ activeTab = "customers"; query = ""; renderCustomersTab(); });
-    btnContacts.addEventListener("click", ()=>{ activeTab = "contacts"; query = ""; renderContactsTab(); });
+    btnCustomers.addEventListener("click", ()=>{ activeTab = "customers"; renderCustomersTab(); });
+    btnContacts.addEventListener("click", ()=>{ activeTab = "contacts"; renderContactsTab(); });
 
     root.appendChild(card);
     root.appendChild(tabs);
@@ -5078,6 +4919,7 @@ function renderCustomersView() {
     currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : renderContactsTab() };
     renderCustomersTab();
   }
+
   function renderContactsView() {
     renderCustomersView();
   }
@@ -6160,7 +6002,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
-      if ((sourceLabel && sourceLabel !== "CURRENT") || !job.id) {
+      if (sourceLabel.startsWith("LEGACY") || !job.id) {
         openDrawer(`Legacy Job ${job.job_number || "Details"}`, async (drawerBody) => {
           const card = document.createElement("div");
           card.className = "card";
@@ -6385,16 +6227,10 @@ function renderDataUploadView() {
           <button class="btn btn-orange" id="upload_contacts_btn" style="margin-top:10px;">Upload contacts.csv</button>
           <div class="hint" id="upload_contacts_status" style="margin-top:8px;"></div>
         </div>
-        <div>
-          <div class="label">Jobs.csv</div>
-          <input class="input" id="upload_jobs" type="file" accept=".csv" />
-          <button class="btn btn-orange" id="upload_jobs_btn" style="margin-top:10px;">Upload Jobs.csv</button>
-          <div class="hint" id="upload_jobs_status" style="margin-top:8px;"></div>
-        </div>
       </div>
       <div class="card" style="margin-top:14px; padding:14px;">
         <div style="font-weight:900; margin-bottom:6px;">How to use</div>
-        <div class="hint">billable_time.csv and tech_notes.csv overwrite those live files directly. customers.csv and contacts.csv are converted into customers_db.json and contacts_db.json on the live Render disk. Jobs.csv is stored directly and used by All Jobs for legacy fields like estimate, invoice, PO, contact, technician, and notes. Restart the Render service once after upload to refresh references.</div>
+        <div class="hint">billable_time.csv and tech_notes.csv overwrite those live files directly. customers.csv and contacts.csv are converted into customers_db.json and contacts_db.json on the live Render disk. Restart the Render service once after upload to refresh references.</div>
       </div>
     `;
 
@@ -6427,7 +6263,6 @@ function renderDataUploadView() {
     wireUploader("#upload_notes", "#upload_notes_btn", "#upload_notes_status", "tech_notes.csv");
     wireUploader("#upload_customers", "#upload_customers_btn", "#upload_customers_status", "customers.csv");
     wireUploader("#upload_contacts", "#upload_contacts_btn", "#upload_contacts_status", "contacts.csv");
-    wireUploader("#upload_jobs", "#upload_jobs_btn", "#upload_jobs_status", "Jobs.csv");
 
     root.appendChild(card);
     workspaceBody.innerHTML = "";

@@ -39,29 +39,6 @@ class CRMStore:
             self._seed_customers()
         if not self.contacts_path.exists():
             self._seed_contacts()
-        self._sync_contact_links()
-
-    def _sync_contact_links(self) -> None:
-        customers = self._load_items(self.customers_path)
-        contacts = self._load_items(self.contacts_path)
-        if not customers or not contacts:
-            return
-        by_norm = {}
-        for c in customers:
-            norm = _norm(c.get("company_name"))
-            if norm and norm not in by_norm:
-                by_norm[norm] = str(c.get("id") or "")
-        changed = False
-        for item in contacts:
-            want = _norm(item.get("company_name"))
-            cid = str(item.get("customer_id") or "").strip()
-            matched = by_norm.get(want, "")
-            if matched and cid != matched:
-                item["customer_id"] = matched
-                changed = True
-        if changed:
-            self._save_items(self.contacts_path, contacts)
-
 
     def _load_items(self, path: Path) -> List[Dict[str, Any]]:
         data = _read_json(path, {"items": []})
@@ -121,8 +98,27 @@ class CRMStore:
                     })
         self._save_items(self.contacts_path, items)
 
+
+    def _backfill_contact_links(self) -> None:
+        customers = self._load_items(self.customers_path)
+        contacts = self._load_items(self.contacts_path)
+        if not contacts or not customers:
+            return
+        customer_map = {_norm(c.get("company_name")): str(c.get("id") or "") for c in customers}
+        changed = False
+        for item in contacts:
+            if not str(item.get("customer_id") or "").strip():
+                company_name = str(item.get("company_name") or "").strip()
+                link = customer_map.get(_norm(company_name), "")
+                if link:
+                    item["customer_id"] = link
+                    changed = True
+        if changed:
+            self._save_items(self.contacts_path, contacts)
+
     def list_customers(self) -> List[Dict[str, Any]]:
         self._ensure()
+        self._backfill_contact_links()
         items = self._load_items(self.customers_path)
         return sorted(items, key=lambda x: str(x.get("company_name", "")).lower())
 
@@ -145,7 +141,6 @@ class CRMStore:
         }
         items.append(item)
         self._save_items(self.customers_path, items)
-        self._sync_contact_links()
         return item
 
     def update_customer(self, item_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -157,12 +152,12 @@ class CRMStore:
                     if key in payload:
                         item[key] = str(payload.get(key) or "").strip()
                 self._save_items(self.customers_path, items)
-                self._sync_contact_links()
                 return item
         raise ValueError("Customer not found")
 
     def list_contacts(self, company_name: str | None = None, customer_id: str | None = None) -> List[Dict[str, Any]]:
         self._ensure()
+        self._backfill_contact_links()
         items = self._load_items(self.contacts_path)
         if customer_id:
             want_id = str(customer_id).strip()
@@ -198,7 +193,6 @@ class CRMStore:
         }
         items.append(item)
         self._save_items(self.contacts_path, items)
-        self._sync_contact_links()
         return item
 
     def update_contact(self, item_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -210,6 +204,5 @@ class CRMStore:
                     if key in payload:
                         item[key] = str(payload.get(key) or "").strip()
                 self._save_items(self.contacts_path, items)
-                self._sync_contact_links()
                 return item
         raise ValueError("Contact not found")
