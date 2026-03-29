@@ -219,6 +219,7 @@ def promote_legacy_job(
     record_id: str,
     x_api_key: Optional[str] = Header(default=None),
     date: Optional[str] = None,
+    kind: Optional[str] = None,
 ):
     _require_key(request, x_api_key)
     legacy = _legacy(request)
@@ -228,10 +229,11 @@ def promote_legacy_job(
     if not row:
         raise HTTPException(status_code=404, detail="Legacy job not found")
 
+    promote_kind = "sales_lead" if str(kind or "").strip().lower() == "sales_lead" else "dispatch"
     payload = {
-        "kind": "dispatch",
+        "kind": promote_kind,
         "date": (date or row.get("date") or datetime.utcnow().strftime("%Y-%m-%d")),
-        "status": "Dispatch",
+        "status": "Sales Lead" if promote_kind == "sales_lead" else "Dispatch",
         "customer": row.get("customer") or row.get("customer_name") or "",
         "contact": row.get("contact") or row.get("contact_name") or "",
         "address": row.get("address") or "",
