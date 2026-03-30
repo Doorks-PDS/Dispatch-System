@@ -220,6 +220,7 @@ def promote_legacy_job(
     x_api_key: Optional[str] = Header(default=None),
     date: Optional[str] = None,
     kind: Optional[str] = None,
+    job_number: Optional[str] = None,
 ):
     _require_key(request, x_api_key)
     legacy = _legacy(request)
@@ -241,6 +242,7 @@ def promote_legacy_job(
         "po_number": row.get("po_number") or row.get("po_no") or "",
         "job_notes": row.get("job_notes") or row.get("description") or row.get("tech_notes") or "",
         "office_notes": row.get("work_performed") or "",
+        "job_number": str(job_number or "").strip(),
     }
     job = cal.create_job(payload)
     return {"ok": True, "job": job}

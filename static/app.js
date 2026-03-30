@@ -476,9 +476,10 @@
     await fetchJSON(`/calendar/jobs/${jobId}`, { method: "DELETE" });
   }
 
-  async function apiPromoteLegacyJob(recordId, dateValue) {
+  async function apiPromoteLegacyJob(recordId, dateValue, jobNumber = "") {
     const qs = new URLSearchParams();
     if (dateValue) qs.set("date", dateValue);
+    if (String(jobNumber || "").trim()) qs.set("job_number", String(jobNumber || "").trim());
     const suffix = qs.toString() ? `?${qs.toString()}` : "";
     const data = await fetchJSON(`/data/legacy/${encodeURIComponent(recordId)}/promote${suffix}`, {
       method: "POST",
@@ -3343,12 +3344,20 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
           const dispatchBtn = document.createElement("button");
           dispatchBtn.className = "btn btn-orange";
-          dispatchBtn.textContent = "Add to Calendar";
+          dispatchBtn.textContent = "Import to Calendar";
           dispatchBtn.addEventListener("click", async () => {
             try {
-              const defaultDate = new Date().toISOString().slice(0, 10);
-              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
-              const created = await apiPromoteLegacyJob(job.id, chosen);
+              const defaultDate = String(job.date || "").trim() || new Date().toISOString().slice(0, 10);
+              const chosenDate = prompt("Dispatch date (YYYY-MM-DD):", defaultDate);
+              if (chosenDate === null) return;
+              const cleanedDate = String(chosenDate || "").trim() || defaultDate;
+
+              const suggestedNumber = String(job.job_number || "").trim();
+              const chosenNumber = prompt("Job number (leave blank for next available):", suggestedNumber);
+              if (chosenNumber === null) return;
+              const cleanedNumber = String(chosenNumber || "").trim();
+
+              const created = await apiPromoteLegacyJob(job.id, cleanedDate, cleanedNumber);
               alert(`Dispatch ${created.job_number || ""} created.`);
               drawerBody.innerHTML = "";
               const local = document.createElement("div");
@@ -3360,26 +3369,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             }
           });
 
-          const salesLeadBtn = document.createElement("button");
-          salesLeadBtn.className = "btn";
-          salesLeadBtn.textContent = "Import Sales Lead";
-          salesLeadBtn.addEventListener("click", async () => {
-            try {
-              const defaultDate = new Date().toISOString().slice(0, 10);
-              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
-              const created = await apiCreateSalesLeadFromLegacy(job.id, chosen);
-              alert(`Sales Lead ${created.job_number || ""} created.`);
-              drawerBody.innerHTML = "";
-              const local = document.createElement("div");
-              drawerBody.appendChild(local);
-              renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
-              await refresh();
-            } catch (e) {
-              alert(e.message || String(e));
-            }
-          });
-
-          actions.appendChild(salesLeadBtn);
           actions.appendChild(dispatchBtn);
           const mount = card.querySelector("#legacy_action_mount");
           if (mount) mount.appendChild(actions);
@@ -3420,50 +3409,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="jobrow-addr">${escapeHtml(j.date || j.date_display || "")} - ${escapeHtml(j.address || "")}</div>
           <div class="hint" style="margin-top:6px; font-weight:900;">Estimate: ${formatDocRefDisplay(estimate)} | Invoice: ${formatDocRefDisplay(invoice)} | PO: ${formatDocRefDisplay(poNumber)}</div>
         `;
-
-        if (sourceLabel !== "CURRENT") {
-          const actions = document.createElement("div");
-          actions.style.display = "flex";
-          actions.style.gap = "8px";
-          actions.style.marginTop = "8px";
-
-          const dispatchBtn = document.createElement("button");
-          dispatchBtn.className = "btn btn-orange";
-          dispatchBtn.textContent = "Import to Calendar";
-          dispatchBtn.addEventListener("click", async (ev) => {
-            ev.stopPropagation();
-            try {
-              const defaultDate = new Date().toISOString().slice(0, 10);
-              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
-              const created = await apiPromoteLegacyJob(j.id, chosen);
-              alert(`Dispatch ${created.job_number || ""} created.`);
-              await refresh();
-            } catch (e) {
-              alert(e.message || String(e));
-            }
-          });
-
-          const salesLeadBtn = document.createElement("button");
-          salesLeadBtn.className = "btn";
-          salesLeadBtn.textContent = "Import Sales Lead";
-          salesLeadBtn.addEventListener("click", async (ev) => {
-            ev.stopPropagation();
-            try {
-              const defaultDate = new Date().toISOString().slice(0, 10);
-              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
-              const created = await apiCreateSalesLeadFromLegacy(j.id, chosen);
-              alert(`Sales Lead ${created.job_number || ""} created.`);
-              await refresh();
-            } catch (e) {
-              alert(e.message || String(e));
-            }
-          });
-
-          actions.appendChild(dispatchBtn);
-          actions.appendChild(salesLeadBtn);
-          row.appendChild(actions);
-        }
-
         row.addEventListener("click", () => openAnyJobCard(j));
         list.appendChild(row);
       });
