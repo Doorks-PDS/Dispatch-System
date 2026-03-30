@@ -2776,6 +2776,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row4 = document.createElement("div");
         row4.className = "grid2";
         row4.innerHTML = `
+          <div><div class="label">Job / Lead #</div><input class="input" id="nj_job_number" placeholder="Leave blank for next number" /></div>
           <div><div class="label">PO #</div><input class="input" id="nj_po" placeholder="PO #" /></div>
           <div><div class="label">Estimate #</div><input class="input" id="nj_est" placeholder="Estimate #" /></div>
           <div><div class="label">Invoice #</div><input class="input" id="nj_inv" placeholder="Invoice #" /></div>
@@ -2903,6 +2904,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               phone: row2.querySelector("#nj_phone").value.trim(),
               email: row3.querySelector("#nj_email").value.trim(),
               office_notes: row3.querySelector("#nj_office_notes").value.trim(),
+              job_number: row4.querySelector("#nj_job_number").value.trim(),
               po_number: row4.querySelector("#nj_po").value.trim(),
               estimate_number: row4.querySelector("#nj_est").value.trim(),
               invoice_number: row4.querySelector("#nj_inv").value.trim(),
@@ -2984,6 +2986,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           card.innerHTML = `
             <h3 style="margin:0;">${escapeHtml(job.customer || job.customer_name || "Legacy Job")}</h3>
             <div class="hint" style="margin-top:6px;">${escapeHtml(job.job_number || "")}${job.date ? ` - ${escapeHtml(job.date)}` : ""}${job.source ? ` - ${escapeHtml(String(job.source).toUpperCase())}` : ""}</div>
+            <div id="legacy_action_mount" style="margin-top:12px;"></div>
             <div class="grid2" style="margin-top:12px;">
               <div><div class="label">Customer</div><div class="field">${escapeHtml(job.customer || job.customer_name || "")}</div></div>
               <div><div class="label">Job #</div><div class="field">${escapeHtml(job.job_number || "")}</div></div>
@@ -3004,11 +3007,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           actions.style.display = "flex";
           actions.style.gap = "8px";
           actions.style.marginTop = "12px";
+          actions.style.marginBottom = "12px";
           actions.style.justifyContent = "flex-end";
 
           const promoteBtn = document.createElement("button");
           promoteBtn.className = "btn btn-orange";
-          promoteBtn.textContent = "Create Dispatch";
+          promoteBtn.textContent = "Add to Calendar";
           promoteBtn.addEventListener("click", async () => {
             try {
               const defaultDate = new Date().toISOString().slice(0, 10);
@@ -3046,7 +3050,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
           actions.appendChild(leadBtn);
           actions.appendChild(promoteBtn);
-          card.appendChild(actions);
+          const mount = card.querySelector("#legacy_action_mount");
+          if (mount) mount.appendChild(actions);
 
           drawerBody.appendChild(card);
         });
@@ -3162,6 +3167,49 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           actionRow.appendChild(leadBtn);
           row.appendChild(actionRow);
         }
+        if (String(j.source || "").toUpperCase() && String(j.source || "").toUpperCase() !== "CURRENT") {
+          const actionRow = document.createElement("div");
+          actionRow.style.display = "flex";
+          actionRow.style.gap = "8px";
+          actionRow.style.marginTop = "8px";
+
+          const importBtn = document.createElement("button");
+          importBtn.className = "btn btn-orange";
+          importBtn.textContent = "Import to Calendar";
+          importBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiPromoteLegacyJob(j.id, chosen);
+              alert(`Dispatch ${created.job_number || ""} created.`);
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          const leadBtn = document.createElement("button");
+          leadBtn.className = "btn";
+          leadBtn.textContent = "Import Sales Lead";
+          leadBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiCreateSalesLeadFromLegacy(j.id, chosen);
+              alert(`Sales Lead ${created.job_number || ""} created.`);
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          actionRow.appendChild(importBtn);
+          actionRow.appendChild(leadBtn);
+          row.appendChild(actionRow);
+        }
+
         row.addEventListener("click", () => openAnyJobCard(j));
         list.appendChild(row);
       });
