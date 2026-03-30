@@ -475,6 +475,28 @@
   async function apiDeleteJob(jobId) {
     await fetchJSON(`/calendar/jobs/${jobId}`, { method: "DELETE" });
   }
+
+  async function apiPromoteLegacyJob(recordId, dateValue) {
+    const qs = new URLSearchParams();
+    if (dateValue) qs.set("date", dateValue);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const data = await fetchJSON(`/data/legacy/${encodeURIComponent(recordId)}/promote${suffix}`, {
+      method: "POST",
+    });
+    return data.job;
+  }
+
+  async function apiCreateSalesLeadFromLegacy(recordId, dateValue) {
+    const qs = new URLSearchParams();
+    if (dateValue) qs.set("date", dateValue);
+    qs.set("kind", "sales_lead");
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    const data = await fetchJSON(`/data/legacy/${encodeURIComponent(recordId)}/promote${suffix}`, {
+      method: "POST",
+    });
+    return data.job;
+  }
+
  
   async function apiAddCompletion(jobId, payload) {
     const data = await fetchJSON(`/calendar/jobs/${jobId}/completion`, {
@@ -2776,7 +2798,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row4 = document.createElement("div");
         row4.className = "grid2";
         row4.innerHTML = `
-          <div><div class="label">Job / Lead #</div><input class="input" id="nj_job_number" placeholder="Leave blank for next number" /></div>
           <div><div class="label">PO #</div><input class="input" id="nj_po" placeholder="PO #" /></div>
           <div><div class="label">Estimate #</div><input class="input" id="nj_est" placeholder="Estimate #" /></div>
           <div><div class="label">Invoice #</div><input class="input" id="nj_inv" placeholder="Invoice #" /></div>
@@ -2904,7 +2925,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               phone: row2.querySelector("#nj_phone").value.trim(),
               email: row3.querySelector("#nj_email").value.trim(),
               office_notes: row3.querySelector("#nj_office_notes").value.trim(),
-              job_number: row4.querySelector("#nj_job_number").value.trim(),
               po_number: row4.querySelector("#nj_po").value.trim(),
               estimate_number: row4.querySelector("#nj_est").value.trim(),
               invoice_number: row4.querySelector("#nj_inv").value.trim(),
@@ -2986,7 +3006,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           card.innerHTML = `
             <h3 style="margin:0;">${escapeHtml(job.customer || job.customer_name || "Legacy Job")}</h3>
             <div class="hint" style="margin-top:6px;">${escapeHtml(job.job_number || "")}${job.date ? ` - ${escapeHtml(job.date)}` : ""}${job.source ? ` - ${escapeHtml(String(job.source).toUpperCase())}` : ""}</div>
-            <div id="legacy_action_mount" style="margin-top:12px;"></div>
             <div class="grid2" style="margin-top:12px;">
               <div><div class="label">Customer</div><div class="field">${escapeHtml(job.customer || job.customer_name || "")}</div></div>
               <div><div class="label">Job #</div><div class="field">${escapeHtml(job.job_number || "")}</div></div>
@@ -3007,12 +3026,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           actions.style.display = "flex";
           actions.style.gap = "8px";
           actions.style.marginTop = "12px";
-          actions.style.marginBottom = "12px";
           actions.style.justifyContent = "flex-end";
 
           const promoteBtn = document.createElement("button");
           promoteBtn.className = "btn btn-orange";
-          promoteBtn.textContent = "Add to Calendar";
+          promoteBtn.textContent = "Create Dispatch";
           promoteBtn.addEventListener("click", async () => {
             try {
               const defaultDate = new Date().toISOString().slice(0, 10);
@@ -3050,8 +3068,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
           actions.appendChild(leadBtn);
           actions.appendChild(promoteBtn);
-          const mount = card.querySelector("#legacy_action_mount");
-          if (mount) mount.appendChild(actions);
+          card.appendChild(actions);
 
           drawerBody.appendChild(card);
         });
@@ -3167,49 +3184,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           actionRow.appendChild(leadBtn);
           row.appendChild(actionRow);
         }
-        if (String(j.source || "").toUpperCase() && String(j.source || "").toUpperCase() !== "CURRENT") {
-          const actionRow = document.createElement("div");
-          actionRow.style.display = "flex";
-          actionRow.style.gap = "8px";
-          actionRow.style.marginTop = "8px";
-
-          const importBtn = document.createElement("button");
-          importBtn.className = "btn btn-orange";
-          importBtn.textContent = "Import to Calendar";
-          importBtn.addEventListener("click", async (ev) => {
-            ev.stopPropagation();
-            try {
-              const defaultDate = new Date().toISOString().slice(0, 10);
-              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
-              const created = await apiPromoteLegacyJob(j.id, chosen);
-              alert(`Dispatch ${created.job_number || ""} created.`);
-              await refresh();
-            } catch (e) {
-              alert(e.message || String(e));
-            }
-          });
-
-          const leadBtn = document.createElement("button");
-          leadBtn.className = "btn";
-          leadBtn.textContent = "Import Sales Lead";
-          leadBtn.addEventListener("click", async (ev) => {
-            ev.stopPropagation();
-            try {
-              const defaultDate = new Date().toISOString().slice(0, 10);
-              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
-              const created = await apiCreateSalesLeadFromLegacy(j.id, chosen);
-              alert(`Sales Lead ${created.job_number || ""} created.`);
-              await refresh();
-            } catch (e) {
-              alert(e.message || String(e));
-            }
-          });
-
-          actionRow.appendChild(importBtn);
-          actionRow.appendChild(leadBtn);
-          row.appendChild(actionRow);
-        }
-
         row.addEventListener("click", () => openAnyJobCard(j));
         list.appendChild(row);
       });
@@ -3336,13 +3310,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
-      if (sourceLabel.startsWith("LEGACY") || !job.id) {
+      if ((sourceLabel && sourceLabel !== "CURRENT") || !job.id) {
         openDrawer(`Legacy Job ${job.job_number || "Details"}`, async (drawerBody) => {
           const card = document.createElement("div");
           card.className = "card";
           card.innerHTML = `
             <h3 style="margin:0;">${escapeHtml(job.customer || job.customer_name || "Legacy Job")}</h3>
             <div class="hint" style="margin-top:6px;">${escapeHtml(job.job_number || "")}${job.date ? ` - ${escapeHtml(job.date)}` : ""}${job.source ? ` - ${escapeHtml(String(job.source).toUpperCase())}` : ""}</div>
+            <div id="legacy_action_mount" style="margin-top:12px;"></div>
             <div class="grid2" style="margin-top:12px;">
               <div><div class="label">Customer</div><div class="field">${escapeHtml(job.customer || job.customer_name || "")}</div></div>
               <div><div class="label">Job #</div><div class="field">${escapeHtml(job.job_number || "")}</div></div>
@@ -3359,6 +3334,56 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div style="margin-top:10px;"><div class="label">Additional Recommendations</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.additional_recommendations || "")}</div></div>
             <div style="margin-top:10px;"><div class="label">Parts Used</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.parts_used || "")}</div></div>
           `;
+
+          const actions = document.createElement("div");
+          actions.style.display = "flex";
+          actions.style.gap = "8px";
+          actions.style.marginTop = "12px";
+          actions.style.justifyContent = "flex-end";
+
+          const dispatchBtn = document.createElement("button");
+          dispatchBtn.className = "btn btn-orange";
+          dispatchBtn.textContent = "Add to Calendar";
+          dispatchBtn.addEventListener("click", async () => {
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiPromoteLegacyJob(job.id, chosen);
+              alert(`Dispatch ${created.job_number || ""} created.`);
+              drawerBody.innerHTML = "";
+              const local = document.createElement("div");
+              drawerBody.appendChild(local);
+              renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          const salesLeadBtn = document.createElement("button");
+          salesLeadBtn.className = "btn";
+          salesLeadBtn.textContent = "Import Sales Lead";
+          salesLeadBtn.addEventListener("click", async () => {
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiCreateSalesLeadFromLegacy(job.id, chosen);
+              alert(`Sales Lead ${created.job_number || ""} created.`);
+              drawerBody.innerHTML = "";
+              const local = document.createElement("div");
+              drawerBody.appendChild(local);
+              renderJobDetails(local, created, { afterSave: refresh, afterDelete: refresh });
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          actions.appendChild(salesLeadBtn);
+          actions.appendChild(dispatchBtn);
+          const mount = card.querySelector("#legacy_action_mount");
+          if (mount) mount.appendChild(actions);
+
           drawerBody.appendChild(card);
         });
         return;
@@ -3385,6 +3410,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const customer = j.customer || j.customer_name || "Job";
         const estimate = cleanDocRef(j.estimate_number || j.estimate_no || "");
         const invoice = cleanDocRef(j.invoice_number || j.invoice_no || "");
+        const poNumber = cleanDocRef(j.po_number || j.po_no || "");
         const sourceLabel = j.source ? String(j.source).toUpperCase() : "CURRENT";
         row.innerHTML = `
           <div class="jobrow-top">
@@ -3392,8 +3418,52 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div style="display:flex; gap:8px; align-items:center;"><span class="badge">${escapeHtml(sourceLabel)}</span></div>
           </div>
           <div class="jobrow-addr">${escapeHtml(j.date || j.date_display || "")} - ${escapeHtml(j.address || "")}</div>
-          <div class="hint" style="margin-top:6px; font-weight:900;">Estimate: ${formatDocRefDisplay(estimate)} | Invoice: ${formatDocRefDisplay(invoice)} | PO: ${formatDocRefDisplay(j.po_number || j.po_no || "")}</div>
+          <div class="hint" style="margin-top:6px; font-weight:900;">Estimate: ${formatDocRefDisplay(estimate)} | Invoice: ${formatDocRefDisplay(invoice)} | PO: ${formatDocRefDisplay(poNumber)}</div>
         `;
+
+        if (sourceLabel !== "CURRENT") {
+          const actions = document.createElement("div");
+          actions.style.display = "flex";
+          actions.style.gap = "8px";
+          actions.style.marginTop = "8px";
+
+          const dispatchBtn = document.createElement("button");
+          dispatchBtn.className = "btn btn-orange";
+          dispatchBtn.textContent = "Import to Calendar";
+          dispatchBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Dispatch date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiPromoteLegacyJob(j.id, chosen);
+              alert(`Dispatch ${created.job_number || ""} created.`);
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          const salesLeadBtn = document.createElement("button");
+          salesLeadBtn.className = "btn";
+          salesLeadBtn.textContent = "Import Sales Lead";
+          salesLeadBtn.addEventListener("click", async (ev) => {
+            ev.stopPropagation();
+            try {
+              const defaultDate = new Date().toISOString().slice(0, 10);
+              const chosen = prompt("Sales Lead date (YYYY-MM-DD):", defaultDate) || defaultDate;
+              const created = await apiCreateSalesLeadFromLegacy(j.id, chosen);
+              alert(`Sales Lead ${created.job_number || ""} created.`);
+              await refresh();
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+
+          actions.appendChild(dispatchBtn);
+          actions.appendChild(salesLeadBtn);
+          row.appendChild(actions);
+        }
+
         row.addEventListener("click", () => openAnyJobCard(j));
         list.appendChild(row);
       });
