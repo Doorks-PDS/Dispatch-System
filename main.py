@@ -15,20 +15,6 @@ from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
 from starlette.responses import FileResponse
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-REPO_DATA_DIR = get_repo_data_dir(PROJECT_ROOT)
-DATA_DIR = get_writable_data_dir(PROJECT_ROOT)
-FORMS_DIR = REPO_DATA_DIR / "forms"
-UPLOADS_DIR = DATA_DIR / "uploads"
-STATIC_DIR = PROJECT_ROOT / "static"
-TEMPLATES_DIR = PROJECT_ROOT / "templates"
-
-DATA_DIR.mkdir(parents=True, exist_ok=True)
-FORMS_DIR.mkdir(parents=True, exist_ok=True)
-UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
-STATIC_DIR.mkdir(parents=True, exist_ok=True)
-TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
-
 from app.services.atlas_chat import handle_chat
 from app.services.storage import get_repo_data_dir, get_writable_data_dir
 
@@ -68,6 +54,21 @@ from app.routers.data import router as data_router
 from app.routers.auth import router as auth_router
 from app.routers.admin import router as admin_router
 from app.services.user_store import UsersStore
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+REPO_DATA_DIR = get_repo_data_dir(PROJECT_ROOT)
+DATA_DIR = get_writable_data_dir(PROJECT_ROOT)
+FORMS_DIR = REPO_DATA_DIR / "forms"
+UPLOADS_DIR = DATA_DIR / "uploads"
+STATIC_DIR = PROJECT_ROOT / "static"
+TEMPLATES_DIR = PROJECT_ROOT / "templates"
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+FORMS_DIR.mkdir(parents=True, exist_ok=True)
+UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
+STATIC_DIR.mkdir(parents=True, exist_ok=True)
+TEMPLATES_DIR.mkdir(parents=True, exist_ok=True)
 
 TECH_KEYS = {os.getenv("DOORKS_TECH_KEY", "tech123")}
 OFFICE_KEYS = {os.getenv("DOORKS_OFFICE_KEY", "office123")}
@@ -224,7 +225,6 @@ app.add_middleware(
     https_only=False,
     max_age=60 * 60 * 12,
 )
-
 
 
 class ChatRequest(BaseModel):
