@@ -4,6 +4,8 @@ import base64
 import hashlib
 import hmac
 import json
+import os
+import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,9 +27,35 @@ def _read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except Exception:
+            pass
+
+
 def _write_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+    backup = path.with_suffix(path.suffix + ".bak")
+    text = json.dumps(obj, indent=2, ensure_ascii=False)
+
+    try:
+        if path.exists():
+            backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        pass
+
+    _atomic_write_text(path, text)
 
 
 class UsersStore:
@@ -37,29 +65,48 @@ class UsersStore:
         root = Path(project_root)
         self.project_root = root if root.is_dir() else root.parent
         self.path = bootstrap_data_file(self.project_root, "users.json")
+        self.backup_path = self.path.with_suffix(self.path.suffix + ".bak")
         self._ensure()
 
-    def _ensure(self) -> None:
-        base = {"version": 1, "items": []}
-        cur = _read_json(self.path, base)
-        if not isinstance(cur, dict):
-            cur = base
-        cur.setdefault("version", 1)
-        if not isinstance(cur.get("items"), list):
-            cur["items"] = []
-        _write_json(self.path, cur)
+    def _empty_payload(self) -> Dict[str, Any]:
+        return {"version": 1, "items": []}
 
-    def _load(self) -> Dict[str, Any]:
-        self._ensure()
-        data = _read_json(self.path, {"version": 1, "items": []})
+    def _normalize_payload(self, data: Any) -> Dict[str, Any]:
         if not isinstance(data, dict):
-            return {"version": 1, "items": []}
+            data = self._empty_payload()
+        data.setdefault("version", 1)
         if not isinstance(data.get("items"), list):
             data["items"] = []
         return data
 
+    def _recover_if_needed(self) -> Dict[str, Any]:
+        current = _read_json(self.path, None)
+        if isinstance(current, dict) and isinstance(current.get("items"), list):
+            return self._normalize_payload(current)
+
+        backup = _read_json(self.backup_path, None)
+        if isinstance(backup, dict) and isinstance(backup.get("items"), list):
+            normalized = self._normalize_payload(backup)
+            _write_json(self.path, normalized)
+            return normalized
+
+        fresh = self._empty_payload()
+        _write_json(self.path, fresh)
+        return fresh
+
+    def _ensure(self) -> None:
+        data = self._recover_if_needed()
+        _write_json(self.path, self._normalize_payload(data))
+
+    def _load(self) -> Dict[str, Any]:
+        self._ensure()
+        data = _read_json(self.path, None)
+        if not isinstance(data, dict):
+            data = _read_json(self.backup_path, self._empty_payload())
+        return self._normalize_payload(data)
+
     def _save(self, data: Dict[str, Any]) -> None:
-        _write_json(self.path, data)
+        _write_json(self.path, self._normalize_payload(data))
 
     def _sanitize(self, item: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -86,10 +133,29 @@ class UsersStore:
                 return item
         return None
 
-    def ensure_seed_user(self, *, username: str, name: str, email: str, password_hash: str, pin_hash: Optional[str] = None, role: str = "office_admin") -> Dict[str, Any]:
+    def _active_admin_count(self, items: List[Dict[str, Any]]) -> int:
+        return sum(
+            1
+            for item in items
+            if isinstance(item, dict)
+            and str(item.get("role") or "") == "office_admin"
+            and bool(item.get("active", True))
+        )
+
+    def ensure_seed_user(
+        self,
+        *,
+        username: str,
+        name: str,
+        email: str,
+        password_hash: str,
+        pin_hash: Optional[str] = None,
+        role: str = "office_admin",
+    ) -> Dict[str, Any]:
         data = self._load()
         items = data.get("items", [])
         existing = self._find_by_username(items, username)
+
         if existing is None:
             existing = {
                 "id": uuid.uuid4().hex,
@@ -120,6 +186,7 @@ class UsersStore:
         existing["updated_at"] = _now_iso()
         if not existing.get("created_at"):
             existing["created_at"] = _now_iso()
+
         data["items"] = items
         self._save(data)
         return self._sanitize(existing)
@@ -155,6 +222,7 @@ class UsersStore:
             return self._sanitize(item)
         if stored_pin_hash and not verify_password(pin or "", stored_pin_hash):
             return None
+
         item["updated_at"] = _now_iso()
         data = self._load()
         items = data.get("items", [])
@@ -165,16 +233,28 @@ class UsersStore:
             self._save(data)
         return self._sanitize(item)
 
-    def create_user(self, *, username: str, name: str, email: str, role: str, password: str, pin: str, active: bool = True) -> Dict[str, Any]:
+    def create_user(
+        self,
+        *,
+        username: str,
+        name: str,
+        email: str,
+        role: str,
+        password: str,
+        pin: str,
+        active: bool = True,
+    ) -> Dict[str, Any]:
         username = (username or "").strip()
         if not username:
             raise ValueError("Username is required")
         if role not in self.ROLES:
             raise ValueError("Invalid role")
+
         data = self._load()
         items = data.get("items", [])
         if self._find_by_username(items, username):
             raise ValueError("Username already exists")
+
         now = _now_iso()
         item = {
             "id": uuid.uuid4().hex,
@@ -193,13 +273,26 @@ class UsersStore:
         self._save(data)
         return self._sanitize(item)
 
-    def update_user(self, user_id: str, *, username: Optional[str] = None, name: Optional[str] = None, email: Optional[str] = None, role: Optional[str] = None, active: Optional[bool] = None) -> Optional[Dict[str, Any]]:
+    def update_user(
+        self,
+        user_id: str,
+        *,
+        username: Optional[str] = None,
+        name: Optional[str] = None,
+        email: Optional[str] = None,
+        role: Optional[str] = None,
+        active: Optional[bool] = None,
+    ) -> Optional[Dict[str, Any]]:
         data = self._load()
         items = data.get("items", [])
         idx = self._find_index(items, user_id)
         if idx < 0:
             return None
+
         item = items[idx]
+        old_role = str(item.get("role") or "")
+        old_active = bool(item.get("active", True))
+
         if username is not None:
             uname = username.strip()
             if not uname:
@@ -208,16 +301,28 @@ class UsersStore:
             if other and str(other.get("id")) != str(user_id):
                 raise ValueError("Username already exists")
             item["username"] = uname
+
         if name is not None:
             item["name"] = name.strip()
+
         if email is not None:
             item["email"] = email.strip()
+
         if role is not None:
             if role not in self.ROLES:
                 raise ValueError("Invalid role")
+            if old_role == "office_admin" and role != "office_admin" and old_active:
+                if self._active_admin_count(items) <= 1:
+                    raise ValueError("You cannot change the last active office admin to another role")
             item["role"] = role
+
         if active is not None:
-            item["active"] = bool(active)
+            next_active = bool(active)
+            if old_role == "office_admin" and old_active and not next_active:
+                if self._active_admin_count(items) <= 1:
+                    raise ValueError("You cannot disable the last active office admin")
+            item["active"] = next_active
+
         item["updated_at"] = _now_iso()
         items[idx] = item
         data["items"] = items
@@ -259,10 +364,16 @@ class UsersStore:
     def delete_user(self, user_id: str) -> bool:
         data = self._load()
         items = data.get("items", [])
-        before = len(items)
-        items = [x for x in items if not (isinstance(x, dict) and str(x.get("id", "")) == str(user_id))]
-        if len(items) == before:
+        idx = self._find_index(items, user_id)
+        if idx < 0:
             return False
+
+        target = items[idx]
+        if str(target.get("role") or "") == "office_admin" and bool(target.get("active", True)):
+            if self._active_admin_count(items) <= 1:
+                raise ValueError("You cannot delete the last active office admin")
+
+        items = [x for x in items if not (isinstance(x, dict) and str(x.get("id", "")) == str(user_id))]
         data["items"] = items
         self._save(data)
         return True

@@ -217,7 +217,10 @@ def delete_user(user_id: str, request: Request):
     current = _require_admin(request)
     if str(current.get("id") or "") == str(user_id):
         raise HTTPException(status_code=400, detail="You cannot delete your own account")
-    ok = _store(request).delete_user(user_id)
+    try:
+        ok = _store(request).delete_user(user_id)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not ok:
         raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True}
