@@ -5072,34 +5072,34 @@ function renderEmployeesView() {
           `;
           roleSel.value = u.role || "tech";
 
-          const editBtn = document.createElement("button");
-          editBtn.className = "btn";
-          editBtn.textContent = "Edit User";
-          editBtn.addEventListener("click", async () => {
-            try {
-              const nextName = prompt(`Full name for ${u.username || u.name}:`, u.name || "");
-              if (nextName === null) return;
-              const nextUsername = prompt(`Username for ${u.name || u.username}:`, u.username || "");
-              if (nextUsername === null) return;
-              const nextEmail = prompt(`Email for ${u.name || u.username}:`, u.email || "");
-              if (nextEmail === null) return;
-              await apiUpdateAuthUser(u.id, {
-                name: nextName.trim(),
-                username: nextUsername.trim(),
-                email: nextEmail.trim(),
-                role: roleSel.value,
-                active: u.active !== false,
-              });
-              await refresh();
-            } catch (err) { alert(err.message || String(err)); }
-          });
-
           const saveRole = document.createElement("button");
           saveRole.className = "btn";
           saveRole.textContent = "Save Role";
           saveRole.addEventListener("click", async () => {
             try {
               await apiUpdateAuthUser(u.id, { role: roleSel.value, active: u.active !== false });
+              await refresh();
+            } catch (err) { alert(err.message || String(err)); }
+          });
+
+          const editUser = document.createElement("button");
+          editUser.className = "btn";
+          editUser.textContent = "Edit User";
+          editUser.addEventListener("click", async () => {
+            const nextName = prompt(`Edit full name for ${u.username || u.name}:`, u.name || "");
+            if (nextName === null) return;
+            const nextUsername = prompt(`Edit username for ${u.name || u.username}:`, u.username || "");
+            if (nextUsername === null) return;
+            const nextEmail = prompt(`Edit email for ${u.username || u.name}:`, u.email || "");
+            if (nextEmail === null) return;
+            try {
+              await apiUpdateAuthUser(u.id, {
+                name: String(nextName || "").trim(),
+                username: String(nextUsername || "").trim(),
+                email: String(nextEmail || "").trim(),
+                role: roleSel.value,
+                active: u.active !== false,
+              });
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
           });
@@ -5152,8 +5152,8 @@ function renderEmployeesView() {
           });
 
           btnRow.appendChild(roleSel);
-          btnRow.appendChild(editBtn);
           btnRow.appendChild(saveRole);
+          btnRow.appendChild(editUser);
           btnRow.appendChild(resetPw);
           btnRow.appendChild(resetPin);
           btnRow.appendChild(toggle);
@@ -5195,31 +5195,29 @@ function renderEmployeesView() {
           a.style.display = "flex";
           a.style.gap = "8px";
           a.style.marginTop = "8px";
-
-          const edit = document.createElement("button");
-          edit.className = "btn";
-          edit.textContent = "Edit Employee";
-          edit.addEventListener("click", async () => {
+          const editEmp = document.createElement("button");
+          editEmp.className = "btn";
+          editEmp.textContent = "Edit Employee";
+          editEmp.addEventListener("click", async () => {
+            const nextName = prompt("Employee name:", e.name || "");
+            if (nextName === null) return;
+            const nextPhone = prompt("Employee phone:", e.phone || "");
+            if (nextPhone === null) return;
+            const nextEmail = prompt("Employee email:", e.email || "");
+            if (nextEmail === null) return;
+            const nextAddress = prompt("Employee address:", e.address || "");
+            if (nextAddress === null) return;
             try {
-              const nextName = prompt("Employee name:", e.name || "");
-              if (nextName === null) return;
-              const nextPhone = prompt(`Phone for ${e.name || "employee"}:`, e.phone || "");
-              if (nextPhone === null) return;
-              const nextEmail = prompt(`Email for ${e.name || "employee"}:`, e.email || "");
-              if (nextEmail === null) return;
-              const nextAddress = prompt(`Address for ${e.name || "employee"}:`, e.address || "");
-              if (nextAddress === null) return;
               await apiUpdateEmployee(e.id, {
-                name: nextName.trim(),
-                phone: nextPhone.trim(),
-                email: nextEmail.trim(),
-                address: nextAddress.trim(),
+                name: String(nextName || "").trim(),
+                phone: String(nextPhone || "").trim(),
+                email: String(nextEmail || "").trim(),
+                address: String(nextAddress || "").trim(),
                 role: e.role || "tech",
               });
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
           });
-
           const del = document.createElement("button");
           del.className = "btn";
           del.textContent = "Delete Employee";
@@ -5232,7 +5230,7 @@ function renderEmployeesView() {
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
           });
-          a.appendChild(edit);
+          a.appendChild(editEmp);
           a.appendChild(del);
           row.appendChild(top);
           row.appendChild(meta);
