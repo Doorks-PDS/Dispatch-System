@@ -28,28 +28,59 @@ class EmployeeCreate(BaseModel):
 @router.get("")
 def list_employees(request: Request, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    items = list(_store(request).list())
+    base_items = list(_store(request).list())
     users_store = getattr(request.app.state, "users_store", None)
+
+    def _norm(value: object) -> str:
+        return str(value or "").strip().lower()
+
+    items = []
+    by_key = {}
+
+    for item in base_items:
+        if not isinstance(item, dict):
+            continue
+        merged = dict(item)
+        name_key = _norm(merged.get("name"))
+        email_key = _norm(merged.get("email"))
+        key = (email_key or name_key)
+        if key:
+            by_key[key] = merged
+        items.append(merged)
+
     if users_store:
-        seen = {str((x.get("name") or "")).strip().lower() for x in items if isinstance(x, dict)}
         for user in users_store.list_users():
             if not isinstance(user, dict):
                 continue
             name = str(user.get("name") or user.get("username") or "").strip()
             if not name:
                 continue
-            key = name.lower()
-            if key in seen:
+            email = str(user.get("email") or "").strip()
+            key = (_norm(email) or _norm(name))
+            existing = by_key.get(key)
+            if existing is not None:
+                existing["role"] = user.get("role", existing.get("role", "tech"))
+                existing["email"] = email or str(existing.get("email") or "")
+                existing["login_user_id"] = user.get("id", "")
+                existing["login_active"] = bool(user.get("active", True))
+                existing["login_username"] = user.get("username", "")
                 continue
-            items.append({
+
+            merged = {
                 "id": user.get("id", ""),
                 "name": name,
                 "role": user.get("role", "tech"),
                 "phone": "",
-                "email": str(user.get("email") or ""),
+                "email": email,
                 "address": "",
-            })
-            seen.add(key)
+                "login_user_id": user.get("id", ""),
+                "login_active": bool(user.get("active", True)),
+                "login_username": user.get("username", ""),
+            }
+            items.append(merged)
+            if key:
+                by_key[key] = merged
+
     items.sort(key=lambda x: str((x.get("name") or "")).lower())
     return {"ok": True, "items": items}
 

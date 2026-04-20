@@ -3,6 +3,9 @@ from __future__ import annotations
 import json
 import csv
 import uuid
+import os
+import tempfile
+import threading
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,9 +32,33 @@ def _read_json(path: Path, default: Any) -> Any:
         return default
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except Exception:
+            pass
+
+
 def _write_json(path: Path, obj: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+    backup = path.with_suffix(path.suffix + ".bak")
+    text = json.dumps(obj, indent=2, ensure_ascii=False)
+    try:
+        if path.exists():
+            backup.write_text(path.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        pass
+    _atomic_write_text(path, text)
 
 
 def _read_csv_rows(path: Path) -> List[Dict[str, Any]]:
@@ -123,6 +150,8 @@ class CalendarStore:
         self.billable_time_csv = first_existing_data_path(self.project_root, "billable_time.csv")
         self.tech_notes_csv = first_existing_data_path(self.project_root, "tech_notes.csv")
         self.upload_root = bootstrap_data_dir(self.project_root, "calendar", "uploads")
+        self.backup_path = self.path.with_suffix(self.path.suffix + ".bak")
+        self._lock = threading.RLock()
         self._ensure_schema()
 
     def _base_schema(self) -> Dict[str, Any]:
@@ -451,7 +480,8 @@ class CalendarStore:
         return self._next_dispatch_job_number(data, date_yyyy_mm_dd)
 
     def create_job(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         kind = str(payload.get("kind") or "dispatch").strip().lower()
@@ -517,7 +547,8 @@ class CalendarStore:
         return job
 
     def update_job(self, job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         idx = None
@@ -593,7 +624,8 @@ class CalendarStore:
         return j
 
     def delete_job(self, job_id: str) -> None:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
         removed: Optional[Dict[str, Any]] = None
         kept = []
@@ -618,7 +650,8 @@ class CalendarStore:
         self._save(data)
 
     def start_check_in(self, job_id: str) -> Dict[str, Any]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         for i, j in enumerate(jobs):
@@ -634,7 +667,8 @@ class CalendarStore:
         raise KeyError("Job not found")
 
     def stop_check_in(self, job_id: str) -> Dict[str, Any]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         for i, j in enumerate(jobs):
@@ -649,7 +683,8 @@ class CalendarStore:
         raise KeyError("Job not found")
 
     def add_completion_form(self, job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         for i, j in enumerate(jobs):
@@ -719,7 +754,8 @@ class CalendarStore:
         raise KeyError("Job not found")
 
     def update_completion_form(self, job_id: str, form_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         for i, j in enumerate(jobs):
@@ -786,7 +822,8 @@ class CalendarStore:
         raise KeyError("Completion form not found")
 
     def add_job_attachments(self, job_id: str, files: List[Tuple[str, bytes]]) -> List[Dict[str, Any]]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         for i, j in enumerate(jobs):
@@ -814,7 +851,8 @@ class CalendarStore:
         raise KeyError("Job not found")
 
     def add_completion_attachments(self, job_id: str, form_id: str, files: List[Tuple[str, bytes]]) -> List[Dict[str, Any]]:
-        data = self._load()
+        with self._lock:
+            data = self._load()
         jobs = data["jobs"]
 
         for i, j in enumerate(jobs):

@@ -206,7 +206,10 @@ def update_active(user_id: str, payload: ActiveUpdateRequest, request: Request):
     current = _require_admin(request)
     if str(current.get("id") or "") == str(user_id) and payload.active is False:
         raise HTTPException(status_code=400, detail="You cannot disable your own account")
-    item = _store(request).set_active(user_id, payload.active)
+    try:
+        item = _store(request).set_active(user_id, payload.active)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     if not item:
         raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True, "item": _sanitize(item)}
