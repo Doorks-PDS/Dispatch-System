@@ -1,0 +1,107 @@
+import pandas as pd
+import math
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+from app.services.trick_store import add_pending
+import math
+
+
+class AtlasSearch:
+    def __init__(self, df, text_column="notes"):
+        self.df = df
+        self.text_column = text_column
+
+        # Normalize text
+        self.df[self.text_column] = (
+            self.df[self.text_column]
+            .fillna("")
+            .astype(str)
+        )
+
+        self.vectorizer = TfidfVectorizer(
+            stop_words="english",
+            max_features=5000
+        )
+
+        self.tfidf_matrix = self.vectorizer.fit_transform(
+            self.df[self.text_column]
+        )
+
+    # -------------------------
+    # Utility: JSON-safe values
+    # -------------------------
+    def _safe_value(self, value):
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            if math.isnan(value) or math.isinf(value):
+                return 0.0
+        return value
+
+    # -------------------------
+    # Main search
+    # -------------------------
+    def search(self, query, top_k=5):
+        query_vec = self.vectorizer.transform([query])
+        similarity = cosine_similarity(query_vec, self.tfidf_matrix).flatten()
+
+        # Frequency: how many records are meaningfully similar
+        freq_threshold = 0.25
+        frequency = int((similarity > freq_threshold).sum())
+
+        top_indices = similarity.argsort()[-top_k:][::-1]
+
+        scores = []
+        results = []
+
+        for idx in top_indices:
+            score = float(similarity[idx])
+            if score <= 0:
+                continue
+
+            scores.append(score)
+
+            row = {
+                k: self._safe_value(v)
+                for k, v in self.df.iloc[idx].to_dict().items()
+            }
+
+            results.append({
+                "score": round(score, 3),
+                "record": row
+            })
+
+        # -------------------------
+        # Confidence calculation
+        # -------------------------
+        avg_similarity = sum(scores) / len(scores) if scores else 0.0
+        frequency_score = min(frequency / 100, 1.0)
+
+        confidence = min(
+            1.0,
+            (avg_similarity * 0.7) + (frequency_score * 0.3)
+        )
+
+        # Status classification
+        if confidence >= 0.85 and frequency >= 100:
+            status = "trick_of_the_trade"
+        elif confidence >= 0.60:
+            status = "pending_admin_review"
+        else:
+            status = "ignore"
+        if status == "pending_admin_review":
+            add_pending({
+                "query": query,
+                "confidence": round(confidence, 3),
+                "frequency": frequency,
+                "matches": results[:3]  # keep it lightweight
+            })
+
+        return {
+            "query": query,
+            "confidence": round(confidence, 3),
+            "frequency": frequency,
+            "status": status,
+            "matches": results
+        }
+

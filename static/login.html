@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Doorks — Login</title>
+  <link rel="stylesheet" href="/static/style.css"/>
+</head>
+<body>
+  <div class="centerWrap">
+    <div style="display:flex; justify-content:center; margin-bottom:18px;">
+      <div class="brandBubble">
+        <div class="logoCircle" aria-hidden="true">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+            <path d="M7 3h9a2 2 0 0 1 2 2v16H7V3z" stroke="rgba(255,154,61,.95)" stroke-width="2"/>
+            <path d="M7 21H5V3h2" stroke="rgba(255,154,61,.95)" stroke-width="2"/>
+            <circle cx="14.5" cy="12" r="1" fill="rgba(255,154,61,.95)"/>
+          </svg>
+        </div>
+        <div>
+          <div class="doorks">DOORKS</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="loginCard">
+      <div class="titleBlock">
+        <div class="h1">Login</div>
+        <div class="h2">Choose Tech or Office and enter your key</div>
+      </div>
+
+      <label class="field">
+        <span>Role</span>
+        <select id="role">
+          <option value="tech">Tech (Atlas)</option>
+          <option value="office">Office (Moses)</option>
+        </select>
+      </label>
+
+      <label class="field">
+        <span>API Key</span>
+        <input id="apiKey" type="password" placeholder="tech123 or office123"/>
+      </label>
+
+      <div class="loginRow">
+        <button class="btn primary" id="goBtn">Enter Doorks</button>
+        <div class="smallMuted">Tip: Enter = send in chat, Shift+Enter new line</div>
+      </div>
+
+      <div id="msg" class="status"></div>
+    </div>
+  </div>
+
+  <script>
+    const apiKeyKey = "doorks_api_key";
+    const roleKey = "doorks_role";
+
+    const role = document.getElementById("role");
+    const apiKey = document.getElementById("apiKey");
+    const msg = document.getElementById("msg");
+
+    // preload
+    role.value = localStorage.getItem(roleKey) || "tech";
+    apiKey.value = localStorage.getItem(apiKeyKey) || (role.value === "office" ? "office123" : "tech123");
+
+    role.addEventListener("change", ()=>{
+      if(!localStorage.getItem(apiKeyKey)){
+        apiKey.value = (role.value === "office" ? "office123" : "tech123");
+      }
+    });
+
+    document.getElementById("goBtn").addEventListener("click", async ()=>{
+      const r = role.value;
+      const k = (apiKey.value || "").trim();
+      if(!k){
+        msg.textContent = "Enter your API key.";
+        return;
+      }
+      localStorage.setItem(roleKey, r);
+      localStorage.setItem(apiKeyKey, k);
+      window.location.href = (r === "office") ? "/ui/moses" : "/ui";
+    });
+  </script>
+</body>
+</html>
