@@ -25,62 +25,61 @@ class EmployeeCreate(BaseModel):
     password: str = ""
 
 
+class EmployeeUpdate(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+    address: Optional[str] = None
+
+
 @router.get("")
 def list_employees(request: Request, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    base_items = list(_store(request).list())
+    items = list(_store(request).list())
     users_store = getattr(request.app.state, "users_store", None)
-
-    def _norm(value: object) -> str:
-        return str(value or "").strip().lower()
-
-    items = []
-    by_key = {}
-
-    for item in base_items:
-        if not isinstance(item, dict):
-            continue
-        merged = dict(item)
-        name_key = _norm(merged.get("name"))
-        email_key = _norm(merged.get("email"))
-        key = (email_key or name_key)
-        if key:
-            by_key[key] = merged
-        items.append(merged)
-
     if users_store:
+        user_map = {}
         for user in users_store.list_users():
             if not isinstance(user, dict):
                 continue
             name = str(user.get("name") or user.get("username") or "").strip()
             if not name:
                 continue
-            email = str(user.get("email") or "").strip()
-            key = (_norm(email) or _norm(name))
-            existing = by_key.get(key)
-            if existing is not None:
-                existing["role"] = user.get("role", existing.get("role", "tech"))
-                existing["email"] = email or str(existing.get("email") or "")
-                existing["login_user_id"] = user.get("id", "")
-                existing["login_active"] = bool(user.get("active", True))
-                existing["login_username"] = user.get("username", "")
-                continue
+            user_map[name.lower()] = user
 
-            merged = {
+        seen = set()
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            key = str((item.get("name") or "")).strip().lower()
+            if not key:
+                continue
+            seen.add(key)
+            user = user_map.get(key)
+            if user:
+                item["role"] = user.get("role", item.get("role", "tech"))
+                if user.get("email"):
+                    item["email"] = str(user.get("email") or item.get("email") or "")
+                item["login_user_id"] = user.get("id", "")
+                item["login_username"] = user.get("username", "")
+                item["login_active"] = bool(user.get("active", True))
+
+        for key, user in user_map.items():
+            if key in seen:
+                continue
+            name = str(user.get("name") or user.get("username") or "").strip()
+            items.append({
                 "id": user.get("id", ""),
                 "name": name,
                 "role": user.get("role", "tech"),
                 "phone": "",
-                "email": email,
+                "email": str(user.get("email") or ""),
                 "address": "",
                 "login_user_id": user.get("id", ""),
-                "login_active": bool(user.get("active", True)),
                 "login_username": user.get("username", ""),
-            }
-            items.append(merged)
-            if key:
-                by_key[key] = merged
-
+                "login_active": bool(user.get("active", True)),
+            })
     items.sort(key=lambda x: str((x.get("name") or "")).lower())
     return {"ok": True, "items": items}
 
@@ -92,6 +91,18 @@ def create_employee(request: Request, payload: EmployeeCreate, x_api_key: Option
         item = _store(request).create(payload.dict())
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return {"ok": True, "item": item}
+
+
+@router.put("/{emp_id}")
+def update_employee(request: Request, emp_id: str, payload: EmployeeUpdate, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    try:
+        item = _store(request).update(emp_id, payload.dict(exclude_unset=True))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not item:
+        raise HTTPException(status_code=404, detail="Employee not found")
     return {"ok": True, "item": item}
 
 

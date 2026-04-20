@@ -5072,6 +5072,28 @@ function renderEmployeesView() {
           `;
           roleSel.value = u.role || "tech";
 
+          const editBtn = document.createElement("button");
+          editBtn.className = "btn";
+          editBtn.textContent = "Edit User";
+          editBtn.addEventListener("click", async () => {
+            try {
+              const nextName = prompt(`Full name for ${u.username || u.name}:`, u.name || "");
+              if (nextName === null) return;
+              const nextUsername = prompt(`Username for ${u.name || u.username}:`, u.username || "");
+              if (nextUsername === null) return;
+              const nextEmail = prompt(`Email for ${u.name || u.username}:`, u.email || "");
+              if (nextEmail === null) return;
+              await apiUpdateAuthUser(u.id, {
+                name: nextName.trim(),
+                username: nextUsername.trim(),
+                email: nextEmail.trim(),
+                role: roleSel.value,
+                active: u.active !== false,
+              });
+              await refresh();
+            } catch (err) { alert(err.message || String(err)); }
+          });
+
           const saveRole = document.createElement("button");
           saveRole.className = "btn";
           saveRole.textContent = "Save Role";
@@ -5130,6 +5152,7 @@ function renderEmployeesView() {
           });
 
           btnRow.appendChild(roleSel);
+          btnRow.appendChild(editBtn);
           btnRow.appendChild(saveRole);
           btnRow.appendChild(resetPw);
           btnRow.appendChild(resetPin);
@@ -5172,6 +5195,31 @@ function renderEmployeesView() {
           a.style.display = "flex";
           a.style.gap = "8px";
           a.style.marginTop = "8px";
+
+          const edit = document.createElement("button");
+          edit.className = "btn";
+          edit.textContent = "Edit Employee";
+          edit.addEventListener("click", async () => {
+            try {
+              const nextName = prompt("Employee name:", e.name || "");
+              if (nextName === null) return;
+              const nextPhone = prompt(`Phone for ${e.name || "employee"}:`, e.phone || "");
+              if (nextPhone === null) return;
+              const nextEmail = prompt(`Email for ${e.name || "employee"}:`, e.email || "");
+              if (nextEmail === null) return;
+              const nextAddress = prompt(`Address for ${e.name || "employee"}:`, e.address || "");
+              if (nextAddress === null) return;
+              await apiUpdateEmployee(e.id, {
+                name: nextName.trim(),
+                phone: nextPhone.trim(),
+                email: nextEmail.trim(),
+                address: nextAddress.trim(),
+                role: e.role || "tech",
+              });
+              await refresh();
+            } catch (err) { alert(err.message || String(err)); }
+          });
+
           const del = document.createElement("button");
           del.className = "btn";
           del.textContent = "Delete Employee";
@@ -5184,6 +5232,7 @@ function renderEmployeesView() {
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
           });
+          a.appendChild(edit);
           a.appendChild(del);
           row.appendChild(top);
           row.appendChild(meta);
