@@ -617,6 +617,15 @@
     await fetchJSON(`/employees/${id}`, { method: "DELETE" });
   }
 
+  async function apiUpdateEmployee(id, payload) {
+    const data = await fetchJSON(`/employees/${id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    return data.item;
+  }
+
   async function apiListAuthUsers() {
     const data = await fetchJSON("/auth/users");
     return data.items || [];
@@ -5086,11 +5095,11 @@ function renderEmployeesView() {
           editUser.className = "btn";
           editUser.textContent = "Edit User";
           editUser.addEventListener("click", async () => {
-            const nextName = prompt(`Edit full name for ${u.username || u.name}:`, u.name || "");
+            const nextName = prompt(`Full name for ${u.username || u.name}:`, u.name || "");
             if (nextName === null) return;
-            const nextUsername = prompt(`Edit username for ${u.name || u.username}:`, u.username || "");
+            const nextUsername = prompt(`Username for ${u.name || u.username}:`, u.username || "");
             if (nextUsername === null) return;
-            const nextEmail = prompt(`Edit email for ${u.username || u.name}:`, u.email || "");
+            const nextEmail = prompt(`Email for ${u.name || u.username}:`, u.email || "");
             if (nextEmail === null) return;
             try {
               await apiUpdateAuthUser(u.id, {
@@ -5195,12 +5204,16 @@ function renderEmployeesView() {
           a.style.display = "flex";
           a.style.gap = "8px";
           a.style.marginTop = "8px";
-          const editEmp = document.createElement("button");
-          editEmp.className = "btn";
-          editEmp.textContent = "Edit Employee";
-          editEmp.addEventListener("click", async () => {
+          a.style.flexWrap = "wrap";
+
+          const edit = document.createElement("button");
+          edit.className = "btn";
+          edit.textContent = "Edit Employee";
+          edit.addEventListener("click", async () => {
             const nextName = prompt("Employee name:", e.name || "");
             if (nextName === null) return;
+            const nextRole = prompt("Employee role (tech, lead, office, office_admin):", e.role || "tech");
+            if (nextRole === null) return;
             const nextPhone = prompt("Employee phone:", e.phone || "");
             if (nextPhone === null) return;
             const nextEmail = prompt("Employee email:", e.email || "");
@@ -5210,14 +5223,15 @@ function renderEmployeesView() {
             try {
               await apiUpdateEmployee(e.id, {
                 name: String(nextName || "").trim(),
+                role: String(nextRole || "tech").trim() || "tech",
                 phone: String(nextPhone || "").trim(),
                 email: String(nextEmail || "").trim(),
                 address: String(nextAddress || "").trim(),
-                role: e.role || "tech",
               });
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
           });
+
           const del = document.createElement("button");
           del.className = "btn";
           del.textContent = "Delete Employee";
@@ -5230,7 +5244,7 @@ function renderEmployeesView() {
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
           });
-          a.appendChild(editEmp);
+          a.appendChild(edit);
           a.appendChild(del);
           row.appendChild(top);
           row.appendChild(meta);
