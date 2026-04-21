@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "26d2695a283842d997a204c9542b4e41",
+      "created_at": "2026-03-24T14:57:49.758265+00:00",
+      "updated_at": "2026-03-24T14:57:49.758332+00:00",
+      "name": "Drew Watson",
+      "role": "lead",
+      "phone": "8188521767",
+      "email": "drew@prioritydoors.com",
+      "address": "",
+      "password": "Drew123!"
+    },
+    {
+      "id": "bf4a32b5bec94253b672d31720923553",
+      "created_at": "2026-03-24T15:00:23.476953+00:00",
+      "updated_at": "2026-03-24T15:00:23.476972+00:00",
+      "name": "Caleb Lopez",
+      "role": "tech",
+      "phone": "(760) 450-2232",
+      "email": "caleb@prioritydoors.com",
+      "address": "",
+      "password": "Caleb123!"
+    },
+    {
+      "id": "934acafb473a4b2b82ffc4f7c95eb37c",
+      "created_at": "2026-03-24T15:50:16.354282+00:00",
+      "updated_at": "2026-03-24T15:50:16.354295+00:00",
+      "name": "Nick Serrano",
+      "role": "office",
+      "phone": "(760) 415-0957",
+      "email": "Nicholas@prioritydoors.com",
+      "address": "",
+      "password": "Nick123!"
+    }
+  ]
+}

@@ -1,0 +1,319 @@
+{
+  "version": 3,
+  "estimate_next": 1,
+  "invoice_next": 1,
+  "items": [
+    {
+      "type": "invoice",
+      "number": "JS00001",
+      "filename": "JS00001.pdf",
+      "path": "/Users/jasonbrewster/doorks/data/documents/JS00001.pdf",
+      "job_id": "53dfdf190d1a401fb99d469b4f32f8b7",
+      "customer": "Enlightened Skin Care, LLC",
+      "address": "41080 Saddleback Dr, Aguanga, Ca, 92536",
+      "ship_to": "41080 Saddleback Dr, Aguanga, Ca, 92536",
+      "po_number": "",
+      "job_number": "0326-5",
+      "invoice_number": "JS00001",
+      "completed_by": "Jason Brewster",
+      "tax_rate": 7.75,
+      "items": [
+        {
+          "code": "TRIP",
+          "description": "Trip Charge",
+          "qty": 1,
+          "rate": 175,
+          "kind": "trip",
+          "taxable": false
+        },
+        {
+          "code": "FUEL",
+          "description": "Fuel Surcharge",
+          "qty": 1,
+          "rate": 20,
+          "kind": "fuel",
+          "taxable": false
+        },
+        {
+          "code": "CREW",
+          "description": "Crew Tech Labor",
+          "qty": 2,
+          "rate": 235,
+          "kind": "labor",
+          "taxable": false
+        },
+        {
+          "code": "DP-BTM",
+          "description": "DP Bottom Pivot",
+          "qty": 1,
+          "rate": 50,
+          "kind": "other",
+          "taxable": true
+        }
+      ],
+      "work": "Invoice Includes - Storefront Door Repairs\n\nWe are proposing to return with a crew to remove the existing storefront door and replace the existing broken bottom pivot. Upon completion of work the technicians tested and adjusted the door as needed to ensure its proper function and security.\n\n****JOB COMPLETE****",
+      "labor": "CREW - Crew Tech Labor | Qty 2 @ $235.00 = $470.00 | Non-Taxable",
+      "parts": "TRIP - Trip Charge | Qty 1 @ $175.00 = $175.00 | Non-Taxable\nFUEL - Fuel Surcharge | Qty 1 @ $20.00 = $20.00 | Non-Taxable\nDP-BTM - DP Bottom Pivot | Qty 1 @ $50.00 = $50.00",
+      "date": "2026-03-13",
+      "created_at": "2026-03-13T19:32:55.013960+00:00",
+      "updated_at": "2026-03-13T19:32:55.013977+00:00"
+    },
+    {
+      "id": "signoff-0326-1",
+      "type": "signoff",
+      "filename": "SIGNOFF_0326-1.pdf",
+      "number": "0326-1",
+      "job_id": "",
+      "job_number": "0326-1",
+      "customer": "A-1 Irrigation",
+      "address": "",
+      "po_number": "",
+      "completed_by": "Jason",
+      "created_at": "2026-03-20T18:53:45.758366Z",
+      "date": "2026-03-20"
+    },
+    {
+      "id": "signoff-0326-1",
+      "type": "signoff",
+      "filename": "SIGNOFF_0326-1.pdf",
+      "number": "0326-1",
+      "job_id": "",
+      "job_number": "0326-1",
+      "customer": "Alexandria Properties",
+      "address": "",
+      "po_number": "",
+      "completed_by": "Jason Brewster + Additional Techs Onsite",
+      "created_at": "2026-03-20T20:26:09.786147Z",
+      "date": "2026-03-20",
+      "contact_name": "Mike Felice",
+      "arrival_time": "",
+      "departure_time": "",
+      "additional_techs_onsite": false
+    },
+    {
+      "id": "signoff-0326-2",
+      "type": "signoff",
+      "filename": "SIGNOFF_0326-2.pdf",
+      "number": "0326-2",
+      "job_id": "",
+      "job_number": "0326-2",
+      "customer": "Alexandria Properties",
+      "address": "",
+      "po_number": "",
+      "completed_by": "Drew Watson + Additional Techs Onsite",
+      "created_at": "2026-03-20T20:27:06.102717Z",
+      "date": "2026-03-20",
+      "contact_name": "Mike Felice",
+      "arrival_time": "8am-2pm",
+      "departure_time": "",
+      "additional_techs_onsite": false
+    },
+    {
+      "type": "estimate",
+      "number": "RE00025",
+      "filename": "RE00025.pdf",
+      "path": "/Users/jasonbrewster/doorks/data/documents/RE00025.pdf",
+      "job_id": "ca527c60c1fb4fe9b501a71bb8275d38",
+      "customer": "Harrah's Resort & Casino",
+      "address": "1010 Neimmi, Pauma, Ca, 92000",
+      "ship_to": "1010 Neimmi, Pauma, Ca, 92000",
+      "po_number": "",
+      "job_number": "100001",
+      "invoice_number": "",
+      "completed_by": "Drew Watson",
+      "tax_rate": 0.0,
+      "items": [
+        {
+          "code": "TRIP",
+          "description": "Trip Charge",
+          "qty": 1,
+          "rate": 175,
+          "kind": "trip",
+          "taxable": false
+        },
+        {
+          "code": "FUEL",
+          "description": "Fuel Surcharge",
+          "qty": 1,
+          "rate": 20,
+          "kind": "fuel",
+          "taxable": false
+        },
+        {
+          "code": "LABOR",
+          "description": "Single Tech Labor",
+          "qty": 2,
+          "rate": 175,
+          "kind": "labor",
+          "taxable": false
+        }
+      ],
+      "work": "PM RSD",
+      "labor": "LABOR - Single Tech Labor | Qty 2 @ $175.00 = $350.00 | Non-Taxable",
+      "parts": "TRIP - Trip Charge | Qty 1 @ $175.00 = $175.00 | Non-Taxable\nFUEL - Fuel Surcharge | Qty 1 @ $20.00 = $20.00 | Non-Taxable",
+      "date": "2026-03-23",
+      "created_at": "2026-03-23T19:38:34.138034+00:00",
+      "updated_at": "2026-03-23T19:38:34.138051+00:00"
+    },
+    {
+      "type": "estimate",
+      "number": "RE00027",
+      "filename": "RE00027.pdf",
+      "path": "/Users/jasonbrewster/doorks/data/documents/RE00027.pdf",
+      "job_id": "bf6ebbf52732482f9e8b3101f167ef71",
+      "customer": "The Seabird Ocean Resort & Spa",
+      "address": "19000 Wyoming Way, Oceanside, Ca, 92000",
+      "ship_to": "19000 Wyoming Way, Oceanside, Ca, 92000",
+      "po_number": "",
+      "job_number": "100002",
+      "invoice_number": "",
+      "completed_by": "Jason Brewster",
+      "tax_rate": 8.25,
+      "items": [
+        {
+          "code": "TRIP",
+          "description": "Trip Charge",
+          "qty": 1,
+          "rate": 175,
+          "kind": "trip",
+          "taxable": false
+        },
+        {
+          "code": "FUEL",
+          "description": "Fuel Surcharge",
+          "qty": 1,
+          "rate": 20,
+          "kind": "fuel",
+          "taxable": false
+        },
+        {
+          "code": "LABOR",
+          "description": "Single Tech Labor",
+          "qty": 1,
+          "rate": 175,
+          "kind": "labor",
+          "taxable": false
+        }
+      ],
+      "work": "Proposal Includes - Repairs to exit device",
+      "labor": "LABOR - Single Tech Labor | Qty 1 @ $175.00 = $175.00 | Non-Taxable",
+      "parts": "TRIP - Trip Charge | Qty 1 @ $175.00 = $175.00 | Non-Taxable\nFUEL - Fuel Surcharge | Qty 1 @ $20.00 = $20.00 | Non-Taxable",
+      "date": "2026-03-23",
+      "created_at": "2026-03-23T20:21:22.192576+00:00",
+      "updated_at": "2026-03-23T20:21:22.192592+00:00"
+    },
+    {
+      "type": "estimate",
+      "number": "RE00032",
+      "filename": "RE00032.pdf",
+      "path": "/Users/jasonbrewster/doorks/data/documents/RE00032.pdf",
+      "job_id": "0c914ee4ca7845939b9f79a10fc41732",
+      "customer": "Kilroy Realty, L.P.",
+      "address": "3565 General Atomics, San Diego, Ca, 92000",
+      "ship_to": "3565 General Atomics, San Diego, Ca, 92000",
+      "po_number": "",
+      "job_number": "100005",
+      "invoice_number": "",
+      "completed_by": "Drew Watson",
+      "tax_rate": 7.75,
+      "items": [
+        {
+          "code": "TRIP",
+          "description": "Trip Charge",
+          "qty": 1,
+          "rate": 175,
+          "kind": "trip",
+          "taxable": false
+        },
+        {
+          "code": "FUEL",
+          "description": "Fuel Surcharge",
+          "qty": 1,
+          "rate": 20,
+          "kind": "fuel",
+          "taxable": false
+        },
+        {
+          "code": "LABOR",
+          "description": "Single Tech Labor",
+          "qty": 2,
+          "rate": 175,
+          "kind": "labor",
+          "taxable": false
+        }
+      ],
+      "work": "Proposal Includes - PM Parking Garage Gates\n\nWe are proposing to perform PM Services on the (4x) Parking Garage Gates. \n\n****Excludes Hidden Conditions*****",
+      "labor": "LABOR - Single Tech Labor | Qty 2 @ $175.00 = $350.00 | Non-Taxable",
+      "parts": "TRIP - Trip Charge | Qty 1 @ $175.00 = $175.00 | Non-Taxable\nFUEL - Fuel Surcharge | Qty 1 @ $20.00 = $20.00 | Non-Taxable",
+      "date": "2026-03-24",
+      "created_at": "2026-03-24T21:07:53.140262+00:00",
+      "updated_at": "2026-03-24T21:07:53.140278+00:00"
+    },
+    {
+      "type": "estimate",
+      "number": "RE00034",
+      "filename": "RE00034.pdf",
+      "path": "/Users/jasonbrewster/doorks/data/documents/RE00034.pdf",
+      "job_id": "6ca340b965774af3802e3ef7b41b8645",
+      "customer": "Alexandria Properties",
+      "address": "9265 El Camino Real, San Diego, Ca, 9200",
+      "ship_to": "9265 El Camino Real, San Diego, Ca, 9200",
+      "po_number": "",
+      "job_number": "100004",
+      "invoice_number": "",
+      "completed_by": "Jason Brewster",
+      "tax_rate": 7.75,
+      "items": [
+        {
+          "code": "TRIP",
+          "description": "Trip Charge",
+          "qty": 1,
+          "rate": 175,
+          "kind": "trip",
+          "taxable": false
+        },
+        {
+          "code": "FUEL",
+          "description": "Fuel Surcharge",
+          "qty": 1,
+          "rate": 20,
+          "kind": "fuel",
+          "taxable": false
+        },
+        {
+          "code": "CREW",
+          "description": "Crew Tech Labor",
+          "qty": 2,
+          "rate": 235,
+          "kind": "labor",
+          "taxable": false
+        }
+      ],
+      "work": "Proposal to repair rsd",
+      "labor": "CREW - Crew Tech Labor | Qty 2 @ $235.00 = $470.00 | Non-Taxable",
+      "parts": "TRIP - Trip Charge | Qty 1 @ $175.00 = $175.00 | Non-Taxable\nFUEL - Fuel Surcharge | Qty 1 @ $20.00 = $20.00 | Non-Taxable",
+      "date": "2026-03-24",
+      "created_at": "2026-03-24T21:47:01.952356+00:00",
+      "updated_at": "2026-03-24T21:47:01.952367+00:00"
+    },
+    {
+      "id": "signoff-0326-3",
+      "type": "signoff",
+      "filename": "SIGNOFF_0326-3.pdf",
+      "number": "0326-3",
+      "job_id": "",
+      "job_number": "0326-3",
+      "customer": "Alexandria Properties",
+      "address": "",
+      "po_number": "",
+      "completed_by": "Jason Brewster",
+      "created_at": "2026-03-25T17:18:34.311771Z",
+      "date": "2026-03-25",
+      "contact_name": "Mike Felice",
+      "arrival_time": "8am-10am",
+      "departure_time": "",
+      "additional_techs_onsite": false,
+      "signature_data": "data:image/png;base64,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pK2rwpHhJ3X6solL0oEx96X9/TvuKzgJTkQAAQQQQACBsgrMFDCUtRBkhsB8BULtsdsdz7xV1y+dbxoLuC6hIQwn6vrUAtLgUgQQQAABBBAosQABb4mBSb6cAltPCrUdvNNxHDtbQnYp39IUwDPfTfbG316axEkVAQQQQAABBIopQMBbTE3S8pVA0/r1HStHFmeHHhStbD09S7SIxJ/6ipYgCSGAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggAACCCCAAAIIIIAAAggggEBpBP4/L/k+I+CZiIEAAAAASUVORK5CYII="
+    }
+  ]
+}

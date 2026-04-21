@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "items": [
+    {
+      "id": "seed-jason-brewster",
+      "username": "Jason Brewster",
+      "email": "Jason@prioritydoors.com",
+      "role": "office_admin",
+      "active": true,
+      "password_hash": "pbkdf2_sha256$260000$9Ndx9ecZVvwzWHfsaoh6ng==$1ldgeJrA9FNeQeAvFgneKJbj2sk0cDmSEGFcu4IFCLQ=",
+      "pin_hash": "pbkdf2_sha256$260000$wC6Oaof4bpcfdwZJg4vp5A==$f9CG0olKcfslD6xlTV6Tl2tbvDhaFLnO4TQMUfUH+3s=",
+      "created_at": "2026-03-24T02:50:54.847517",
+      "updated_at": "2026-04-21T03:12:08.305590+00:00",
+      "name": "Jason Brewster"
+    },
+    {
+      "id": "71f5005b281a43de88e834a672f67d24",
+      "created_at": "2026-03-24T14:57:49.771020+00:00",
+      "updated_at": "2026-03-26T20:24:40.596985+00:00",
+      "username": "Drew Watson",
+      "name": "Drew Watson",
+      "email": "drew@prioritydoors.com",
+      "role": "lead",
+      "active": true,
+      "password_hash": "pbkdf2_sha256$260000$TkxV1s3i4xV1lF1pOwIRkA==$0EIDoKnFqx2rqe55dqNXKlj2I9sVcBPQeq9CBSaXTPI=",
+      "pin_hash": "pbkdf2_sha256$260000$6yUZhDigC3NOxjKL6NoLGw==$XcSI2MPrYaB2Yj35c+PTxQDhRUrixi6LLZh0yt7OKMM="
+    },
+    {
+      "id": "404edc96eabf4123b91e62204fba5d50",
+      "created_at": "2026-03-24T15:00:23.486370+00:00",
+      "updated_at": "2026-03-25T02:26:23.232926+00:00",
+      "username": "Caleb Lopez",
+      "name": "Caleb Lopez",
+      "email": "caleb@prioritydoors.com",
+      "role": "tech",
+      "active": true,
+      "password_hash": "pbkdf2_sha256$260000$oOUNTp3QXyBTpF4pHW38+g==$jcYp0ehXU8dElwBHmMXmO7oGNrORhwwa6MIKchkicTo=",
+      "pin_hash": "pbkdf2_sha256$260000$SP4GYWFd0KL8nPG3cRFhOw==$QIsAHUfcpPqOJ/jkIx/c0+YLq6bpA93FBsbRvowzoYY="
+    },
+    {
+      "id": "abb7a33224ab4224a0d2cc3a2a36e3fc",
+      "created_at": "2026-03-24T15:50:16.362821+00:00",
+      "updated_at": "2026-03-24T19:33:17.911055+00:00",
+      "username": "Nick Serrano",
+      "name": "Nick Serrano",
+      "email": "Nicholas@prioritydoors.com",
+      "role": "office",
+      "active": true,
+      "password_hash": "pbkdf2_sha256$260000$ALGekfkNTAjMoKp1OYakJQ==$KG+B8BZ1omvvwKlwIfmOzMtMWjENVvN5rf4o7BsJuKA=",
+      "pin_hash": "pbkdf2_sha256$260000$OOMp2CVcan0DTOLNp+NDfA==$4Fi85hop7s/rc4Nqib8HJ/s5maR6PKgFf9109GeVBG4="
+    }
+  ]
+}
