@@ -33,11 +33,13 @@
   const navContacts = el("navContacts");
   let navAllJobs = el("navAllJobs");
   let navPartsList = el("navPartsList");
+  let navDoorLogs = el("navDoorLogs");
  
   const navDataCenter = el("navDataCenter");
   const navPayroll = el("navPayroll");
   const navEmployees = el("navEmployees");
   const navDataUpload = el("navDataUpload");
+  let navPricingSettings = el("navPricingSettings");
   let navSaddleback = el("navSaddleback");
  
   const navNotifications = el("navNotifications");
@@ -101,6 +103,21 @@
     }
   }
 
+
+
+  if (!navDoorLogs) {
+    const jobsNavCol = navJobFlow && navJobFlow.parentElement;
+    if (jobsNavCol) {
+      const btn = document.createElement("button");
+      btn.className = "navbtn";
+      btn.id = "navDoorLogs";
+      btn.innerHTML = `<span>Door Logs</span><small>Doors / Reports</small>`;
+      if (navCustomers) jobsNavCol.insertBefore(btn, navCustomers);
+      else jobsNavCol.appendChild(btn);
+      navDoorLogs = btn;
+    }
+  }
+
   if (navCustomers) {
     const bits = navCustomers.querySelectorAll("span, small");
     if (bits[0]) bits[0].textContent = "Customers / Contacts";
@@ -152,6 +169,21 @@
     }
   }
 
+
+
+  if (!navPricingSettings && officeFlowPanel) {
+    const navcol = officeFlowPanel.querySelector(".navcol");
+    if (navcol) {
+      const btn = document.createElement("button");
+      btn.className = "navbtn";
+      btn.id = "navPricingSettings";
+      btn.innerHTML = `<span>Pricing Settings</span><small>Rates / Defaults</small>`;
+      if (navDataUpload) navcol.insertBefore(btn, navDataUpload);
+      else navcol.appendChild(btn);
+      navPricingSettings = btn;
+    }
+  }
+
   let apiKey = "";
   let currentUser = null;
   let pendingPinUser = null;
@@ -184,8 +216,8 @@
   function setNavActive(btn) {
     [
       navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff,
-      navJobFlow, navAllJobs, navPartsList, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
-      navDataCenter, navPayroll, navEmployees, navDataUpload, navSaddleback,
+      navJobFlow, navAllJobs, navPartsList, navDoorLogs, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
+      navDataCenter, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
       navNotifications, navAtlas, navMoses
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
   }
@@ -782,6 +814,51 @@
   async function apiDeleteDocument(filename) {
     await fetchJSON(`/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
   }
+
+
+  async function apiGetPricing() {
+    return await fetchJSON("/pricing");
+  }
+
+  async function apiSavePricing(payload) {
+    return await fetchJSON("/pricing", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function apiListDoorLogs() {
+    return await fetchJSON("/door-logs");
+  }
+
+  async function apiCreateDoorLog(payload) {
+    return await fetchJSON("/door-logs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function apiUpdateDoorLog(id, payload) {
+    return await fetchJSON(`/door-logs/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function apiDeleteDoorLog(id) {
+    return await fetchJSON(`/door-logs/${encodeURIComponent(id)}`, { method: "DELETE" });
+  }
+
+  async function apiAutoFillDescription(payload) {
+    return await fetchJSON("/documents/auto-description", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
  
   async function apiListTimeOff(params = {}) {
     const qs = new URLSearchParams(params);
@@ -1053,6 +1130,8 @@
     setVisible(navCustomers, !!role && perms.customers);
     setVisible(navEstimateInvoice, !!role && perms.estimates);
     setVisible(navPartsList, !!role && perms.parts);
+    setVisible(navDoorLogs, !!role && perms.parts);
+    setVisible(navPricingSettings, !!role && perms.estimates);
   }
 
   function updateLoginUi(message = "") {
@@ -5333,7 +5412,7 @@ function renderEmployeesView() {
   function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
-      const [customers, employees] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => [])]);
+      const [customers, employees, pricing] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }))]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
       let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems().map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
       let currentPartResults = [];
@@ -5379,6 +5458,9 @@ function renderEmployeesView() {
         </div>
         <div style="margin-top:12px;"><div class="label">Proposal / Invoice Body</div><textarea id="doc_work" placeholder="Proposal Includes / Invoice Includes..." style="min-height:140px;"></textarea></div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
+          <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
+          <button class="btn" id="doc_prompt_builder">Prompt Builder</button>
+          <button class="btn" id="doc_open_pricing">Pricing Settings</button>
           <button class="btn" id="add_trip">Trip Charge</button>
           <button class="btn" id="add_fuel">Fuel Surcharge</button>
           <button class="btn" id="add_single">Single Tech Labor</button>
@@ -5423,6 +5505,15 @@ function renderEmployeesView() {
       const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel };
       SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
+      if (!String(editDoc?.tax_rate || "").trim() && pricing && pricing.tax != null) {
+        const taxDefault = Number(pricing.tax || 0);
+        if (taxDefault) {
+          const matched = SALES_TAX_OPTIONS.find(opt => Number(opt.rate) === taxDefault);
+          if (matched) {
+            /* value set below via setTaxRateValue */
+          }
+        }
+      }
       function setTaxRateValue(rate, city="") { const normalized = String(rate == null ? "" : rate).trim(); const known = normalized && SALES_TAX_OPTIONS.some(opt => String(opt.rate) === normalized);
         if (known) { dom.taxRateSelect.value = normalized; dom.taxRateCustom.value = normalized; dom.taxRateCustom.style.display = "none"; dom.taxRateHint.textContent = city ? `${city} selected.` : "City tax rate selected."; return; }
         if (normalized) { dom.taxRateSelect.value = "__custom__"; dom.taxRateCustom.value = normalized; dom.taxRateCustom.style.display = "block"; dom.taxRateHint.textContent = "Custom sales tax entered."; return; }
@@ -5442,10 +5533,10 @@ function renderEmployeesView() {
       function renderItems(){ applyDocTypeMeta(); dom.tbody.innerHTML=""; items.forEach((item,idx)=>dom.tbody.appendChild(makeRow(item,idx))); updateTotals(); }
       dom.partLookup.addEventListener("input", ()=>{ clearTimeout(searchTimer); const q=dom.partLookup.value.trim(); if(!q){ renderPartLookupResults([]); return; } searchTimer=setTimeout(()=>searchParts(q), 180); });
       dom.partLookup.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addPartToItems(findPartMatch(dom.partLookup.value)||currentPartResults[0]); }});
-      card.querySelector("#add_trip").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:175, kind:"trip", taxable:false })); renderItems(); });
-      card.querySelector("#add_fuel").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:20, kind:"fuel", taxable:false })); renderItems(); });
-      card.querySelector("#add_single").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"LABOR", description:"Single Tech Labor", qty:1, rate:175, kind:"labor", taxable:false })); renderItems(); });
-      card.querySelector("#add_crew").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:1, rate:235, kind:"labor", taxable:false })); renderItems(); });
+      card.querySelector("#add_trip").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:Number(pricing.trip || 175), kind:"trip", taxable:false })); renderItems(); });
+      card.querySelector("#add_fuel").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:Number(pricing.fuel || 20), kind:"fuel", taxable:false })); renderItems(); });
+      card.querySelector("#add_single").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"LABOR", description:"Single Tech Labor", qty:1, rate:Number(pricing.labor || 175), kind:"labor", taxable:false })); renderItems(); });
+      card.querySelector("#add_crew").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:1, rate:Number(pricing.crew_labor || 235), kind:"labor", taxable:false })); renderItems(); });
       card.querySelector("#add_blank").addEventListener("click", ()=>{ items.push(createDocLineItem({ kind:"other" })); renderItems(); });
       card.querySelector("#doc_cancel").addEventListener("click", ()=> overlay.remove());
       dom.type.addEventListener("change", renderItems);
@@ -5463,7 +5554,39 @@ function renderEmployeesView() {
         updateTotals();
       });
       dom.taxRateCustom.addEventListener("input", updateTotals);
-      dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); });
+      dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); else if (pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default"); });
+      card.querySelector("#doc_open_pricing").addEventListener("click", ()=> renderPricingSettingsView());
+      card.querySelector("#doc_prompt_builder").addEventListener("click", ()=> {
+        const extra = prompt("Add extra wording or scope to the document description:", "");
+        if (extra === null) return;
+        const clean = String(extra || "").trim();
+        if (!clean) return;
+        dom.work.value = [String(dom.work.value || "").trim(), clean].filter(Boolean).join("\n\n");
+      });
+      card.querySelector("#doc_auto_fill").addEventListener("click", async ()=> {
+        try {
+          const completionForms = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
+          const notes = [job && (job.job_notes || job.tech_notes || job.description || ""), ...completionForms.map(f => [f.work_performed, f.notes].filter(Boolean).join(" "))].filter(Boolean).join(" ").trim();
+          const recs = [job && (job.additional_recommendations || ""), ...completionForms.map(f => [f.recommendations, f.additional_recommendations].filter(Boolean).join(" "))].filter(Boolean).join(" ").trim();
+          const crew = completionForms.length > 1 || /crew/i.test(notes);
+          const resp = await apiAutoFillDescription({
+            customer: dom.customer.value.trim() || (job && job.customer) || "",
+            address: dom.address.value.trim() || (job && job.address) || "",
+            door_location: (job && (job.door_location || job.location_on_site)) || "",
+            door_id: (job && (job.door_id || job.opening_id)) || "",
+            notes: notes,
+            recommendations: recs,
+            crew: !!crew,
+            trips: 1,
+            dates: [dom.date.value || ""],
+          });
+          dom.work.value = String((resp && resp.description) || "");
+          if (!items.some(it => it.kind === "trip")) items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:Number(pricing.trip || 175), kind:"trip", taxable:false }));
+          if (!items.some(it => it.kind === "fuel")) items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:Number(pricing.fuel || 20), kind:"fuel", taxable:false }));
+          renderItems();
+        } catch (e) { alert(e.message || String(e)); }
+      });
+      if (!editDoc && pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default");
       renderItems();
       card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload={ job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""), customer:dom.customer.value.trim(), address:dom.address.value.trim(), work:dom.work.value.trim(), labor:serializeDocItems(items,true), parts:serializeDocItems(items,false), number:dom.number.value.trim(), po_number:dom.po.value.trim(), invoice_number: docType === "invoice" ? dom.number.value.trim() : "", job_number:dom.job.value.trim(), tax_rate:Number(getCurrentTaxRateValue()||0), completed_by: dom.completedBy.value || "", items: items, date: dom.date.value || "", ship_to: dom.ship.value.trim() }; const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
@@ -5568,9 +5691,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
  
     function renderGeneratorTab() {
-      body.innerHTML = `<div class="card"><h3>Estimate / Invoice</h3><div class="hint">Open a blank document and choose estimate or invoice inside the builder.</div><div style="margin-top:10px"><button class="btn btn-orange" id="openDocBuilder">Open Builder</button></div></div>`;
+      body.innerHTML = `<div class="card"><h3>Estimate / Invoice</h3><div class="hint">Open a blank document and choose estimate or invoice inside the builder.</div><div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="openDocBuilder">Open Builder</button><button class="btn" id="openPricingSettings">Pricing Settings</button></div></div>`;
       const btn = document.getElementById("openDocBuilder");
       if (btn) btn.addEventListener("click", () => openEstimateInvoiceDrawer(null, "estimate", null, { refreshDocs: renderActiveTab }));
+      const ps = document.getElementById("openPricingSettings");
+      if (ps) ps.addEventListener("click", renderPricingSettingsView);
     }
  
     async function renderActiveTab() {
@@ -5594,6 +5719,156 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     renderEstimatePage();
   }
  
+
+
+  function renderPricingSettingsView() {
+    setNavActive(navPricingSettings);
+    setActiveChip("Office Flow");
+    setWorkspace("Pricing Settings");
+    clearWorkspaceActions();
+    const root = document.createElement("div");
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <h3>Pricing Settings</h3>
+      <div class="hint">Update default charges used by the estimate/invoice builder.</div>
+      <div class="grid2" style="margin-top:12px;">
+        <div><div class="label">Trip Charge</div><input class="input" id="ps_trip" type="number" step="0.01" /></div>
+        <div><div class="label">Fuel Surcharge</div><input class="input" id="ps_fuel" type="number" step="0.01" /></div>
+        <div><div class="label">Single Tech Labor</div><input class="input" id="ps_labor" type="number" step="0.01" /></div>
+        <div><div class="label">Crew Tech Labor</div><input class="input" id="ps_crew" type="number" step="0.01" /></div>
+        <div><div class="label">Default Sales Tax %</div><input class="input" id="ps_tax" type="number" step="0.01" /></div>
+      </div>
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-orange" id="ps_save">Save Pricing</button>
+      </div>
+      <div class="hint" id="ps_status" style="margin-top:8px;"></div>
+    `;
+    root.appendChild(card);
+    workspaceBody.innerHTML = "";
+    workspaceBody.appendChild(root);
+    currentView = { refresh: renderPricingSettingsView };
+    (async () => {
+      const pricing = await apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }));
+      card.querySelector("#ps_trip").value = pricing.trip ?? 175;
+      card.querySelector("#ps_fuel").value = pricing.fuel ?? 20;
+      card.querySelector("#ps_labor").value = pricing.labor ?? 175;
+      card.querySelector("#ps_crew").value = pricing.crew_labor ?? 235;
+      card.querySelector("#ps_tax").value = pricing.tax ?? 7.75;
+      card.querySelector("#ps_save").addEventListener("click", async () => {
+        try {
+          await apiSavePricing({
+            trip: Number(card.querySelector("#ps_trip").value || 0),
+            fuel: Number(card.querySelector("#ps_fuel").value || 0),
+            labor: Number(card.querySelector("#ps_labor").value || 0),
+            crew_labor: Number(card.querySelector("#ps_crew").value || 0),
+            tax: Number(card.querySelector("#ps_tax").value || 0),
+          });
+          card.querySelector("#ps_status").textContent = "Pricing saved.";
+        } catch (e) { card.querySelector("#ps_status").textContent = e.message || String(e); }
+      });
+    })();
+  }
+
+  function renderDoorLogsView() {
+    setNavActive(navDoorLogs);
+    setActiveChip("Job Flow");
+    setWorkspace("Door Logs");
+    clearWorkspaceActions();
+    const root = document.createElement("div");
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `
+      <h3>Door Logs</h3>
+      <div class="hint">Track door-specific information by customer and location.</div>
+      <div class="grid2" style="margin-top:12px;">
+        <div><div class="label">Customer</div><input class="input" id="dl_customer" /></div>
+        <div><div class="label">Address</div><input class="input" id="dl_address" /></div>
+        <div><div class="label">Door Location</div><input class="input" id="dl_location" /></div>
+        <div><div class="label">Door ID</div><input class="input" id="dl_door_id" /></div>
+        <div><div class="label">Pass / Fail</div><select class="input" id="dl_pass_fail"><option value="">-- Select --</option><option>Pass</option><option>Fail</option></select></div>
+        <div><div class="label">Repairs</div><input class="input" id="dl_repairs" /></div>
+      </div>
+      <div style="margin-top:10px;"><div class="label">Additional Recommendations</div><textarea id="dl_recommendations"></textarea></div>
+      <div style="margin-top:10px;"><div class="label">Notes</div><textarea id="dl_notes"></textarea></div>
+      <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
+        <button class="btn btn-orange" id="dl_save">Save Door Log</button>
+        <button class="btn" id="dl_clear">Clear</button>
+        <button class="btn" id="dl_print">Print Results</button>
+      </div>
+      <div style="margin-top:12px;"><input class="input" id="dl_search" placeholder="Search customer, address, door location, door ID, notes..." /></div>
+      <div id="dl_list" style="display:grid; gap:8px; margin-top:12px;"></div>
+    `;
+    root.appendChild(card);
+    workspaceBody.innerHTML = "";
+    workspaceBody.appendChild(root);
+    currentView = { refresh: renderDoorLogsView };
+
+    let editId = "";
+    let allLogs = [];
+    const list = card.querySelector("#dl_list");
+    function readForm() {
+      return {
+        customer: card.querySelector("#dl_customer").value.trim(),
+        address: card.querySelector("#dl_address").value.trim(),
+        door_location: card.querySelector("#dl_location").value.trim(),
+        door_id: card.querySelector("#dl_door_id").value.trim(),
+        pass_fail: card.querySelector("#dl_pass_fail").value.trim(),
+        repairs: card.querySelector("#dl_repairs").value.trim(),
+        additional_recommendations: card.querySelector("#dl_recommendations").value.trim(),
+        notes: card.querySelector("#dl_notes").value.trim(),
+      };
+    }
+    function fillForm(item) {
+      editId = item && item.id ? item.id : "";
+      card.querySelector("#dl_customer").value = item?.customer || "";
+      card.querySelector("#dl_address").value = item?.address || "";
+      card.querySelector("#dl_location").value = item?.door_location || "";
+      card.querySelector("#dl_door_id").value = item?.door_id || "";
+      card.querySelector("#dl_pass_fail").value = item?.pass_fail || "";
+      card.querySelector("#dl_repairs").value = item?.repairs || "";
+      card.querySelector("#dl_recommendations").value = item?.additional_recommendations || "";
+      card.querySelector("#dl_notes").value = item?.notes || "";
+    }
+    function clearForm() { fillForm(null); }
+    function matches(item, q) {
+      const hay = [item.customer, item.address, item.door_location, item.door_id, item.pass_fail, item.repairs, item.additional_recommendations, item.notes].join(" ").toLowerCase();
+      return !q || hay.includes(q);
+    }
+    function renderList() {
+      const q = String(card.querySelector("#dl_search").value || "").trim().toLowerCase();
+      list.innerHTML = "";
+      const filtered = allLogs.filter(item => matches(item, q));
+      if (!filtered.length) { list.innerHTML = `<div class="hint">No door logs found.</div>`; return; }
+      filtered.forEach(item => {
+        const row = document.createElement("div");
+        row.className = "jobrow";
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Log")}</div><div class="badge">${escapeHtml(item.pass_fail || "Open")}</div></div><div class="jobrow-addr">${escapeHtml(item.address || "")}</div><div class="hint">Door Location: ${escapeHtml(item.door_location || "")} | Door ID: ${escapeHtml(item.door_id || "")}</div><div class="hint">Repairs: ${escapeHtml(item.repairs || "")}</div><div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations || "")}</div><div class="hint">Notes: ${escapeHtml(item.notes || "")}</div>`;
+        const actions = document.createElement("div");
+        actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "8px";
+        const edit = document.createElement("button"); edit.className = "btn"; edit.textContent = "Edit"; edit.addEventListener("click", ()=> fillForm(item));
+        const del = document.createElement("button"); del.className = "btn"; del.textContent = "Delete"; del.addEventListener("click", async ()=> { if (!confirm("Delete this door log?")) return; await apiDeleteDoorLog(item.id); await load(); });
+        actions.append(edit, del); row.appendChild(actions); list.appendChild(row);
+      });
+    }
+    async function load() {
+      const data = await apiListDoorLogs().catch(() => []);
+      allLogs = Array.isArray(data) ? data : [];
+      renderList();
+    }
+    card.querySelector("#dl_save").addEventListener("click", async ()=> {
+      const payload = readForm();
+      if (!payload.customer && !payload.address && !payload.door_location && !payload.door_id) { alert("Enter at least customer, address, door location, or door ID."); return; }
+      if (editId) await apiUpdateDoorLog(editId, payload); else await apiCreateDoorLog(payload);
+      clearForm();
+      await load();
+    });
+    card.querySelector("#dl_clear").addEventListener("click", clearForm);
+    card.querySelector("#dl_search").addEventListener("input", renderList);
+    card.querySelector("#dl_print").addEventListener("click", ()=> window.print());
+    load();
+  }
+
   function renderTimeOffView() {
     setNavActive(navFormsTimeOff);
     setActiveChip("Forms");
@@ -6287,6 +6562,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navCustomers) navCustomers.addEventListener("click", renderCustomersView);
   if (navContacts) navContacts.addEventListener("click", renderContactsView);
   if (navPartsList) navPartsList.addEventListener("click", renderPartsListView);
+  if (navDoorLogs) navDoorLogs.addEventListener("click", renderDoorLogsView);
+  if (navPricingSettings) navPricingSettings.addEventListener("click", renderPricingSettingsView);
  
 
 function renderDataUploadView() {

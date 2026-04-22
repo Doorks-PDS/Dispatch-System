@@ -38,6 +38,63 @@ class DocCreate(BaseModel):
 
 
 
+
+
+class AutoDescriptionPayload(BaseModel):
+    customer: str = ""
+    address: str = ""
+    door_location: str = ""
+    door_id: str = ""
+    notes: str = ""
+    recommendations: str = ""
+    crew: bool = False
+    trips: int = 1
+    dates: List[str] = []
+
+
+def generate_description(payload: AutoDescriptionPayload) -> str:
+    tech = "Technicians" if payload.crew else "Technician"
+    opening = f"{tech} arrived onsite and checked in with customer. {tech} moved to the work area and evaluated the condition of the opening."
+    location_bits = []
+    if payload.customer:
+        location_bits.append(payload.customer.strip())
+    if payload.address:
+        location_bits.append(payload.address.strip())
+    if payload.door_location:
+        location_bits.append(f"Door Location: {payload.door_location.strip()}")
+    if payload.door_id:
+        location_bits.append(f"Door ID: {payload.door_id.strip()}")
+    location_line = " ".join(location_bits).strip()
+    notes = (payload.notes or "").strip()
+    recs = (payload.recommendations or "").strip()
+    trips = max(int(payload.trips or 1), 1)
+    dates = [str(x).strip() for x in (payload.dates or []) if str(x).strip()]
+
+    if trips > 1:
+        lines = []
+        for idx in range(trips):
+            date_label = f" ({dates[idx]})" if idx < len(dates) else ""
+            body = opening
+            if location_line:
+                body += " " + location_line
+            if notes:
+                body += " " + notes
+            if recs:
+                body += f" Recommendations noted: {recs}."
+            lines.append(f"Trip #{idx+1}{date_label} - {body}".strip())
+        lines.append("********JOB COMPLETE*********")
+        return "\n".join(lines)
+
+    parts = [opening]
+    if location_line:
+        parts.append(location_line)
+    if notes:
+        parts.append(notes)
+    if recs:
+        parts.append(f"Recommendations noted: {recs}.")
+    parts.append("********JOB COMPLETE*********")
+    return " ".join([p for p in parts if p]).strip()
+
 class SignoffCreate(BaseModel):
     job_id: str = ""
     job_number: str = ""
@@ -217,3 +274,9 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
             pass
 
     return {"ok": True, "doc": _doc_response(item)}
+
+
+@router.post("/auto-description")
+def auto_description(payload: AutoDescriptionPayload, request: Request, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    return {"ok": True, "description": generate_description(payload)}
