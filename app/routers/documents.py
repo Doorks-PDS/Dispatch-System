@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional, Any, List
+import re
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -43,57 +44,109 @@ class DocCreate(BaseModel):
 class AutoDescriptionPayload(BaseModel):
     customer: str = ""
     address: str = ""
+    project: str = ""
+    job_number: str = ""
     door_location: str = ""
     door_id: str = ""
     notes: str = ""
     recommendations: str = ""
+    office_notes: str = ""
+    job_notes: str = ""
+    work: str = ""
+    doc_type: str = "estimate"
     crew: bool = False
     trips: int = 1
     dates: List[str] = []
 
 
+def _clean_text(value: Any) -> str:
+    text = str(value or "").replace("\r", " ").replace("\n", " ").strip()
+    return " ".join(text.split())
+
+
+def _looks_like_contact_or_address(text: str) -> bool:
+    lowered = f" {_clean_text(text).lower()} "
+    if not lowered.strip():
+        return True
+    address_tokens = [" ave ", " avenue ", " st ", " street ", " rd ", " road ", " dr ", " drive ", " blvd ", " boulevard ", " suite ", " ste ", " escondido ", " ca ", " zip "]
+    if any(tok in lowered for tok in address_tokens):
+        return True
+    if "@" in lowered:
+        return True
+    if sum(ch.isdigit() for ch in lowered) >= 4:
+        return True
+    return False
+
+
+def _split_note_parts(*values: Any) -> List[str]:
+    parts: List[str] = []
+    for value in values:
+        text = _clean_text(value)
+        if not text:
+            continue
+        for piece in re.split(r"(?<=[.!?])\s+|\n+", text):
+            chunk = _clean_text(piece)
+            if not chunk or _looks_like_contact_or_address(chunk):
+                continue
+            parts.append(chunk)
+    deduped: List[str] = []
+    seen = set()
+    for part in parts:
+        key = part.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(part)
+    return deduped
+
+
+def _as_sentence(text: str) -> str:
+    clean = _clean_text(text)
+    if not clean:
+        return ""
+    if clean[-1] not in ".!?":
+        clean += "."
+    return clean
+
+
+def _proposal_title(payload: AutoDescriptionPayload) -> str:
+    for value in [payload.project, payload.door_location, payload.door_id]:
+        clean = _clean_text(value)
+        if clean and not _looks_like_contact_or_address(clean):
+            return clean
+    return "Opening"
+
+
 def generate_description(payload: AutoDescriptionPayload) -> str:
     tech = "Technicians" if payload.crew else "Technician"
-    opening = f"{tech} arrived onsite and checked in with customer. {tech} moved to the work area and evaluated the condition of the opening."
-    location_bits = []
-    if payload.customer:
-        location_bits.append(payload.customer.strip())
-    if payload.address:
-        location_bits.append(payload.address.strip())
-    if payload.door_location:
-        location_bits.append(f"Door Location: {payload.door_location.strip()}")
-    if payload.door_id:
-        location_bits.append(f"Door ID: {payload.door_id.strip()}")
-    location_line = " ".join(location_bits).strip()
-    notes = (payload.notes or "").strip()
-    recs = (payload.recommendations or "").strip()
-    trips = max(int(payload.trips or 1), 1)
-    dates = [str(x).strip() for x in (payload.dates or []) if str(x).strip()]
+    doc_type = (_clean_text(payload.doc_type) or "estimate").lower()
+    notes = _split_note_parts(payload.office_notes, payload.job_notes, payload.notes, payload.work)
+    recs = _split_note_parts(payload.recommendations)
 
-    if trips > 1:
-        lines = []
-        for idx in range(trips):
-            date_label = f" ({dates[idx]})" if idx < len(dates) else ""
-            body = opening
-            if location_line:
-                body += " " + location_line
-            if notes:
-                body += " " + notes
-            if recs:
-                body += f" Recommendations noted: {recs}."
-            lines.append(f"Trip #{idx+1}{date_label} - {body}".strip())
+    if doc_type == "invoice":
+        lines: List[str] = [f"{tech} arrived onsite and checked in with customer."]
+        for part in notes:
+            lowered = part.lower()
+            if lowered.startswith("arrived on site") or lowered.startswith("arrived onsite"):
+                continue
+            lines.append(_as_sentence(part))
+        for rec in recs:
+            lines.append(f"Recommended repairs: {_clean_text(rec)}.")
         lines.append("********JOB COMPLETE*********")
-        return "\n".join(lines)
+        return " ".join(line for line in lines if line).strip()
 
-    parts = [opening]
-    if location_line:
-        parts.append(location_line)
+    title = _proposal_title(payload)
+    lines = [f"Proposal Includes – {title}"]
+    lines.append(f"{tech} arrived onsite and checked in with customer to review the condition of the opening.")
     if notes:
-        parts.append(notes)
-    if recs:
-        parts.append(f"Recommendations noted: {recs}.")
-    parts.append("********JOB COMPLETE*********")
-    return " ".join([p for p in parts if p]).strip()
+        lines.extend(_as_sentence(part) for part in notes)
+    elif payload.job_notes:
+        lines.append(_as_sentence(payload.job_notes))
+    for rec in recs:
+        lines.append(_as_sentence(rec))
+    lines.append("Scheduling to be coordinated with customer upon approval.")
+    lines.append("****EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS****")
+    return " ".join(line for line in lines if line).strip()
 
 class SignoffCreate(BaseModel):
     job_id: str = ""
