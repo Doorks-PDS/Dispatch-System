@@ -5780,14 +5780,15 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     card.className = "card";
     card.innerHTML = `
       <h3>Door Records</h3>
-      <div class="hint">Track specific openings by customer, address, project, and job number.</div>
+      <div class="hint">Track specific openings by customer, address, project, job number, and unique Door ID.</div>
       <div class="grid2" style="margin-top:12px;">
         <div style="position:relative;"><div class="label">Customer</div><input class="input" id="dl_customer" autocomplete="off" /><div id="dl_customer_results" style="display:none; position:absolute; left:0; right:0; top:100%; z-index:20; background:#fff; border:1px solid #e5e7eb; border-radius:10px; padding:6px;"></div></div>
         <div><div class="label">Address</div><input class="input" id="dl_address" /></div>
         <div><div class="label">Project</div><input class="input" id="dl_project" /></div>
         <div><div class="label">Job #</div><input class="input" id="dl_job_number" /></div>
         <div><div class="label">Door Location</div><input class="input" id="dl_location" /></div>
-        <div><div class="label">Door ID</div><input class="input" id="dl_door_id" /></div>
+        <div><div class="label">Door ID</div><input class="input" id="dl_door_id" placeholder="Unique door identifier" /></div>
+        <div><div class="label">Door Type</div><select class="input" id="dl_door_type"><option value="">-- Select --</option><option>Roll Up</option><option>Storefront</option><option>Man Door</option><option>Glass Door</option><option>Overhead Sectional</option><option>Gate</option><option>Other</option></select></div>
         <div><div class="label">Pass / Fail</div><select class="input" id="dl_pass_fail"><option value="">-- Select --</option><option>Pass</option><option>Fail</option></select></div>
         <div><div class="label">Repairs</div><input class="input" id="dl_repairs" /></div>
       </div>
@@ -5798,7 +5799,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <button class="btn" id="dl_clear">Clear</button>
         <button class="btn" id="dl_print">Print Results</button>
       </div>
-      <div style="margin-top:12px;"><input class="input" id="dl_search" placeholder="Search customer, address, door location, door ID, notes..." /></div>
+      <div style="margin-top:12px;"><input class="input" id="dl_search" placeholder="Search Door ID, customer, address, project, or job #..." /></div>
       <div id="dl_list" style="display:grid; gap:8px; margin-top:12px;"></div>
     `;
     root.appendChild(card);
@@ -5817,6 +5818,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         job_number: card.querySelector("#dl_job_number").value.trim(),
         door_location: card.querySelector("#dl_location").value.trim(),
         door_id: card.querySelector("#dl_door_id").value.trim(),
+        door_type: card.querySelector("#dl_door_type").value.trim(),
         pass_fail: card.querySelector("#dl_pass_fail").value.trim(),
         repairs: card.querySelector("#dl_repairs").value.trim(),
         additional_recommendations: card.querySelector("#dl_recommendations").value.trim(),
@@ -5831,6 +5833,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       card.querySelector("#dl_job_number").value = item?.job_number || "";
       card.querySelector("#dl_location").value = item?.door_location || "";
       card.querySelector("#dl_door_id").value = item?.door_id || "";
+      card.querySelector("#dl_door_type").value = item?.door_type || "";
       card.querySelector("#dl_pass_fail").value = item?.pass_fail || "";
       card.querySelector("#dl_repairs").value = item?.repairs || "";
       card.querySelector("#dl_recommendations").value = item?.additional_recommendations || "";
@@ -5838,7 +5841,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
     function clearForm() { fillForm(null); }
     function matches(item, q) {
-      const hay = [item.customer, item.address, item.project, item.job_number, item.door_location, item.door_id, item.pass_fail, item.repairs, item.additional_recommendations, item.notes].join(" ").toLowerCase();
+      const hay = [item.customer, item.address, item.project, item.job_number, item.door_location, item.door_id, item.door_type, item.pass_fail, item.repairs, item.additional_recommendations, item.notes].join(" ").toLowerCase();
       return !q || hay.includes(q);
     }
     function renderList() {
@@ -5849,7 +5852,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       filtered.forEach(item => {
         const row = document.createElement("div");
         row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Record")}</div><div class="badge">${escapeHtml(item.pass_fail || "Open")}</div></div><div class="jobrow-addr">${escapeHtml(item.address || "")}</div><div class="hint">Project: ${escapeHtml(item.project || "")} | Job #: ${escapeHtml(item.job_number || "")}</div><div class="hint">Door Location: ${escapeHtml(item.door_location || "")} | Door ID: ${escapeHtml(item.door_id || "")}</div><div class="hint">Repairs: ${escapeHtml(item.repairs || "")}</div><div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations || "")}</div><div class="hint">Notes: ${escapeHtml(item.notes || "")}</div>`;
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Record")}</div><div class="badge">${escapeHtml(item.pass_fail || "Open")}</div></div><div class="jobrow-addr">${escapeHtml(item.address || "")}</div><div class="hint">Project: ${escapeHtml(item.project || "")} | Job #: ${escapeHtml(item.job_number || "")}</div><div class="hint">Door Location: ${escapeHtml(item.door_location || "")} | Door ID: ${escapeHtml(item.door_id || "")} | Door Type: ${escapeHtml(item.door_type || "")}</div><div class="hint">Repairs: ${escapeHtml(item.repairs || "")}</div><div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations || "")}</div><div class="hint">Notes: ${escapeHtml(item.notes || "")}</div>`;
         const actions = document.createElement("div");
         actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "8px";
         const edit = document.createElement("button"); edit.className = "btn"; edit.textContent = "Edit"; edit.addEventListener("click", ()=> fillForm(item));
@@ -5898,6 +5901,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     card.querySelector("#dl_save").addEventListener("click", async ()=> {
       const payload = readForm();
       if (!payload.customer && !payload.address && !payload.project && !payload.job_number && !payload.door_location && !payload.door_id) { alert("Enter at least customer, address, project, job number, door location, or door ID."); return; }
+      if (!payload.customer) { alert("Select or enter a customer."); return; }
+      if (!payload.door_id) { alert("Door ID is required so each opening can be tracked individually."); return; }
       if (editId) await apiUpdateDoorLog(editId, payload); else await apiCreateDoorLog(payload);
       clearForm();
       await load();
