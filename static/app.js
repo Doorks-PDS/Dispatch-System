@@ -5800,7 +5800,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <div><div class="label">Door Type</div><select class="input" id="dl_door_type"><option value="">Select Door Type --</option><option>Automatic Door</option><option>Man Door</option><option>Storefront Door</option><option>Herculite Door</option><option>Roll Up</option><option>Glass</option><option>Roll/Swing Gate</option><option>Other</option></select></div>
         <div><div class="label">Pass / Fail</div><select class="input" id="dl_pass_fail"><option value="">-- Select --</option><option>Pass</option><option>Fail</option></select></div>
       </div>
-      <div style="margin-top:10px;"><div class="label">Repairs</div><textarea id="dl_repairs" style="min-height:120px;"></textarea></div>
+      <div style="margin-top:10px;"><div class="label">Work Performed</div><textarea id="dl_repairs" style="min-height:120px;"></textarea></div>
       <div style="margin-top:10px;"><div class="label">Additional Recommendations</div><textarea id="dl_recommendations"></textarea></div>
       <div style="margin-top:10px;"><div class="label">Notes</div><textarea id="dl_notes"></textarea></div>
       <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
