@@ -148,23 +148,19 @@
   if (navEstimateInvoice) {
     if (navEstimatePage) navEstimatePage.style.display = "none";
     if (navInvoicePage) navInvoicePage.style.display = "none";
-    const jobsNavCol = navEstimateInvoice.parentElement;
-    if (jobsNavCol) {
-      const anchor = (navContacts && navContacts.parentElement === jobsNavCol) ? navContacts : navCustomers;
-      if (anchor && anchor.parentElement === jobsNavCol) {
-        if (navEstimateInvoice.previousElementSibling !== anchor) jobsNavCol.insertBefore(navEstimateInvoice, anchor.nextSibling);
-      } else {
-        jobsNavCol.appendChild(navEstimateInvoice);
-      }
-    }
   } else if (navEstimatePage) {
     const pieces = navEstimatePage.querySelectorAll("span, small");
     if (pieces[0]) pieces[0].textContent = "Estimate/Invoice";
     if (pieces[1]) pieces[1].textContent = "Builder";
     if (navInvoicePage) navInvoicePage.style.display = "none";
-    if (navCustomers && navCustomers.parentElement) {
-      navCustomers.parentElement.insertBefore(navEstimatePage, navCustomers.nextSibling);
-    }
+  }
+
+  const jobsNavCol = (navJobFlow && navJobFlow.parentElement) || (navEstimateInvoice && navEstimateInvoice.parentElement) || (navEstimatePage && navEstimatePage.parentElement);
+  if (jobsNavCol) {
+    const estimateBtn = navEstimateInvoice || navEstimatePage;
+    [navJobFlow, navAllJobs, navDoorLogs, navCustomers, navContacts, estimateBtn, navPartsList].forEach((node) => {
+      if (node && node.parentElement === jobsNavCol) jobsNavCol.appendChild(node);
+    });
   }
  
   const workspaceTitle = el("workspaceTitle");
@@ -5468,8 +5464,6 @@ function renderEmployeesView() {
         <div style="margin-top:12px;"><div class="label">Proposal / Invoice Body</div><textarea id="doc_work" placeholder="Proposal Includes / Invoice Includes..." style="min-height:140px;"></textarea></div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
           <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
-          <button class="btn" id="doc_prompt_builder">Prompt Builder</button>
-          <button class="btn" id="doc_open_pricing">Pricing Settings</button>
           <button class="btn" id="add_trip">Trip Charge</button>
           <button class="btn" id="add_fuel">Fuel Surcharge</button>
           <button class="btn" id="add_single">Single Tech Labor</button>
@@ -5564,8 +5558,8 @@ function renderEmployeesView() {
       });
       dom.taxRateCustom.addEventListener("input", updateTotals);
       dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); else if (pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default"); });
-      card.querySelector("#doc_open_pricing").addEventListener("click", ()=> renderPricingSettingsView());
-      card.querySelector("#doc_prompt_builder").addEventListener("click", ()=> {
+      const _docOpenPricingBtn = card.querySelector("#doc_open_pricing"); if (_docOpenPricingBtn) _docOpenPricingBtn.addEventListener("click", ()=> renderPricingSettingsView());
+      const _docPromptBtn = card.querySelector("#doc_prompt_builder"); if (_docPromptBtn) _docPromptBtn.addEventListener("click", ()=> {
         const extra = prompt("Add extra wording or scope to the document description:", "");
         if (extra === null) return;
         const clean = String(extra || "").trim();
@@ -5586,8 +5580,10 @@ function renderEmployeesView() {
             notes: notes,
             recommendations: recs,
             crew: !!crew,
-            type: kind,
             trips: 1,
+            type: docType,
+            doc_type: docType,
+            kind: docType,
             dates: [dom.date.value || ""],
           });
           dom.work.value = String((resp && resp.description) || "");
@@ -5801,11 +5797,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <div><div class="label">Door Type</div><select class="input" id="dl_door_type"><option value="">Select Door Type --</option><option>Automatic Door</option><option>Man Door</option><option>Storefront Door</option><option>Herculite Door</option><option>Roll Up</option><option>Glass</option><option>Roll/Swing Gate</option><option>Other</option></select></div>
         <div><div class="label">Pass / Fail</div><select class="input" id="dl_pass_fail"><option value="">-- Select --</option><option>Pass</option><option>Fail</option></select></div>
       </div>
-      <div style="margin-top:10px;"><div class="label">Work Performed</div><select class="input" id="dl_work_type"><option value="">-- Select Work Performed --</option><option>PM Services</option><option>Fire Testing</option><option>Other</option></select></div>
-      <div style="margin-top:10px;" id="dl_work_wrap" style="display:none;"><div class="label">Work Performed Details</div><textarea id="dl_repairs" style="min-height:120px;"></textarea></div>
-      <div style="margin-top:10px;"><label style="display:flex; gap:8px; align-items:center;"><input type="checkbox" id="dl_has_recommendations" /> <span>Additional Recommendations Needed</span></label></div>
-      <div style="margin-top:10px; display:none;" id="dl_recommendations_wrap"><div class="label">Additional Recommendations</div><textarea id="dl_recommendations" style="min-height:120px;"></textarea></div>
-      <div style="margin-top:10px;"><div class="label">Notes</div><textarea id="dl_notes" style="min-height:120px;"></textarea></div>
+      <div style="margin-top:10px;"><div class="label">Repairs</div><textarea id="dl_repairs" style="min-height:120px;"></textarea></div>
+      <div style="margin-top:10px;"><div class="label">Additional Recommendations</div><textarea id="dl_recommendations"></textarea></div>
+      <div style="margin-top:10px;"><div class="label">Notes</div><textarea id="dl_notes"></textarea></div>
       <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
         <button class="btn btn-orange" id="dl_save">Save Door Log</button>
         <button class="btn" id="dl_clear">Clear</button>
@@ -5832,9 +5826,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         door_id: card.querySelector("#dl_door_id").value.trim(),
         door_type: card.querySelector("#dl_door_type").value.trim(),
         pass_fail: card.querySelector("#dl_pass_fail").value.trim(),
-        work_performed_type: card.querySelector("#dl_work_type").value.trim(),
         repairs: card.querySelector("#dl_repairs").value.trim(),
-        needs_quote_return: !!card.querySelector("#dl_has_recommendations").checked,
         additional_recommendations: card.querySelector("#dl_recommendations").value.trim(),
         notes: card.querySelector("#dl_notes").value.trim(),
       };
@@ -5849,16 +5841,13 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       card.querySelector("#dl_door_id").value = item?.door_id || "";
       card.querySelector("#dl_door_type").value = item?.door_type || "";
       card.querySelector("#dl_pass_fail").value = item?.pass_fail || "";
-      card.querySelector("#dl_work_type").value = item?.work_performed_type || "";
       card.querySelector("#dl_repairs").value = item?.repairs || "";
-      card.querySelector("#dl_has_recommendations").checked = !!item?.needs_quote_return;
       card.querySelector("#dl_recommendations").value = item?.additional_recommendations || "";
       card.querySelector("#dl_notes").value = item?.notes || "";
-      toggleDoorRecordFields();
     }
     function clearForm() { fillForm(null); }
     function matches(item, q) {
-      const hay = [item.customer, item.address, item.project, item.job_number, item.door_location, item.door_id, item.door_type, item.pass_fail, item.work_performed_type, item.repairs, item.additional_recommendations, item.notes].join(" ").toLowerCase();
+      const hay = [item.customer, item.address, item.project, item.job_number, item.door_location, item.door_id, item.door_type, item.pass_fail, item.repairs, item.additional_recommendations, item.notes].join(" ").toLowerCase();
       return !q || hay.includes(q);
     }
     function renderList() {
@@ -5869,7 +5858,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       filtered.forEach(item => {
         const row = document.createElement("div");
         row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Record")}</div><div class="badge">${escapeHtml(item.pass_fail || "Open")}</div></div><div class="jobrow-addr">${escapeHtml(item.address || "")}</div><div class="hint">Project: ${escapeHtml(item.project || "")} | Job #: ${escapeHtml(item.job_number || "")}</div><div class="hint">Door Location: ${escapeHtml(item.door_location || "")} | Door ID: ${escapeHtml(item.door_id || "")}</div><div class="hint">Door Type: ${escapeHtml(item.door_type || "")}</div><div class="hint">Work Performed: ${escapeHtml(item.work_performed_type || "")}${item.repairs ? " - " + escapeHtml(item.repairs || "") : ""}</div><div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations || "")}</div>${item.needs_quote_return ? `<div class="hint" style="color:#b91c1c; font-weight:700;">Flag for office: Quote / Return visit needed</div>` : ""}<div class="hint">Notes: ${escapeHtml(item.notes || "")}</div>`;
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Record")}</div><div class="badge">${escapeHtml(item.pass_fail || "Open")}</div></div><div class="jobrow-addr">${escapeHtml(item.address || "")}</div><div class="hint">Project: ${escapeHtml(item.project || "")} | Job #: ${escapeHtml(item.job_number || "")}</div><div class="hint">Door Location: ${escapeHtml(item.door_location || "")} | Door ID: ${escapeHtml(item.door_id || "")}</div><div class="hint">Door Type: ${escapeHtml(item.door_type || "")}</div><div class="hint">Repairs: ${escapeHtml(item.repairs || "")}</div><div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations || "")}</div><div class="hint">Notes: ${escapeHtml(item.notes || "")}</div>`;
         const actions = document.createElement("div");
         actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "8px";
         const edit = document.createElement("button"); edit.className = "btn"; edit.textContent = "Edit"; edit.addEventListener("click", ()=> fillForm(item));
@@ -5928,30 +5917,16 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       card.querySelector("#dl_customer").value = display;
       if (addr && !card.querySelector("#dl_address").value.trim()) card.querySelector("#dl_address").value = addr;
     }
-    function toggleDoorRecordFields() {
-      const workType = card.querySelector("#dl_work_type")?.value || "";
-      const workWrap = card.querySelector("#dl_work_wrap");
-      const recCheck = card.querySelector("#dl_has_recommendations");
-      const recWrap = card.querySelector("#dl_recommendations_wrap");
-      if (workWrap) workWrap.style.display = workType === "Other" ? "block" : "none";
-      if (recWrap) recWrap.style.display = recCheck && recCheck.checked ? "block" : "none";
-      if (workType !== "Other" && card.querySelector("#dl_repairs")) card.querySelector("#dl_repairs").value = "";
-      if ((!recCheck || !recCheck.checked) && card.querySelector("#dl_recommendations")) card.querySelector("#dl_recommendations").value = "";
-    }
-
     async function load() {
       const data = await apiListDoorLogs().catch(() => []);
       allLogs = Array.isArray(data) ? data : [];
       customers = await apiListCustomers().catch(() => []);
       renderCustomerDatalist();
-      toggleDoorRecordFields();
       renderList();
     }
     card.querySelector("#dl_customer").addEventListener("input", (e)=> renderCustomerResults(e.target.value));
     card.querySelector("#dl_customer").addEventListener("change", autofillCustomerAddress);
     card.querySelector("#dl_customer").addEventListener("blur", ()=> setTimeout(() => { autofillCustomerAddress(); hideCustomerResults(); }, 150));
-    card.querySelector("#dl_work_type").addEventListener("change", toggleDoorRecordFields);
-    card.querySelector("#dl_has_recommendations").addEventListener("change", toggleDoorRecordFields);
     card.querySelector("#dl_save").addEventListener("click", async ()=> {
       const payload = readForm();
       if (!payload.door_id) { alert("Door ID is required so each individual door can be tracked and searched."); return; }
