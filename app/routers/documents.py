@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Dict
 import re
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -37,26 +37,27 @@ class DocCreate(BaseModel):
     items: List[dict[str, Any]] = []
 
 
-
-
-
-
 class AutoDescriptionPayload(BaseModel):
+    job_id: str = ""
     customer: str = ""
     address: str = ""
     project: str = ""
     job_number: str = ""
     door_location: str = ""
     door_id: str = ""
+    door_type: str = ""
     notes: str = ""
     recommendations: str = ""
     office_notes: str = ""
     job_notes: str = ""
     work: str = ""
     doc_type: str = "estimate"
+    type: str = ""
     crew: bool = False
     trips: int = 1
     dates: List[str] = []
+    completion_forms: List[dict[str, Any]] = []
+    recommendation_forms: List[dict[str, Any]] = []
 
 
 def _clean_text(value: Any) -> str:
@@ -64,16 +65,26 @@ def _clean_text(value: Any) -> str:
     return " ".join(text.split())
 
 
+def _clean_multiline(value: Any) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    lines = [" ".join(line.split()) for line in text.split("\n")]
+    return "\n".join(line for line in lines if line)
+
+
 def _looks_like_contact_or_address(text: str) -> bool:
     lowered = f" {_clean_text(text).lower()} "
     if not lowered.strip():
         return True
-    address_tokens = [" ave ", " avenue ", " st ", " street ", " rd ", " road ", " dr ", " drive ", " blvd ", " boulevard ", " suite ", " ste ", " escondido ", " ca ", " zip "]
+    address_tokens = [
+        " ave ", " avenue ", " st ", " street ", " rd ", " road ", " dr ", " drive ",
+        " blvd ", " boulevard ", " suite ", " ste ", " escondido ", " san diego ",
+        " ca ", " zip ", " towne centre ", " phone ", " email ", " contact "
+    ]
     if any(tok in lowered for tok in address_tokens):
         return True
     if "@" in lowered:
         return True
-    if sum(ch.isdigit() for ch in lowered) >= 4:
+    if sum(ch.isdigit() for ch in lowered) >= 7:
         return True
     return False
 
@@ -81,7 +92,7 @@ def _looks_like_contact_or_address(text: str) -> bool:
 def _split_note_parts(*values: Any) -> List[str]:
     parts: List[str] = []
     for value in values:
-        text = _clean_text(value)
+        text = _clean_multiline(value)
         if not text:
             continue
         for piece in re.split(r"(?<=[.!?])\s+|\n+", text):
@@ -109,76 +120,239 @@ def _as_sentence(text: str) -> str:
     return clean
 
 
-def _proposal_title(payload: AutoDescriptionPayload) -> str:
-    for value in [payload.project, payload.door_location, payload.door_id]:
-        clean = _clean_text(value)
-        if clean and not _looks_like_contact_or_address(clean):
-            return clean
-    return "Opening"
+def _as_list(value: Any) -> List[dict[str, Any]]:
+    if isinstance(value, list):
+        return [x for x in value if isinstance(x, dict)]
+    if isinstance(value, dict):
+        return [value]
+    return []
 
 
-def generate_description(payload: AutoDescriptionPayload) -> str:
-    tech = "Technicians" if payload.crew else "Technician"
-    doc_type = (_clean_text(payload.doc_type) or "estimate").lower()
+def _get_any(source: dict[str, Any], keys: List[str]) -> Any:
+    for key in keys:
+        if key in source and source.get(key) not in (None, ""):
+            return source.get(key)
+        for actual_key, actual_value in source.items():
+            if str(actual_key).lower().replace("_", "") == key.lower().replace("_", "") and actual_value not in (None, ""):
+                return actual_value
+    return ""
 
-    # Pull best data
-    completion_notes = _clean_text(payload.notes)
-    office_notes = _clean_text(payload.office_notes)
-    job_notes = _clean_text(payload.job_notes)
-    recommendations = _clean_text(payload.recommendations)
 
-    door = _clean_text(payload.door_location)
-    door_type = _clean_text(payload.project) or _clean_text(payload.door_id)
+def _job_from_store(request: Optional[Request], job_id: str) -> dict[str, Any]:
+    if not request or not job_id:
+        return {}
+    store = getattr(request.app.state, "calendar_store", None)
+    if not store:
+        return {}
+    try:
+        job = store.get_job(job_id)
+        return job if isinstance(job, dict) else {}
+    except Exception:
+        return {}
 
-    # -----------------------------
-    # INVOICE (clean field style)
-    # -----------------------------
+
+def _merge_payload_with_job(payload: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(job or {})
+    merged.update({k: v for k, v in (payload or {}).items() if v not in (None, "", [], {})})
+
+    merged.setdefault("office_notes", job.get("office_notes") or job.get("officeNotes") or "")
+    merged.setdefault("job_notes", job.get("job_notes") or job.get("jobNotes") or "")
+    merged.setdefault("customer", job.get("customer") or job.get("customer_name") or "")
+    merged.setdefault("address", job.get("address") or job.get("job_address") or "")
+    merged.setdefault("job_number", job.get("job_number") or job.get("jobNumber") or "")
+    merged.setdefault("completion_forms", job.get("completion_forms") or job.get("completionForms") or [])
+    merged.setdefault("recommendation_forms", job.get("recommendation_forms") or job.get("recommendationForms") or [])
+    return merged
+
+
+def _collect_forms(data: dict[str, Any]) -> List[dict[str, Any]]:
+    forms: List[dict[str, Any]] = []
+    for key in [
+        "recommendation_forms",
+        "recommendationForms",
+        "recommendations_forms",
+        "completion_forms",
+        "completionForms",
+        "forms",
+    ]:
+        forms.extend(_as_list(data.get(key)))
+
+    nested = data.get("documents") or {}
+    if isinstance(nested, dict):
+        forms.extend(_as_list(nested.get("recommendation_forms")))
+        forms.extend(_as_list(nested.get("completion_forms")))
+
+    out: List[dict[str, Any]] = []
+    seen = set()
+    for form in forms:
+        key = str(form.get("id") or form.get("created_at") or form)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(form)
+    return out
+
+
+def _form_score(form: dict[str, Any]) -> int:
+    text = " ".join(str(v) for v in form.values()).lower()
+    score = 0
+    if "recommend" in text:
+        score += 6
+    if "ready to quote" in text or "ready_to_quote" in text:
+        score += 6
+    if "parts required" in text or "parts_required" in text:
+        score += 5
+    if _clean_text(_get_any(form, ["recommendations", "additional_recommendations", "additionalRecommendations"])):
+        score += 5
+    if _clean_text(_get_any(form, ["tech_notes", "techNotes", "notes"])):
+        score += 3
+    if _clean_text(_get_any(form, ["door_location", "doorLocation"])):
+        score += 2
+    return score
+
+
+def _best_form(data: dict[str, Any]) -> dict[str, Any]:
+    forms = _collect_forms(data)
+    if not forms:
+        return {}
+    return sorted(forms, key=_form_score, reverse=True)[0]
+
+
+def _extract_parts_required(value: Any) -> List[str]:
+    text = _clean_multiline(value)
+    if not text:
+        return []
+    text = re.sub(r"^parts\s+required\s*:\s*", "", text, flags=re.I)
+    raw_items = re.split(r"\n+|;|,(?=\s*\(?\d|\s*\d+x|\s*1x|\s*\()", text)
+    items: List[str] = []
+    for raw in raw_items:
+        item = _clean_text(raw)
+        if not item:
+            continue
+        item = re.sub(r"^\-\s*", "", item)
+        items.append(item)
+    return items
+
+
+def _extract_approval_scope(job_notes: str) -> List[str]:
+    text = _clean_multiline(job_notes)
+    if not text:
+        return []
+    match = re.search(r"approval\s+to\s+replace\s*:?(.*)$", text, flags=re.I | re.S)
+    if not match:
+        return []
+    raw = match.group(1).strip()
+    items: List[str] = []
+    for piece in re.split(r"\n+|;|,(?=\s*\(?\d|\s*\d+x|\s*1x|\s*\()", raw):
+        item = _clean_text(piece)
+        if item:
+            items.append(item)
+    return items
+
+
+def _normalize_findings(text: str, door_location: str, door_type: str) -> str:
+    clean = _clean_text(text)
+    if not clean:
+        return ""
+    clean = re.sub(r"^arrived\s+onsite\s+and\s+checked\s+in\s+with\s+customer\.?\s*", "", clean, flags=re.I)
+    clean = re.sub(r"\s*cleaned\s+up\s+and\s+checked\s+out,?\.?$", "", clean, flags=re.I)
+
+    if clean.lower().startswith("moved to "):
+        clean = re.sub(r"^moved\s+to\s+", "At the ", clean, flags=re.I)
+    elif door_location or door_type:
+        target = " ".join(x for x in [door_location, door_type] if x).strip()
+        if target and target.lower() not in clean.lower():
+            clean = f"At the {target}, {clean[0].lower() + clean[1:] if clean else clean}"
+
+    return _as_sentence(clean)
+
+
+def _proposal_title(data: dict[str, Any], form: dict[str, Any]) -> str:
+    door_location = _clean_text(
+        _get_any(form, ["door_location", "doorLocation"])
+        or data.get("door_location")
+        or data.get("doorLocation")
+        or data.get("door_id")
+        or data.get("doorId")
+    )
+    door_type = _clean_text(
+        _get_any(form, ["door_type", "doorType"])
+        or data.get("door_type")
+        or data.get("doorType")
+    )
+    project = _clean_text(data.get("project"))
+    if project and not _looks_like_contact_or_address(project):
+        return project
+    title = " ".join(x for x in [door_location, door_type] if x).strip()
+    return title or "Opening"
+
+
+def generate_description_from_data(data: dict[str, Any]) -> str:
+    doc_type = _clean_text(data.get("doc_type") or data.get("type") or "estimate").lower()
+    crew = bool(data.get("crew"))
+    tech = "Technicians" if crew else "Technician"
+
+    form = _best_form(data)
+    office_notes = _clean_text(data.get("office_notes") or data.get("officeNotes"))
+    job_notes = _clean_multiline(data.get("job_notes") or data.get("jobNotes"))
+    payload_notes = _clean_text(data.get("notes") or data.get("work"))
+
+    form_notes = _clean_text(_get_any(form, ["tech_notes", "techNotes", "notes", "recommendations", "recommendation"]))
+    form_recs = _clean_text(_get_any(form, ["recommendations", "additional_recommendations", "additionalRecommendations", "recommendation"]))
+    parts_required = _get_any(form, ["parts_required", "partsRequired", "parts", "parts_used", "partsUsed"])
+    time_required = _clean_text(_get_any(form, ["time_required", "timeRequired", "time", "hours"]))
+    door_location = _clean_text(_get_any(form, ["door_location", "doorLocation"]) or data.get("door_location") or data.get("doorLocation"))
+    door_type = _clean_text(_get_any(form, ["door_type", "doorType"]) or data.get("door_type") or data.get("doorType"))
+
+    # Recommendation/completion forms are preferred over dispatch/sales-lead notes.
+    preferred_source = form_notes or form_recs or payload_notes or office_notes or job_notes
+
     if doc_type == "invoice":
-        lines = [f"{tech} arrived onsite and checked in with customer."]
-
-        source = completion_notes or office_notes or job_notes
-
-        if source:
-            lines.append(_as_sentence(source))
-
-        if recommendations:
-            lines.append(f"Additional recommendations noted: {recommendations}.")
-
+        lines: List[str] = [f"{tech} arrived onsite and checked in with customer."]
+        invoice_body = preferred_source or office_notes or job_notes
+        if invoice_body:
+            cleaned = _clean_text(invoice_body)
+            cleaned = re.sub(r"^arrived\s+onsite\s+and\s+checked\s+in\s+with\s+customer\.?\s*", "", cleaned, flags=re.I)
+            if cleaned:
+                lines.append(_as_sentence(cleaned))
+        if form_recs and form_recs.lower() not in " ".join(lines).lower():
+            lines.append(f"Additional recommendations noted: {_clean_text(form_recs)}.")
         lines.append("********JOB COMPLETE*********")
-        return " ".join(lines)
+        return " ".join(line for line in lines if line).strip()
 
-    # -----------------------------
-    # ESTIMATE (proper proposal)
-    # -----------------------------
-    title = f"{door} {door_type}".strip() or "Opening"
+    title = _proposal_title(data, form)
+    lines: List[str] = [f"Proposal Includes – {title}"]
 
-    lines = [f"Proposal Includes – {title}"]
+    findings = _normalize_findings(preferred_source, door_location, door_type)
+    if findings:
+        lines.append(f"Per our site visit, {findings}")
+    else:
+        lines.append("Per our site visit, technician reviewed the condition of the opening and identified recommended repairs.")
 
-    source = completion_notes or office_notes or job_notes
-
-    if source:
-        lines.append(f"Per our site visit, {source}")
-
-    # Extract structured replacement items
-    scope_items = []
-    if "approval to replace" in job_notes.lower():
-        parts = job_notes.lower().split("approval to replace")
-        if len(parts) > 1:
-            raw = parts[1]
-            for line in raw.split("\n"):
-                clean = _clean_text(line)
-                if clean:
-                    scope_items.append(clean)
+    scope_items = _extract_parts_required(parts_required)
+    if not scope_items:
+        scope_items = _extract_approval_scope(job_notes)
 
     if scope_items:
+        lines.append("")
         lines.append("Recommended scope includes:")
         for item in scope_items:
             lines.append(f"- {item}")
 
+    if time_required:
+        lines.append("")
+        lines.append(f"Estimated onsite labor: {time_required} hour(s).")
+
+    lines.append("")
     lines.append("Please allow 1–3 weeks for scheduling and material procurement.")
     lines.append("****EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS****")
 
-    return "\n".join(lines)
+    return "\n".join(line for line in lines if line is not None).strip()
+
+
+def generate_description(payload: AutoDescriptionPayload) -> str:
+    return generate_description_from_data(payload.dict())
+
 
 class SignoffCreate(BaseModel):
     job_id: str = ""
@@ -191,6 +365,7 @@ class SignoffCreate(BaseModel):
     departure_time: str = ""
     additional_techs_onsite: bool = False
     signature_data: str = ""
+
 
 def _doc_response(item: dict) -> dict:
     row = dict(item)
@@ -362,6 +537,11 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
 
 
 @router.post("/auto-description")
-def auto_description(payload: AutoDescriptionPayload, request: Request, x_api_key: Optional[str] = Header(default=None)):
+def auto_description(payload: dict[str, Any], request: Request, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    return {"ok": True, "description": generate_description(payload)}
+
+    job_id = _clean_text(payload.get("job_id") or payload.get("id") or "")
+    job = _job_from_store(request, job_id)
+    data = _merge_payload_with_job(payload, job)
+
+    return {"ok": True, "description": generate_description_from_data(data)}
