@@ -120,33 +120,65 @@ def _proposal_title(payload: AutoDescriptionPayload) -> str:
 def generate_description(payload: AutoDescriptionPayload) -> str:
     tech = "Technicians" if payload.crew else "Technician"
     doc_type = (_clean_text(payload.doc_type) or "estimate").lower()
-    notes = _split_note_parts(payload.office_notes, payload.job_notes, payload.notes, payload.work)
-    recs = _split_note_parts(payload.recommendations)
 
+    # Pull best data
+    completion_notes = _clean_text(payload.notes)
+    office_notes = _clean_text(payload.office_notes)
+    job_notes = _clean_text(payload.job_notes)
+    recommendations = _clean_text(payload.recommendations)
+
+    door = _clean_text(payload.door_location)
+    door_type = _clean_text(payload.project) or _clean_text(payload.door_id)
+
+    # -----------------------------
+    # INVOICE (clean field style)
+    # -----------------------------
     if doc_type == "invoice":
-        lines: List[str] = [f"{tech} arrived onsite and checked in with customer."]
-        for part in notes:
-            lowered = part.lower()
-            if lowered.startswith("arrived on site") or lowered.startswith("arrived onsite"):
-                continue
-            lines.append(_as_sentence(part))
-        for rec in recs:
-            lines.append(f"Recommended repairs: {_clean_text(rec)}.")
-        lines.append("********JOB COMPLETE*********")
-        return " ".join(line for line in lines if line).strip()
+        lines = [f"{tech} arrived onsite and checked in with customer."]
 
-    title = _proposal_title(payload)
+        source = completion_notes or office_notes or job_notes
+
+        if source:
+            lines.append(_as_sentence(source))
+
+        if recommendations:
+            lines.append(f"Additional recommendations noted: {recommendations}.")
+
+        lines.append("********JOB COMPLETE*********")
+        return " ".join(lines)
+
+    # -----------------------------
+    # ESTIMATE (proper proposal)
+    # -----------------------------
+    title = f"{door} {door_type}".strip() or "Opening"
+
     lines = [f"Proposal Includes – {title}"]
-    lines.append(f"{tech} arrived onsite and checked in with customer to review the condition of the opening.")
-    if notes:
-        lines.extend(_as_sentence(part) for part in notes)
-    elif payload.job_notes:
-        lines.append(_as_sentence(payload.job_notes))
-    for rec in recs:
-        lines.append(_as_sentence(rec))
-    lines.append("Scheduling to be coordinated with customer upon approval.")
+
+    source = completion_notes or office_notes or job_notes
+
+    if source:
+        lines.append(f"Per our site visit, {source}")
+
+    # Extract structured replacement items
+    scope_items = []
+    if "approval to replace" in job_notes.lower():
+        parts = job_notes.lower().split("approval to replace")
+        if len(parts) > 1:
+            raw = parts[1]
+            for line in raw.split("\n"):
+                clean = _clean_text(line)
+                if clean:
+                    scope_items.append(clean)
+
+    if scope_items:
+        lines.append("Recommended scope includes:")
+        for item in scope_items:
+            lines.append(f"- {item}")
+
+    lines.append("Please allow 1–3 weeks for scheduling and material procurement.")
     lines.append("****EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS****")
-    return " ".join(line for line in lines if line).strip()
+
+    return "\n".join(lines)
 
 class SignoffCreate(BaseModel):
     job_id: str = ""
