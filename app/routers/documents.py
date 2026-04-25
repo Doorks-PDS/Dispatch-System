@@ -211,10 +211,27 @@ def _form_score(form: dict[str, Any]) -> int:
     return score
 
 
-def _best_form(data: dict[str, Any]) -> dict[str, Any]:
+def _best_form(data: dict[str, Any], doc_type: str = "estimate") -> dict[str, Any]:
     forms = _collect_forms(data)
     if not forms:
         return {}
+
+    quote_forms = [
+        f for f in forms
+        if bool(f.get("ready_to_quote"))
+        or _clean_text(_get_any(f, ["parts_required", "partsRequired", "time_required", "timeRequired"]))
+        or str(_get_any(f, ["status_update", "statusUpdate", "status"])).strip().lower() == "quote"
+    ]
+
+    completion_forms = [
+        f for f in forms
+        if _clean_text(_get_any(f, ["tech_notes", "techNotes", "parts_used", "partsUsed"]))
+    ]
+
+    if str(doc_type or "").lower() == "estimate" and quote_forms:
+        return sorted(quote_forms, key=_form_score, reverse=True)[0]
+    if str(doc_type or "").lower() == "invoice" and completion_forms:
+        return sorted(completion_forms, key=_form_score, reverse=True)[0]
     return sorted(forms, key=_form_score, reverse=True)[0]
 
 
@@ -292,12 +309,12 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
     crew = bool(data.get("crew"))
     tech = "Technicians" if crew else "Technician"
 
-    form = _best_form(data)
+    form = _best_form(data, doc_type)
     office_notes = _clean_text(data.get("office_notes") or data.get("officeNotes"))
     job_notes = _clean_multiline(data.get("job_notes") or data.get("jobNotes"))
     payload_notes = _clean_text(data.get("notes") or data.get("work"))
 
-    form_notes = _clean_text(_get_any(form, ["tech_notes", "techNotes", "notes", "recommendations", "recommendation"]))
+    form_tech_notes = _clean_text(_get_any(form, ["tech_notes", "techNotes", "notes"]))
     form_recs = _clean_text(_get_any(form, ["recommendations", "additional_recommendations", "additionalRecommendations", "recommendation"]))
     parts_required = _get_any(form, ["parts_required", "partsRequired", "parts", "parts_used", "partsUsed"])
     time_required = _clean_text(_get_any(form, ["time_required", "timeRequired", "time", "hours"]))
@@ -305,7 +322,8 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
     door_type = _clean_text(_get_any(form, ["door_type", "doorType"]) or data.get("door_type") or data.get("doorType"))
 
     # Recommendation/completion forms are preferred over dispatch/sales-lead notes.
-    preferred_source = form_notes or form_recs or payload_notes or office_notes or job_notes
+    # For estimates, recommendation text is the best source. For invoices, tech notes are the best source.
+    preferred_source = (form_recs if doc_type == "estimate" else form_tech_notes) or form_tech_notes or form_recs or payload_notes or office_notes or job_notes
 
     if doc_type == "invoice":
         lines: List[str] = [f"{tech} arrived onsite and checked in with customer."]
