@@ -2420,7 +2420,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const editPhoneInput = row2.querySelector("#ej_phone");
       const editEmailInput = row2.querySelector("#ej_email");
       const editContactList = card.querySelector(`#${contactListId}`);
-      wireKnownAddressAutofill({ input: row1.querySelector("#ej_address"), customerInput: editCustomerInput, knownAddresses, extraAddresses: customers.map(c => c.address || c.site_address || c.job_address || "").filter(Boolean) });
       let editLiveContacts = Array.isArray(contacts) ? [...contacts] : [];
       const renderEditContacts = () => {
         if (!editContactList) return;
@@ -2888,8 +2887,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
  
     async function openNewDispatch(defaultDate) {
-      const customers = await apiListCustomers().catch(() => []);
-      const contacts = await apiListContacts().catch(() => []);
+      let customers = [];
+      let contacts = [];
+      let knownAddresses = [];
+      try { customers = await apiListCustomers(); } catch (e) { customers = []; }
+      try { contacts = await apiListContacts(); } catch (e) { contacts = []; }
+      try { knownAddresses = await apiListAddresses({ limit: 1500 }); } catch (e) { knownAddresses = []; }
  
       openDrawer("New Dispatch", (container, overlay) => {
         const customerListId = `cust-${Math.random().toString(36).slice(2)}`;
@@ -3031,7 +3034,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const cityInput = row1b.querySelector("#nj_city");
         const stateInput = row1b.querySelector("#nj_state");
         const zipInput = row1b.querySelector("#nj_zip");
-        wireKnownAddressAutofill({ input: addressInput, customerInput: newJobCustomerInput, knownAddresses, extraAddresses: existingAddresses });
+        wireKnownAddressAutofill({
+          input: addressInput,
+          customerInput: newJobCustomerInput,
+          knownAddresses,
+          extraAddresses: existingAddresses,
+        });
+        addressInput.addEventListener("change", () => {
+          const match = findMatchingAddress(knownAddresses, addressInput.value);
+          if (!match) return;
+          if (cityInput && !cityInput.value) cityInput.value = match.city || "";
+          if (stateInput && !stateInput.value) stateInput.value = match.state || "";
+          if (zipInput && !zipInput.value) zipInput.value = match.zip || "";
+        });
         addressInput.addEventListener("doorks:address-selected", (ev) => {
           const d = (ev && ev.detail) || {};
           if (d.formatted_address) addressInput.value = d.formatted_address;
