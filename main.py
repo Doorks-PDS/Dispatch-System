@@ -54,10 +54,8 @@ from app.routers.data import router as data_router
 from app.routers.auth import router as auth_router
 from app.routers.admin import router as admin_router
 from app.services.user_store import UsersStore
-from app.services.pricing_store import PricingStore
-from app.services.door_logs_store import DoorLogsStore
-from app.routers.pricing import router as pricing_router
-from app.routers.door_logs import router as door_logs_router
+from app.services.address_store import AddressStore
+from app.routers.addresses import router as addresses_router
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -172,8 +170,7 @@ app.state.documents_store = DocumentsStore(PROJECT_ROOT)
 app.state.crm_store = CRMStore(PROJECT_ROOT)
 app.state.timeoff_store = TimeOffStore(PROJECT_ROOT)
 app.state.users_store = UsersStore(PROJECT_ROOT)
-app.state.pricing_store = PricingStore(PROJECT_ROOT)
-app.state.door_logs_store = DoorLogsStore(PROJECT_ROOT)
+app.state.address_store = AddressStore(PROJECT_ROOT)
 app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -188,8 +185,7 @@ app.include_router(crm_router)
 app.include_router(timeoff_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
-app.include_router(pricing_router)
-app.include_router(door_logs_router)
+app.include_router(addresses_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):

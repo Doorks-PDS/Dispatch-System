@@ -730,6 +730,21 @@
     });
     return data.item;
   }
+
+  async function apiListAddresses(params = {}) {
+    const qs = new URLSearchParams(params);
+    const data = await fetchJSON(`/addresses?${qs.toString()}`);
+    return data.items || [];
+  }
+
+  async function apiCreateAddress(payload) {
+    const data = await fetchJSON("/addresses", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return data.item;
+  }
  
   async function apiListContacts(params = {}) {
     const qs = new URLSearchParams(params);
@@ -1496,6 +1511,48 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     setTimeout(retryBind, 2500);
     setTimeout(retryBind, 5000);
   }
+
+  function normalizeAddressText(v) {
+    return String(v || "").replace(/\s+/g, " ").trim().toLowerCase();
+  }
+
+  function findMatchingAddress(addresses, value) {
+    const typed = normalizeAddressText(value);
+    if (!typed) return null;
+    const source = Array.isArray(addresses) ? addresses : [];
+    return source.find(a => {
+      const addr = normalizeAddressText(a.address || a.formatted_address || a.job_site_address || "");
+      return addr && (addr === typed || addr.includes(typed) || typed.includes(addr));
+    }) || null;
+  }
+
+  function addressDisplayValue(a) {
+    return a ? (a.address || a.formatted_address || a.job_site_address || "") : "";
+  }
+
+  function addressCustomerValue(a) {
+    return a ? (a.company_name || a.customer || a.customer_name || "") : "";
+  }
+
+  function combinedAddressStrings(customerAddresses = [], knownAddresses = []) {
+    const fromCustomers = (customerAddresses || []).map(v => String(v || "").trim()).filter(Boolean);
+    const fromKnown = (knownAddresses || []).map(a => addressDisplayValue(a)).filter(Boolean);
+    return Array.from(new Set([...fromCustomers, ...fromKnown]));
+  }
+
+  function wireKnownAddressAutofill({ input, customerInput = null, knownAddresses = [], extraAddresses = [] }) {
+    if (!input) return;
+    wireAddressSuggestions(input, combinedAddressStrings(extraAddresses, knownAddresses));
+    const apply = () => {
+      const match = findMatchingAddress(knownAddresses, input.value);
+      if (!match) return;
+      const addr = addressDisplayValue(match);
+      if (addr) input.value = addr;
+      const customer = addressCustomerValue(match);
+      if (customerInput && customer && !String(customerInput.value || "").trim()) customerInput.value = customer;
+    };
+    ["change", "blur"].forEach(evt => input.addEventListener(evt, apply));
+  }
  
   function collectJobTechSummary(job) {
     const forms = formsOf(job);
@@ -2247,6 +2304,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     openDrawer("Edit Job", async (drawerBody, overlay) => {
       const customers = await apiListCustomers().catch(() => []);
       const contacts = await apiListContacts().catch(() => []);
+      const knownAddresses = await apiListAddresses({ limit: 1500 }).catch(() => []);
  
       const customerListId = `cust-${Math.random().toString(36).slice(2)}`;
       const contactListId = `cont-${Math.random().toString(36).slice(2)}`;
@@ -2362,6 +2420,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const editPhoneInput = row2.querySelector("#ej_phone");
       const editEmailInput = row2.querySelector("#ej_email");
       const editContactList = card.querySelector(`#${contactListId}`);
+      wireKnownAddressAutofill({ input: row1.querySelector("#ej_address"), customerInput: editCustomerInput, knownAddresses, extraAddresses: customers.map(c => c.address || c.site_address || c.job_address || "").filter(Boolean) });
       let editLiveContacts = Array.isArray(contacts) ? [...contacts] : [];
       const renderEditContacts = () => {
         if (!editContactList) return;
@@ -2972,7 +3031,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const cityInput = row1b.querySelector("#nj_city");
         const stateInput = row1b.querySelector("#nj_state");
         const zipInput = row1b.querySelector("#nj_zip");
-        wireAddressSuggestions(addressInput, existingAddresses);
+        wireKnownAddressAutofill({ input: addressInput, customerInput: newJobCustomerInput, knownAddresses, extraAddresses: existingAddresses });
         addressInput.addEventListener("doorks:address-selected", (ev) => {
           const d = (ev && ev.detail) || {};
           if (d.formatted_address) addressInput.value = d.formatted_address;
@@ -4945,7 +5004,10 @@ function renderCustomersView() {
     const btnContacts = document.createElement("button");
     btnContacts.className = "btn";
     btnContacts.textContent = "Contacts";
-    tabs.append(btnCustomers, btnContacts);
+    const btnAddresses = document.createElement("button");
+    btnAddresses.className = "btn";
+    btnAddresses.textContent = "Addresses";
+    tabs.append(btnCustomers, btnContacts, btnAddresses);
 
     const body = document.createElement("div");
     body.style.marginTop = "14px";
@@ -5038,8 +5100,63 @@ function renderCustomersView() {
       });
     }
 
+    async function renderAddressesTab() {
+      btnCustomers.className = "btn";
+      btnContacts.className = "btn";
+      btnAddresses.className = "btn btn-orange";
+      const [items, customers] = await Promise.all([apiListAddresses({ limit: 1000 }).catch(() => []), apiListCustomers().catch(() => [])]);
+      body.innerHTML = "";
+      const customerListId = `addr-company-${Math.random().toString(36).slice(2)}`;
+      const form = document.createElement("div");
+      form.className = "card";
+      form.innerHTML = `
+        <h3>Addresses</h3>
+        <div class="hint">Saved job-site addresses used for Dispatch, Sales Lead, Door Records, and documents. Legacy addresses are seeded from billable time and tech notes CSVs.</div>
+        <div class="grid2" style="margin-top:12px;">
+          <div><div class="label">Customer</div><input class="input" id="addr_customer" list="${customerListId}" placeholder="Link to existing customer" /></div>
+          <div><div class="label">Address</div><input class="input" id="addr_address" placeholder="Job-site address" /></div>
+          <div><div class="label">Label / Location</div><input class="input" id="addr_label" placeholder="Optional, e.g. North Building" /></div>
+          <div><div class="label">Notes</div><input class="input" id="addr_notes" placeholder="Optional notes" /></div>
+        </div>
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="addr_add">Add Address</button><button class="btn" id="addr_refresh">Refresh</button></div>
+        <div style="margin-top:12px;"><input class="input" id="addr_search" placeholder="Search addresses, customers, job numbers..." /></div>
+        <div id="addr_list" style="display:grid; gap:8px; margin-top:12px;"></div>
+      `;
+      form.appendChild(buildCustomerDatalist(customerListId, customers));
+      body.appendChild(form);
+      const list = form.querySelector("#addr_list");
+      const search = form.querySelector("#addr_search");
+      function renderList() {
+        const q = String(search.value || "").toLowerCase().trim();
+        const filtered = items.filter(a => !q || [a.address, a.customer, a.company_name, a.label, a.notes, a.job_number, a.source].join(" ").toLowerCase().includes(q));
+        list.innerHTML = "";
+        if (!filtered.length) { list.innerHTML = `<div class="hint">No addresses found.</div>`; return; }
+        filtered.slice(0, 500).forEach(a => {
+          const row = document.createElement("div");
+          row.className = "jobrow";
+          row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(a.address || "")}</div><div class="badge">${escapeHtml(a.source || "saved")}</div></div><div class="jobrow-addr">${escapeHtml(a.customer || a.company_name || "")}${a.job_number ? ` - Job #${escapeHtml(a.job_number)}` : ""}</div><div class="hint">${escapeHtml(a.label || a.notes || "")}</div>`;
+          list.appendChild(row);
+        });
+      }
+      form.querySelector("#addr_add").addEventListener("click", async () => {
+        const address = form.querySelector("#addr_address").value.trim();
+        if (!address) return alert("Address is required.");
+        await apiCreateAddress({
+          customer: form.querySelector("#addr_customer").value.trim(),
+          address,
+          label: form.querySelector("#addr_label").value.trim(),
+          notes: form.querySelector("#addr_notes").value.trim(),
+        });
+        renderAddressesTab();
+      });
+      form.querySelector("#addr_refresh").addEventListener("click", renderAddressesTab);
+      search.addEventListener("input", renderList);
+      renderList();
+    }
+
     btnCustomers.addEventListener("click", ()=>{ activeTab = "customers"; renderCustomersTab(); });
     btnContacts.addEventListener("click", ()=>{ activeTab = "contacts"; renderContactsTab(); });
+    btnAddresses.addEventListener("click", ()=>{ activeTab = "addresses"; renderAddressesTab(); });
 
     root.appendChild(card);
     root.appendChild(tabs);
@@ -5047,7 +5164,7 @@ function renderCustomersView() {
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
 
-    currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : renderContactsTab() };
+    currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : activeTab === "contacts" ? renderContactsTab() : renderAddressesTab() };
     renderCustomersTab();
   }
 
@@ -5417,7 +5534,7 @@ function renderEmployeesView() {
   function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
-      const [customers, employees, pricing] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }))]);
+      const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
       let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems().map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
       let currentPartResults = [];
@@ -5522,7 +5639,7 @@ function renderEmployeesView() {
         if (normalized) { dom.taxRateSelect.value = "__custom__"; dom.taxRateCustom.value = normalized; dom.taxRateCustom.style.display = "block"; dom.taxRateHint.textContent = "Custom sales tax entered."; return; }
         dom.taxRateSelect.value = ""; dom.taxRateCustom.value = ""; dom.taxRateCustom.style.display = "none"; dom.taxRateHint.textContent = "Choose a city tax rate or select Custom."; }
       function getCurrentTaxRateValue() { return dom.taxRateSelect.value === "__custom__" ? String(dom.taxRateCustom.value || "").trim() : String(dom.taxRateSelect.value || "").trim(); }
-      dom.type.value = docType; dom.date.value = (editDoc && editDoc.date) || yyyyMmDd(new Date()); wireAddressSuggestions(dom.address, customers.map(c => c.address).filter(Boolean)); if (editDoc && editDoc.tax_rate != null) setTaxRateValue(editDoc.tax_rate); else setTaxRateValue("");
+      dom.type.value = docType; dom.date.value = (editDoc && editDoc.date) || yyyyMmDd(new Date()); wireKnownAddressAutofill({ input: dom.address, customerInput: dom.customer, knownAddresses, extraAddresses: customers.map(c => c.address).filter(Boolean) }); if (editDoc && editDoc.tax_rate != null) setTaxRateValue(editDoc.tax_rate); else setTaxRateValue("");
       if (job) { dom.customer.value = (editDoc && editDoc.customer) || job.customer || ""; dom.address.value = (editDoc && editDoc.address) || job.address || ""; dom.ship.value = (editDoc && editDoc.ship_to) || job.address || job.customer || ""; dom.po.value = (editDoc && editDoc.po_number) || job.po_number || ""; dom.job.value = (editDoc && editDoc.job_number) || job.job_number || ""; const inferred = inferTaxCityFromAddress(dom.address.value); if (!editDoc && inferred) setTaxRateValue(inferred.rate, inferred.city); }
       if (editDoc) { dom.work.value = editDoc.work || ""; setTaxRateValue(editDoc.tax_rate ?? 7.75); dom.completedBy.value = editDoc.completed_by || ""; dom.number.value = editDoc.number || ""; }
       function applyDocTypeMeta(){ docType=dom.type.value; const defaultNumber=nextDocNumberFromStorage(docType); dom.numberLabel.textContent = docType === "estimate" ? "Estimate #" : "Invoice #"; if (editDoc) return; if (!String(dom.number.value||"").trim() || (docType==="estimate" && String(dom.number.value||"").startsWith("JS")) || (docType==="invoice" && String(dom.number.value||"").startsWith("RE"))) dom.number.value = docType === "estimate" ? (job?.estimate_number || defaultNumber) : (job?.invoice_number || defaultNumber); }
@@ -5838,6 +5955,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
 
     let editId = "";
     let allLogs = [];
+    let knownAddresses = [];
     const list = card.querySelector("#dl_list");
     function readForm() {
       return {
@@ -5971,6 +6089,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const data = await apiListDoorLogs().catch(() => []);
       allLogs = Array.isArray(data) ? data : [];
       customers = await apiListCustomers().catch(() => []);
+      knownAddresses = await apiListAddresses({ limit: 1500 }).catch(() => []);
+      wireKnownAddressAutofill({ input: card.querySelector("#dl_address"), customerInput: card.querySelector("#dl_customer"), knownAddresses, extraAddresses: customers.map(c => c.address || c.site_address || c.job_address || "").filter(Boolean) });
       renderCustomerDatalist();
       renderList();
     }
