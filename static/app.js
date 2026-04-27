@@ -2078,7 +2078,10 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       uploadInput.multiple = true;
       uploadInput.style.display = "none";
       uploadLabel.appendChild(uploadInput);
-      uploadInput.
+      uploadInput.addEventListener("change", async () => {
+        try {
+          if (!uploadInput.files || !uploadInput.files.length) return;
+          await apiUploadCompletionAttachments(job.id, f.id, uploadInput.files);
           const updatedJob = await apiGetJob(job.id);
           if (ctx && ctx.afterSave) await ctx.afterSave();
           renderJobDetails(container, updatedJob, ctx);
@@ -2185,7 +2188,10 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     jobUploadInput.multiple = true;
     jobUploadInput.style.display = "none";
     jobUploadLabel.appendChild(jobUploadInput);
-    jobUploadInput.
+    jobUploadInput.addEventListener("change", async () => {
+      try {
+        if (!jobUploadInput.files || !jobUploadInput.files.length) return;
+        await apiUploadJobAttachments(job.id, jobUploadInput.files);
         const updatedJob = await apiGetJob(job.id);
         if (ctx && ctx.afterSave) await ctx.afterSave();
         renderJobDetails(container, updatedJob, ctx);
@@ -2497,7 +2503,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             date: row0.querySelector("#ej_date").value,
             job_number: rowJob.querySelector("#ej_job_number").value.trim(),
             customer: rowJob.querySelector("#ej_customer").value.trim(),
-            address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+            address: row1.querySelector("#ej_address").value.trim(),
             contact: row1.querySelector("#ej_contact").value.trim(),
             phone: row2.querySelector("#ej_phone").value.trim(),
             email: row2.querySelector("#ej_email").value.trim(),
@@ -3031,7 +3037,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           knownAddresses,
           extraAddresses: existingAddresses,
         });
-        addressInput.
+        addressInput.addEventListener("change", () => {
+          const match = findMatchingAddress(knownAddresses, addressInput.value);
           if (!match) return;
           if (cityInput && !cityInput.value) cityInput.value = match.city || "";
           if (stateInput && !stateInput.value) stateInput.value = match.state || "";
@@ -3068,9 +3075,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         newJobNumberInput.addEventListener("input", () => {
           manualNewJobNumber = String(newJobNumberInput.value || "").trim().length > 0;
         });
-        stSel.
+        stSel.addEventListener("change", () => {
+          manualNewJobNumber = false;
+          refreshSuggestedJobNumber();
         });
-        row0.querySelector("#nj_date").
+        row0.querySelector("#nj_date").addEventListener("change", () => {
+          manualNewJobNumber = false;
+          refreshSuggestedJobNumber();
         });
         refreshSuggestedJobNumber();
  
@@ -3084,7 +3095,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               date: row0.querySelector("#nj_date").value,
               status,
               customer: row1.querySelector("#nj_customer").value.trim(),
-              address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || ""))
+              address: [
                 row1.querySelector("#nj_address").value.trim(),
                 (row1b.querySelector("#nj_city")?.value || "").trim(),
                 (row1b.querySelector("#nj_state")?.value || "").trim(),
@@ -3647,7 +3658,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       };
       renderContactOptions();
       const customerInput = card.querySelector('#so_customer');
-      customerInput.
+      customerInput.addEventListener('change', async () => {
+        contacts = await apiListContacts({ company_name: customerInput.value.trim() }).catch(() => []);
         renderContactOptions();
       });
       const actions = document.createElement("div");
@@ -3980,7 +3992,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     });
  
     btnRefresh.addEventListener("click", refresh);
-    filterWrap.querySelector("#tc_filter").
+    filterWrap.querySelector("#tc_filter").addEventListener("change", refresh);
  
     root.appendChild(card);
     root.appendChild(form);
@@ -4392,7 +4404,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     if (monthInput) {
       const now = new Date();
       monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, "0")}`;
-      monthInput.
+      monthInput.addEventListener("change", refresh);
     }
 
     workspaceBody.innerHTML = "";
@@ -4563,7 +4575,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const title = job?.customer || doc.customer || doc.customer_name || doc.job_number || cleanDocRef(doc.number || doc.estimate_number || "") || "Estimate";
         const subtitle = `${job?.job_number ? `Job #${job.job_number}` : (doc.job_number ? `Job #${doc.job_number}` : "")}${cleanDocRef(doc.number || doc.estimate_number || "") ? `${(job?.job_number || doc.job_number) ? ' - ' : ''}Est ${cleanDocRef(doc.number || doc.estimate_number || '')}` : ""}${job?.status ? ` - ${job.status}` : ""}`;
         const address = job?.street_address || job?.address || doc.address || "";
-        leftList.appendChild(makeDataCenterRow({ title, statusLabel: job?.status || "Quote Sent", subtitle, address, clickItem: job || { id: doc.job_id, job_number: doc.job_number, customer: doc.customer || doc.customer_name || "", address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")), estimate_number: cleanDocRef(doc.number || doc.estimate_number || ""), status: job?.status || "Quote Sent" }, fallbackJob: job }));
+        leftList.appendChild(makeDataCenterRow({ title, statusLabel: job?.status || "Quote Sent", subtitle, address, clickItem: job || { id: doc.job_id, job_number: doc.job_number, customer: doc.customer || doc.customer_name || "", address: doc.address || "", estimate_number: cleanDocRef(doc.number || doc.estimate_number || ""), status: job?.status || "Quote Sent" }, fallbackJob: job }));
       });
       leftCard.appendChild(leftList);
       const rightCard=document.createElement("div"); rightCard.className="card"; rightCard.innerHTML=`<h3>Approved Jobs</h3><div class="hint">Customer - Job # - Estimate #</div>`;
@@ -4571,7 +4583,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       if (!approved.length) rightList.innerHTML=`<div class="hint">No approved jobs yet.</div>`;
       else approved.forEach(j=>{
         const subtitle = `${j.job_number ? `Job #${j.job_number}` : ""}${j.estimate_number ? `${j.job_number ? ' - ' : ''}Est ${j.estimate_number}` : ""}`;
-        rightList.appendChild(makeDataCenterRow({ title: j.customer||j.job_number, statusKind: "approved", subtitle, address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")), clickItem: j, fallbackJob: j }));
+        rightList.appendChild(makeDataCenterRow({ title: j.customer||j.job_number, statusKind: "approved", subtitle, address: j.street_address || j.address || "", clickItem: j, fallbackJob: j }));
       });
       rightCard.appendChild(rightList);
       approvalLayout.append(leftCard,rightCard);
@@ -4611,7 +4623,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           detailRows.push({
             date: j.date || j.created_at || "",
             customer: j.customer || j.customer_name || "",
-            address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+            address: j.street_address || j.address || "",
             technician: tech,
             hours: hrs,
             status: j.status || "",
@@ -4632,7 +4644,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         detailRows.push({
           date: t.date || t.created_at || "",
           customer: t.customer || "",
-          address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+          address: t.address || "",
           technician: tech,
           hours: hrs,
           status: "Timecard",
@@ -5419,7 +5431,7 @@ function renderEmployeesView() {
             if (nextPhone === null) return;
             const nextEmail = prompt("Employee email:", e.email || "");
             if (nextEmail === null) return;
-            const nextAddress = prompt("Employee address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")), e.address || "");
+            const nextAddress = prompt("Employee address:", e.address || "");
             if (nextAddress === null) return;
             try {
               await apiUpdateEmployee(e.id, {
@@ -5427,7 +5439,7 @@ function renderEmployeesView() {
                 role: String(nextRole || "tech").trim() || "tech",
                 phone: String(nextPhone || "").trim(),
                 email: String(nextEmail || "").trim(),
-                address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+                address: String(nextAddress || "").trim(),
               });
               await refresh();
             } catch (err) { alert(err.message || String(err)); }
@@ -5622,7 +5634,7 @@ function renderEmployeesView() {
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
-      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel };
+      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel };
       SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
       if (!String(editDoc?.tax_rate || "").trim() && pricing && pricing.tax != null) {
@@ -5649,7 +5661,7 @@ function renderEmployeesView() {
       let searchTimer=null; async function searchParts(q){ try{ renderPartLookupResults(await apiListParts({ q, limit:25 })); } catch { renderPartLookupResults([]); } }
       function addPartToItems(part){ if(!part) return; items.push(createDocLineItem({ code:part.Item||"", description:part.Description||"", qty:1, rate:Number(part.Price||0), kind:"part", taxable:true })); dom.partLookup.value=""; renderPartLookupResults([]); renderItems(); }
       function findPartMatch(q){ const n=String(q||"").trim().toLowerCase(); if(!n) return null; return currentPartResults.find(p=>String(p.Item||"").trim().toLowerCase()===n) || currentPartResults.find(p=>String(p.Description||"").trim().toLowerCase()===n) || currentPartResults.find(p=>`${p.Item||""} ${p.Description||""}`.toLowerCase().includes(n)) || null; }
-      function makeRow(item,idx){ const tr=document.createElement("tr"); const total=Number(item.qty||0)*Number(item.rate||0); tr.innerHTML=`<td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" data-k="code" value="${item.code||""}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" data-k="description" value="${item.description||""}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" style="min-width:72px;" data-k="qty" type="number" min="0" step="0.25" value="${Number(item.qty||0)}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" style="min-width:96px;" data-k="rate" type="number" min="0" step="0.01" value="${Number(item.rate||0)}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" data-k="taxable" ${item.taxable===false?"":"checked"}/> <span class="hint">Tax</span></label></td><td style="padding:8px; border-bottom:1px solid #f3f4f6; white-space:nowrap;" data-k="line_total">$${money(total)}</td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><button class="btn" data-k="del">&times;</button></td>`; const updateLine=()=>{ tr.querySelector('[data-k="line_total"]').textContent=`$${money(Number(item.qty||0)*Number(item.rate||0))}`; updateTotals(); }; tr.querySelector('[data-k="code"]'). const part=hit.find(p=>String(p.Item||"").trim().toLowerCase()===String(item.code||"").trim().toLowerCase())||hit[0]; if(part){ item.code=part.Item||item.code; item.description=part.Description||item.description; item.rate=Number(part.Price||item.rate||0); item.kind="part"; item.taxable=true; renderItems(); return; } updateLine(); }); tr.querySelector('[data-k="description"]').addEventListener("input", e => { item.description=e.target.value; }); tr.querySelector('[data-k="qty"]').addEventListener("input", e => { item.qty=Number(e.target.value||0); updateLine(); }); tr.querySelector('[data-k="rate"]').addEventListener("input", e => { item.rate=Number(e.target.value||0); updateLine(); }); tr.querySelector('[data-k="taxable"]'). }); tr.querySelector('[data-k="del"]').addEventListener("click", ()=>{ items.splice(idx,1); renderItems(); }); return tr; }
+      function makeRow(item,idx){ const tr=document.createElement("tr"); const total=Number(item.qty||0)*Number(item.rate||0); tr.innerHTML=`<td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" data-k="code" value="${item.code||""}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" data-k="description" value="${item.description||""}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" style="min-width:72px;" data-k="qty" type="number" min="0" step="0.25" value="${Number(item.qty||0)}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" style="min-width:96px;" data-k="rate" type="number" min="0" step="0.01" value="${Number(item.rate||0)}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" data-k="taxable" ${item.taxable===false?"":"checked"}/> <span class="hint">Tax</span></label></td><td style="padding:8px; border-bottom:1px solid #f3f4f6; white-space:nowrap;" data-k="line_total">$${money(total)}</td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><button class="btn" data-k="del">&times;</button></td>`; const updateLine=()=>{ tr.querySelector('[data-k="line_total"]').textContent=`$${money(Number(item.qty||0)*Number(item.rate||0))}`; updateTotals(); }; tr.querySelector('[data-k="code"]').addEventListener("change", async e => { item.code=e.target.value; const hit=await apiListParts({ q:item.code, limit:10 }).catch(()=>[]); const part=hit.find(p=>String(p.Item||"").trim().toLowerCase()===String(item.code||"").trim().toLowerCase())||hit[0]; if(part){ item.code=part.Item||item.code; item.description=part.Description||item.description; item.rate=Number(part.Price||item.rate||0); item.kind="part"; item.taxable=true; renderItems(); return; } updateLine(); }); tr.querySelector('[data-k="description"]').addEventListener("input", e => { item.description=e.target.value; }); tr.querySelector('[data-k="qty"]').addEventListener("input", e => { item.qty=Number(e.target.value||0); updateLine(); }); tr.querySelector('[data-k="rate"]').addEventListener("input", e => { item.rate=Number(e.target.value||0); updateLine(); }); tr.querySelector('[data-k="taxable"]').addEventListener("change", e => { item.taxable=!!e.target.checked; updateLine(); }); tr.querySelector('[data-k="del"]').addEventListener("click", ()=>{ items.splice(idx,1); renderItems(); }); return tr; }
       function renderItems(){ applyDocTypeMeta(); dom.tbody.innerHTML=""; items.forEach((item,idx)=>dom.tbody.appendChild(makeRow(item,idx))); updateTotals(); }
       dom.partLookup.addEventListener("input", ()=>{ clearTimeout(searchTimer); const q=dom.partLookup.value.trim(); if(!q){ renderPartLookupResults([]); return; } searchTimer=setTimeout(()=>searchParts(q), 180); });
       dom.partLookup.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addPartToItems(findPartMatch(dom.partLookup.value)||currentPartResults[0]); }});
@@ -5659,8 +5671,13 @@ function renderEmployeesView() {
       card.querySelector("#add_crew").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:1, rate:Number(pricing.crew_labor || 235), kind:"labor", taxable:false })); renderItems(); });
       card.querySelector("#add_blank").addEventListener("click", ()=>{ items.push(createDocLineItem({ kind:"other" })); renderItems(); });
       card.querySelector("#doc_cancel").addEventListener("click", ()=> overlay.remove());
-      dom.type.
-      dom.taxRateSelect.
+      dom.type.addEventListener("change", renderItems);
+      dom.taxRateSelect.addEventListener("change", ()=>{
+        if (dom.taxRateSelect.value === "__custom__") {
+          dom.taxRateCustom.style.display = "block";
+          dom.taxRateHint.textContent = "Enter a custom sales tax %.";
+          if (!String(dom.taxRateCustom.value || "").trim()) dom.taxRateCustom.value = "7.75";
+          dom.taxRateCustom.focus();
         } else {
           dom.taxRateCustom.style.display = "none";
           const selected = dom.taxRateSelect.options[dom.taxRateSelect.selectedIndex];
@@ -5669,7 +5686,7 @@ function renderEmployeesView() {
         updateTotals();
       });
       dom.taxRateCustom.addEventListener("input", updateTotals);
-      dom.address. if (inferred) setTaxRateValue(inferred.rate, inferred.city); else if (pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default"); });
+      dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); else if (pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default"); });
       const _docOpenPricingBtn = card.querySelector("#doc_open_pricing"); if (_docOpenPricingBtn) _docOpenPricingBtn.addEventListener("click", ()=> renderPricingSettingsView());
       const _docPromptBtn = card.querySelector("#doc_prompt_builder"); if (_docPromptBtn) _docPromptBtn.addEventListener("click", ()=> {
         const extra = prompt("Add extra wording or scope to the document description:", "");
@@ -5685,7 +5702,7 @@ function renderEmployeesView() {
           const resp = await apiAutoFillDescription({
             job_id: job ? (job.id || "") : "",
             customer: dom.customer.value.trim() || (job && job.customer) || "",
-            address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+            address: dom.address.value.trim() || (job && job.address) || "",
             door_location: (job && (job.door_location || job.location_on_site)) || "",
             door_id: (job && (job.door_id || job.opening_id)) || "",
             office_notes: (job && job.office_notes) || "",
@@ -5707,7 +5724,7 @@ function renderEmployeesView() {
       });
       if (!editDoc && pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default");
       renderItems();
-      card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload={ job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""), customer:dom.customer.value.trim(), address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")), work:dom.work.value.trim(), labor:serializeDocItems(items,true), parts:serializeDocItems(items,false), number:dom.number.value.trim(), po_number:dom.po.value.trim(), invoice_number: docType === "invoice" ? dom.number.value.trim() : "", job_number:dom.job.value.trim(), tax_rate:Number(getCurrentTaxRateValue()||0), completed_by: dom.completedBy.value || "", items: items, date: dom.date.value || "", ship_to: dom.ship.value.trim() }; const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
+      card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload={ job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""), customer:dom.customer.value.trim(), address:dom.address.value.trim(), work:dom.work.value.trim(), labor:serializeDocItems(items,true), parts:serializeDocItems(items,false), number:dom.number.value.trim(), po_number:dom.po.value.trim(), invoice_number: docType === "invoice" ? dom.number.value.trim() : "", job_number:dom.job.value.trim(), tax_rate:Number(getCurrentTaxRateValue()||0), completed_by: dom.completedBy.value || "", items: items, date: dom.date.value || "", ship_to: dom.ship.value.trim() }; const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
  
@@ -5788,7 +5805,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
           edit.textContent = "Edit";
           styleActionButton(edit, "ghost", true);
           edit.addEventListener("click", () => {
-            const fakeJob = { id: doc.job_id || "", customer: doc.customer || "", address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")), po_number: doc.po_number || "", job_number: doc.job_number || "", __docEdit: doc };
+            const fakeJob = { id: doc.job_id || "", customer: doc.customer || "", address: doc.address || "", po_number: doc.po_number || "", job_number: doc.job_number || "", __docEdit: doc };
             openEstimateInvoiceDrawer(fakeJob, doc.type || type, null, { refreshDocs: () => renderDocList(type) });
           });
           const del = document.createElement("button");
@@ -5955,7 +5972,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     function readForm() {
       return {
         customer: card.querySelector("#dl_customer").value.trim(),
-        address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+        address: card.querySelector("#dl_address").value.trim(),
         project: card.querySelector("#dl_project").value.trim(),
         job_number: card.querySelector("#dl_job_number").value.trim(),
         door_location: card.querySelector("#dl_location").value.trim(),
@@ -6076,8 +6093,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       if (workWrap) workWrap.style.display = workType === "Other" ? "block" : "none";
       if (recWrap) recWrap.style.display = card.querySelector("#dl_has_recommendations").checked ? "block" : "none";
     }
-    card.querySelector("#dl_work_type").
-    card.querySelector("#dl_has_recommendations").
+    card.querySelector("#dl_work_type").addEventListener("change", updateDoorLogConditionalFields);
+    card.querySelector("#dl_has_recommendations").addEventListener("change", updateDoorLogConditionalFields);
     updateDoorLogConditionalFields();
 
     async function load() {
@@ -6090,8 +6107,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       renderList();
     }
     card.querySelector("#dl_customer").addEventListener("input", (e)=> renderCustomerResults(e.target.value));
-    card.querySelector("#dl_customer").
-    card.querySelector("#dl_customer"). hideCustomerResults(); }, 150));
+    card.querySelector("#dl_customer").addEventListener("change", autofillCustomerAddress);
+    card.querySelector("#dl_customer").addEventListener("blur", ()=> setTimeout(() => { autofillCustomerAddress(); hideCustomerResults(); }, 150));
     card.querySelector("#dl_save").addEventListener("click", async ()=> {
       const payload = readForm();
       if (!payload.door_id) { alert("Door ID is required so each individual door can be tracked and searched."); return; }
@@ -6975,7 +6992,7 @@ function renderSaddlebackView() {
         date: "",
         channel: "",
         customer: "",
-        address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+        address: "",
         item: "",
         ref: "",
         total: 0,
@@ -7045,7 +7062,7 @@ function renderSaddlebackView() {
             date: wrap.querySelector("#sdc_order_date").value,
             channel: wrap.querySelector("#sdc_order_channel").value.trim(),
             customer: wrap.querySelector("#sdc_order_customer").value.trim(),
-            address: (dom && dom.address && dom.address.value ? dom.address.value.trim() : (document.querySelector("#address")?.value || "")),
+            address: wrap.querySelector("#sdc_order_address").value.trim(),
             item: wrap.querySelector("#sdc_order_item").value.trim(),
             ref: wrap.querySelector("#sdc_order_ref").value.trim(),
             total: Number(wrap.querySelector("#sdc_order_total").value || 0),
