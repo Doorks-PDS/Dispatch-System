@@ -1520,9 +1520,13 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     const typed = normalizeAddressText(value);
     if (!typed) return null;
     const source = Array.isArray(addresses) ? addresses : [];
+    // IMPORTANT:
+    // Only treat the address as selected when it exactly matches a saved option.
+    // Do NOT use partial matching here, because partial matching can overwrite a
+    // manually typed new address with the first saved address in the list.
     return source.find(a => {
       const addr = normalizeAddressText(a.address || a.formatted_address || a.job_site_address || "");
-      return addr && (addr === typed || addr.includes(typed) || typed.includes(addr));
+      return addr && addr === typed;
     }) || null;
   }
 
@@ -1551,7 +1555,9 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       const customer = addressCustomerValue(match);
       if (customerInput && customer && !String(customerInput.value || "").trim()) customerInput.value = customer;
     };
-    ["change", "blur"].forEach(evt => input.addEventListener(evt, apply));
+    // Apply only on explicit change/selection. Do not apply on blur because that
+    // can overwrite manually typed addresses that are not yet saved.
+    input.addEventListener("change", apply);
   }
  
   function collectJobTechSummary(job) {
@@ -3095,12 +3101,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               date: row0.querySelector("#nj_date").value,
               status,
               customer: row1.querySelector("#nj_customer").value.trim(),
-              address: [
-                row1.querySelector("#nj_address").value.trim(),
-                (row1b.querySelector("#nj_city")?.value || "").trim(),
-                (row1b.querySelector("#nj_state")?.value || "").trim(),
-                (row1b.querySelector("#nj_zip")?.value || "").trim(),
-              ].filter(Boolean).join(", "),
+              address: row1.querySelector("#nj_address").value.trim(),
               city: "",
               state: "",
               zip: "",
