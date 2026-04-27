@@ -315,39 +315,39 @@
 
 
   const SALES_TAX_OPTIONS = [
-    { city: "San Diego", rate: 7.75 },
-    { city: "Chula Vista", rate: 8.75 },
-    { city: "Del Mar", rate: 8.75 },
-    { city: "El Cajon", rate: 8.25 },
-    { city: "Escondido", rate: 8.75 },
-    { city: "Imperial Beach", rate: 8.75 },
-    { city: "La Mesa", rate: 8.50 },
-    { city: "Lemon Grove", rate: 8.75 },
-    { city: "National City", rate: 8.75 },
-    { city: "Oceanside", rate: 8.25 },
-    { city: "San Marcos", rate: 8.75 },
-    { city: "Solana Beach", rate: 8.75 },
-    { city: "Vista", rate: 8.25 },
-    { city: "Riverside", rate: 7.75 },
-    { city: "Blythe", rate: 8.75 },
-    { city: "Cathedral City", rate: 9.25 },
-    { city: "Coachella", rate: 8.75 },
-    { city: "Corona", rate: 8.75 },
-    { city: "Desert Hot Springs", rate: 8.75 },
-    { city: "Hemet", rate: 8.75 },
-    { city: "Indio", rate: 8.75 },
-    { city: "La Quinta", rate: 8.75 },
-    { city: "Lake Elsinore", rate: 8.75 },
-    { city: "Menifee", rate: 8.75 },
-    { city: "Moreno Valley", rate: 8.75 },
-    { city: "Murrieta", rate: 8.75 },
-    { city: "Norco", rate: 8.75 },
-    { city: "Palm Desert", rate: 8.75 },
-    { city: "Palm Springs", rate: 9.25 },
-    { city: "Riverside (Alt)", rate: 8.75 },
-    { city: "San Jacinto", rate: 8.75 },
-    { city: "Temecula", rate: 8.75 },
-    { city: "Wildomar", rate: 8.75 },
+    { city: "", rate: 7.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.25 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.50 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.25 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.25 },
+    { city: "", rate: 7.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 9.25 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 9.25 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
+    { city: "", rate: 8.75 },
   ];
 
   function inferTaxCityFromAddress(address) {
@@ -2930,9 +2930,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row1b.style.gridTemplateColumns = "1.4fr .6fr .7fr";
         row1b.style.gap = "10px";
         row1b.innerHTML = `
-          <div><div class="label">City</div><input class="input" id="nj_city" name="dispatch_city" placeholder="City" autocomplete="off" autocapitalize="words" spellcheck="false" data-lpignore="true" data-1p-ignore="true" /></div>
-          <div><div class="label">State</div><input class="input" id="nj_state" name="dispatch_state" placeholder="State" maxlength="2" autocomplete="off" autocapitalize="characters" spellcheck="false" data-lpignore="true" data-1p-ignore="true" /></div>
-          <div><div class="label">ZIP</div><input class="input" id="nj_zip" name="dispatch_zip" placeholder="ZIP" autocomplete="off" inputmode="numeric" spellcheck="false" data-lpignore="true" data-1p-ignore="true" /></div>
         `;
  
         const row2 = document.createElement("div");
@@ -3104,9 +3101,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 row1b.querySelector("#nj_state").value.trim(),
                 row1b.querySelector("#nj_zip").value.trim(),
               ].filter(Boolean).join(", "),
-              city: row1b.querySelector("#nj_city").value.trim(),
-              state: row1b.querySelector("#nj_state").value.trim(),
-              zip: row1b.querySelector("#nj_zip").value.trim(),
+              city: "",
+              state: "",
+              zip: "",
               contact: row2.querySelector("#nj_contact").value.trim(),
               phone: row2.querySelector("#nj_phone").value.trim(),
               email: row3.querySelector("#nj_email").value.trim(),
@@ -4054,7 +4051,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.className = "card";
       card.style.padding = "14px";
       card.innerHTML = `
-        <div style="font-size:12px;font-weight:800;opacity:.75;margin-bottom:6px;">${escapeHtml(label)}</div>
+        <div style="font-size:12px;font-weight:800;opacity: ""}</div>
         <div style="font-size:30px;font-weight:900;line-height:1;">${escapeHtml(value)}</div>
         <div class="hint" style="margin-top:6px;">${escapeHtml(hint)}</div>
       `;
@@ -4698,7 +4695,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.className = "card";
         card.style.padding = "14px";
         card.innerHTML = `
-          <div style="font-size:12px;font-weight:800;opacity:.75;margin-bottom:6px;">${escapeHtml(label)}</div>
+          <div style="font-size:12px;font-weight:800;opacity: ""}</div>
           <div style="font-size:30px;font-weight:900;line-height:1;">${escapeHtml(value)}</div>
           <div class="hint" style="margin-top:6px;">${escapeHtml(hint)}</div>
         `;

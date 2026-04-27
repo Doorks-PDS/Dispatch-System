@@ -89,28 +89,6 @@ def _looks_like_contact_or_address(text: str) -> bool:
     return False
 
 
-def _split_note_parts(*values: Any) -> List[str]:
-    parts: List[str] = []
-    for value in values:
-        text = _clean_multiline(value)
-        if not text:
-            continue
-        for piece in re.split(r"(?<=[.!?])\s+|\n+", text):
-            chunk = _clean_text(piece)
-            if not chunk or _looks_like_contact_or_address(chunk):
-                continue
-            parts.append(chunk)
-    deduped: List[str] = []
-    seen = set()
-    for part in parts:
-        key = part.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(part)
-    return deduped
-
-
 def _as_sentence(text: str) -> str:
     clean = _clean_text(text)
     if not clean:
@@ -129,6 +107,8 @@ def _as_list(value: Any) -> List[dict[str, Any]]:
 
 
 def _get_any(source: dict[str, Any], keys: List[str]) -> Any:
+    if not isinstance(source, dict):
+        return ""
     for key in keys:
         if key in source and source.get(key) not in (None, ""):
             return source.get(key)
@@ -239,6 +219,8 @@ def _extract_parts_required(value: Any) -> List[str]:
     text = _clean_multiline(value)
     if not text:
         return []
+    if _clean_text(text).lower() in {"none", "n/a", "na", "no", "no parts", "none."}:
+        return []
     text = re.sub(r"^parts\s+required\s*:\s*", "", text, flags=re.I)
     raw_items = re.split(r"\n+|;|,(?=\s*\(?\d|\s*\d+x|\s*1x|\s*\()", text)
     items: List[str] = []
@@ -247,6 +229,8 @@ def _extract_parts_required(value: Any) -> List[str]:
         if not item:
             continue
         item = re.sub(r"^\-\s*", "", item)
+        if item.lower() in {"none", "n/a", "na", "no", "no parts", "none."}:
+            continue
         items.append(item)
     return items
 
@@ -262,25 +246,30 @@ def _extract_approval_scope(job_notes: str) -> List[str]:
     items: List[str] = []
     for piece in re.split(r"\n+|;|,(?=\s*\(?\d|\s*\d+x|\s*1x|\s*\()", raw):
         item = _clean_text(piece)
-        if item:
+        if item and item.lower() not in {"none", "n/a", "na", "no"}:
             items.append(item)
     return items
 
 
-def _normalize_findings(text: str, door_location: str, door_type: str) -> str:
+def _strip_checkin_checkout(text: str) -> str:
     clean = _clean_text(text)
+    clean = re.sub(r"^arrived\s+onsite\s+and\s+checked\s+in\s+with\s+customer\.?\s*", "", clean, flags=re.I)
+    clean = re.sub(r"^we\s+arrived\s+onsite\s+and\s+called\s+the\s+contact.*?(?:property\.|property)", "", clean, flags=re.I)
+    clean = re.sub(r"\s*cleaned\s+up\s+and\s+checked\s+out,?\.?$", "", clean, flags=re.I)
+    clean = re.sub(r"\s*finished\s+up\s+with\s+clean\s+up.*$", " Cleaned up work area.", clean, flags=re.I)
+    return _clean_text(clean)
+
+
+def _normalize_findings(text: str, door_location: str, door_type: str) -> str:
+    clean = _strip_checkin_checkout(text)
     if not clean:
         return ""
-    clean = re.sub(r"^arrived\s+onsite\s+and\s+checked\s+in\s+with\s+customer\.?\s*", "", clean, flags=re.I)
-    clean = re.sub(r"\s*cleaned\s+up\s+and\s+checked\s+out,?\.?$", "", clean, flags=re.I)
-
     if clean.lower().startswith("moved to "):
         clean = re.sub(r"^moved\s+to\s+", "At the ", clean, flags=re.I)
     elif door_location or door_type:
         target = " ".join(x for x in [door_location, door_type] if x).strip()
         if target and target.lower() not in clean.lower():
             clean = f"At the {target}, {clean[0].lower() + clean[1:] if clean else clean}"
-
     return _as_sentence(clean)
 
 
@@ -304,6 +293,38 @@ def _proposal_title(data: dict[str, Any], form: dict[str, Any]) -> str:
     return title or "Opening"
 
 
+def _invoice_summary(tech_notes: str, parts_used: str = "") -> List[str]:
+    clean = _strip_checkin_checkout(tech_notes)
+    if not clean:
+        return []
+
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
+    selected: List[str] = []
+
+    for s in sentences:
+        low = s.lower()
+        if any(word in low for word in ["replaced", "removed", "installed", "reset", "adjusted", "repaired", "serviced"]):
+            selected.append(_as_sentence(s))
+        elif any(word in low for word in ["tested", "confirmed", "verified"]):
+            selected.append(_as_sentence(s))
+        if len(selected) >= 3:
+            break
+
+    if not selected and sentences:
+        selected.append(_as_sentence(sentences[0]))
+
+    if parts_used and _clean_text(parts_used).lower() not in {"none", "n/a", "na", "no"}:
+        part_text = _clean_text(parts_used)
+        if not any(part_text.lower() in line.lower() for line in selected):
+            selected.insert(0, f"Installed/replaced {part_text}.")
+
+    # Always keep invoice concise.
+    if not any("clean" in line.lower() for line in selected):
+        selected.append("Tested operation and cleaned up work area.")
+
+    return selected[:4]
+
+
 def generate_description_from_data(data: dict[str, Any]) -> str:
     doc_type = _clean_text(data.get("doc_type") or data.get("type") or "estimate").lower()
     crew = bool(data.get("crew"))
@@ -316,27 +337,21 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
 
     form_tech_notes = _clean_text(_get_any(form, ["tech_notes", "techNotes", "notes"]))
     form_recs = _clean_text(_get_any(form, ["recommendations", "additional_recommendations", "additionalRecommendations", "recommendation"]))
-    parts_required = _get_any(form, ["parts_required", "partsRequired", "parts", "parts_used", "partsUsed"])
+    parts_required = _get_any(form, ["parts_required", "partsRequired"])
+    parts_used = _clean_text(_get_any(form, ["parts_used", "partsUsed", "parts"]))
     time_required = _clean_text(_get_any(form, ["time_required", "timeRequired", "time", "hours"]))
     door_location = _clean_text(_get_any(form, ["door_location", "doorLocation"]) or data.get("door_location") or data.get("doorLocation"))
     door_type = _clean_text(_get_any(form, ["door_type", "doorType"]) or data.get("door_type") or data.get("doorType"))
 
-    # Recommendation/completion forms are preferred over dispatch/sales-lead notes.
-    # For estimates, recommendation text is the best source. For invoices, tech notes are the best source.
-    preferred_source = (form_recs if doc_type == "estimate" else form_tech_notes) or form_tech_notes or form_recs or payload_notes or office_notes or job_notes
-
     if doc_type == "invoice":
         lines: List[str] = [f"{tech} arrived onsite and checked in with customer."]
-        invoice_body = preferred_source or office_notes or job_notes
-        if invoice_body:
-            cleaned = _clean_text(invoice_body)
-            cleaned = re.sub(r"^arrived\s+onsite\s+and\s+checked\s+in\s+with\s+customer\.?\s*", "", cleaned, flags=re.I)
-            if cleaned:
-                lines.append(_as_sentence(cleaned))
-        if form_recs and form_recs.lower() not in " ".join(lines).lower():
-            lines.append(f"Additional recommendations noted: {_clean_text(form_recs)}.")
+        summary_lines = _invoice_summary(form_tech_notes or payload_notes or office_notes or job_notes, parts_used)
+        lines.extend(summary_lines)
         lines.append("********JOB COMPLETE*********")
         return " ".join(line for line in lines if line).strip()
+
+    # Estimates: recommendation/quote forms first; dispatch/job notes only as last fallback.
+    preferred_source = form_recs or form_tech_notes or payload_notes or office_notes or job_notes
 
     title = _proposal_title(data, form)
     lines: List[str] = [f"Proposal Includes – {title}"]
@@ -540,7 +555,6 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
                 signoffs.append(filename)
                 docs["signoffs"] = signoffs
                 job_store.update_job(payload.job_id, {"job_notes": job.get("job_notes") or "", "office_notes": job.get("office_notes") or "", "parts_order": job.get("parts_order") or {}, "completion_forms": job.get("completion_forms") or [],})
-                # direct mutate persisted record
                 data2 = job_store._load()
                 for i,j in enumerate(data2.get("jobs", [])):
                     if str(j.get("id")) == str(payload.job_id):
