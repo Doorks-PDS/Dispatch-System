@@ -3097,9 +3097,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               customer: row1.querySelector("#nj_customer").value.trim(),
               address: [
                 row1.querySelector("#nj_address").value.trim(),
-                row1b.querySelector("#nj_city").value.trim(),
-                row1b.querySelector("#nj_state").value.trim(),
-                row1b.querySelector("#nj_zip").value.trim(),
+                (row1b.querySelector("#nj_city")?.value || "").trim(),
+                (row1b.querySelector("#nj_state")?.value || "").trim(),
+                (row1b.querySelector("#nj_zip")?.value || "").trim(),
               ].filter(Boolean).join(", "),
               city: "",
               state: "",
