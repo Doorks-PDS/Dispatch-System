@@ -731,6 +731,15 @@
     return data.item;
   }
 
+  async function apiUpdateCustomer(id, payload) {
+    const data = await fetchJSON(`/crm/customers/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return data.item;
+  }
+
   async function apiListAddresses(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/addresses?${qs.toString()}`);
@@ -740,6 +749,15 @@
   async function apiCreateAddress(payload) {
     const data = await fetchJSON("/addresses", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return data.item;
+  }
+
+  async function apiUpdateAddress(id, payload) {
+    const data = await fetchJSON(`/addresses/${encodeURIComponent(id)}`, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -792,6 +810,15 @@
   async function apiCreateContact(payload) {
     const data = await fetchJSON("/crm/contacts", {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return data.item;
+  }
+
+  async function apiUpdateContact(id, payload) {
+    const data = await fetchJSON(`/crm/contacts/${encodeURIComponent(id)}`, {
+      method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -5001,16 +5028,18 @@ function renderCustomersView() {
     setActiveChip("Work Flow");
     setWorkspace("Customers");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers and contacts in one place.</div>`;
+    card.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers, contacts, and saved job-site addresses in one place.</div>`;
 
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
     tabs.style.gap = "8px";
     tabs.style.marginTop = "12px";
+    tabs.style.flexWrap = "wrap";
+
     const btnCustomers = document.createElement("button");
     btnCustomers.className = "btn btn-orange";
     btnCustomers.textContent = "Customers";
@@ -5027,97 +5056,206 @@ function renderCustomersView() {
 
     let activeTab = "customers";
 
+    function setTab(tab) {
+      activeTab = tab;
+      btnCustomers.className = tab === "customers" ? "btn btn-orange" : "btn";
+      btnContacts.className = tab === "contacts" ? "btn btn-orange" : "btn";
+      btnAddresses.className = tab === "addresses" ? "btn btn-orange" : "btn";
+    }
+
+    function includesQuery(item, query, keys) {
+      if (!query) return true;
+      const hay = keys.map(k => String(item && item[k] || "")).join(" ").toLowerCase();
+      return hay.includes(query.toLowerCase());
+    }
+
+    async function editCustomer(item) {
+      const company_name = (prompt("Customer name:", item.company_name || "") || "").trim();
+      if (!company_name) return;
+      const address = (prompt("Address:", item.address || "") || "").trim();
+      const phone_number = (prompt("Phone:", item.phone_number || "") || "").trim();
+      const email = (prompt("Email:", item.email || "") || "").trim();
+      const notes = (prompt("Notes:", item.notes || "") || "").trim();
+      await apiUpdateCustomer(item.id, {
+        company_name,
+        address,
+        city: item.city || "",
+        state: item.state || "",
+        zip_code: item.zip_code || "",
+        phone_number,
+        email,
+        notes,
+      });
+      await renderCustomersTab();
+    }
+
+    async function editContact(item, customers) {
+      const name = (prompt("Contact name:", item.name || "") || "").trim();
+      if (!name) return;
+      const company_name = (prompt("Company:", item.company_name || "") || "").trim();
+      const phone_number = (prompt("Phone:", item.phone_number || "") || "").trim();
+      const cell_phone = (prompt("Cell phone:", item.cell_phone || "") || "").trim();
+      const email = (prompt("Email:", item.email || "") || "").trim();
+      const title = (prompt("Title:", item.title || "") || "").trim();
+      const matchedCustomer = (customers || []).find(c => normalizeText(c.company_name) === normalizeText(company_name));
+      await apiUpdateContact(item.id, {
+        name,
+        company_name,
+        customer_id: matchedCustomer ? matchedCustomer.id || "" : item.customer_id || "",
+        phone_number,
+        cell_phone,
+        email,
+        title,
+        notes: item.notes || "",
+      });
+      await renderContactsTab();
+    }
+
+    async function editAddress(item) {
+      if (String(item.source || "saved") !== "saved" && String(item.id || "").includes("-")) {
+        alert("Legacy CSV addresses cannot be edited directly. Add it as a saved address if you need to change it.");
+        return;
+      }
+      const customer = (prompt("Customer:", item.customer || item.company_name || "") || "").trim();
+      const address = (prompt("Address:", item.address || "") || "").trim();
+      if (!address) return;
+      const label = (prompt("Label / Location:", item.label || "") || "").trim();
+      const notes = (prompt("Notes:", item.notes || "") || "").trim();
+      await apiUpdateAddress(item.id, { customer, company_name: customer, address, label, notes });
+      await renderAddressesTab();
+    }
+
     async function renderCustomersTab() {
-      btnCustomers.className = "btn btn-orange";
-      btnContacts.className = "btn";
+      setTab("customers");
       const items = await apiListCustomers().catch(() => []);
       body.innerHTML = "";
-      const addRow = document.createElement("div");
-      addRow.style.marginBottom = "12px";
-      addRow.innerHTML = `<div class="hint">Add a customer and optional primary contact details.</div><div style="margin-top:8px;"><button class="btn btn-orange" id="cust_add">Add Customer</button></div>`;
-      body.appendChild(addRow);
+
+      const top = document.createElement("div");
+      top.innerHTML = `
+        <div class="hint">Add, search, and edit customers.</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
+          <input class="input" id="cust_search" placeholder="Search customers, address, phone, email..." style="flex:1; min-width:220px;" />
+          <button class="btn btn-orange" id="cust_add">Add Customer</button>
+        </div>
+      `;
+      body.appendChild(top);
+
       const list = document.createElement("div");
       list.style.display = "grid";
       list.style.gap = "8px";
-      if (!items.length) list.innerHTML = `<div class="hint">No customers yet.</div>`;
-      items.forEach(c => {
-        const row = document.createElement("div");
-        row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>`;
-        list.appendChild(row);
-      });
+      list.style.marginTop = "12px";
       body.appendChild(list);
-      addRow.querySelector("#cust_add").addEventListener("click", async () => {
+
+      function renderList() {
+        const q = String(top.querySelector("#cust_search").value || "").trim().toLowerCase();
+        const filtered = items.filter(c => includesQuery(c, q, ["company_name", "address", "city", "state", "zip_code", "phone_number", "email", "notes"]));
+        list.innerHTML = "";
+        if (!filtered.length) { list.innerHTML = `<div class="hint">No customers found.</div>`; return; }
+        filtered.forEach(c => {
+          const row = document.createElement("div");
+          row.className = "jobrow";
+          row.innerHTML = `
+            <div class="jobrow-top">
+              <div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>
+              <button class="btn" data-edit-customer="${escapeHtml(c.id || "")}">Edit</button>
+            </div>
+            <div class="jobrow-addr">${escapeHtml(c.address || "")}</div>
+            <div class="hint">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
+            ${c.notes ? `<div class="hint">${escapeHtml(c.notes || "")}</div>` : ""}
+          `;
+          row.querySelector("[data-edit-customer]").addEventListener("click", () => editCustomer(c));
+          list.appendChild(row);
+        });
+      }
+
+      top.querySelector("#cust_search").addEventListener("input", renderList);
+      top.querySelector("#cust_add").addEventListener("click", async () => {
         const name = (prompt("Customer name:") || "").trim();
         if (!name) return;
+        const address = (prompt("Customer address (optional):") || "").trim();
+        const phone = (prompt("Customer phone (optional):") || "").trim();
+        const email = (prompt("Customer email (optional):") || "").trim();
         const contactName = (prompt("Primary contact name (optional):") || "").trim();
         const contactPhone = (prompt("Primary contact phone (optional):") || "").trim();
         const contactEmail = (prompt("Primary contact email (optional):") || "").trim();
-        await apiCreateCustomer({ company_name: name });
+        await apiCreateCustomer({ company_name: name, address, phone_number: phone, email });
         if (contactName || contactPhone || contactEmail) {
-          try {
-            await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail });
-          } catch {}
+          try { await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail }); } catch {}
         }
-        renderCustomersTab();
+        await renderCustomersTab();
       });
+
+      renderList();
     }
 
     async function renderContactsTab() {
-      btnCustomers.className = "btn";
-      btnContacts.className = "btn btn-orange";
+      setTab("contacts");
       const [items, customers] = await Promise.all([apiListContacts().catch(() => []), apiListCustomers().catch(() => [])]);
       body.innerHTML = "";
       const companyListId = `contact-company-${Math.random().toString(36).slice(2)}`;
       const form = document.createElement("div");
       form.className = "card";
       form.innerHTML = `
+        <h3>Contacts</h3>
         <div class="grid2">
           <div><div class="label">Name</div><input class="input" id="cont_name" /></div>
           <div><div class="label">Company</div><input class="input" id="cont_company" list="${companyListId}" placeholder="Link to existing customer" /></div>
           <div><div class="label">Phone</div><input class="input" id="cont_phone" /></div>
           <div><div class="label">Email</div><input class="input" id="cont_email" /></div>
         </div>
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="cont_add">Add Contact</button></div>
+        <div style="margin-top:12px;"><input class="input" id="cont_search" placeholder="Search contacts, company, phone, email..." /></div>
       `;
       form.appendChild(buildCustomerDatalist(companyListId, customers));
-      const actions = document.createElement("div");
-      actions.style.display = "flex";
-      actions.style.gap = "8px";
-      actions.style.marginTop = "10px";
-      const add = document.createElement("button");
-      add.className = "btn btn-orange";
-      add.textContent = "Add Contact";
-      actions.appendChild(add);
-      form.appendChild(actions);
       body.appendChild(form);
+
       const list = document.createElement("div");
       list.style.display = "grid";
       list.style.gap = "8px";
       list.style.marginTop = "12px";
-      if (!items.length) list.innerHTML = `<div class="hint">No contacts yet.</div>`;
-      items.forEach(c => {
-        const row = document.createElement("div");
-        row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(c.name || "")}</div><div class="hint">${escapeHtml(c.company_name || "")}</div></div><div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>`;
-        list.appendChild(row);
-      });
       body.appendChild(list);
-      add.addEventListener("click", async () => {
+
+      function renderList() {
+        const q = String(form.querySelector("#cont_search").value || "").trim().toLowerCase();
+        const filtered = items.filter(c => includesQuery(c, q, ["name", "company_name", "phone_number", "cell_phone", "email", "title", "notes"]));
+        list.innerHTML = "";
+        if (!filtered.length) { list.innerHTML = `<div class="hint">No contacts found.</div>`; return; }
+        filtered.forEach(c => {
+          const row = document.createElement("div");
+          row.className = "jobrow";
+          row.innerHTML = `
+            <div class="jobrow-top">
+              <div><div class="jobrow-name">${escapeHtml(c.name || "")}</div><div class="hint">${escapeHtml(c.company_name || "")}</div></div>
+              <button class="btn" data-edit-contact="${escapeHtml(c.id || "")}">Edit</button>
+            </div>
+            <div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.cell_phone ? ` / ${escapeHtml(c.cell_phone)}` : ""}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
+            ${c.title ? `<div class="hint">${escapeHtml(c.title || "")}</div>` : ""}
+          `;
+          row.querySelector("[data-edit-contact]").addEventListener("click", () => editContact(c, customers));
+          list.appendChild(row);
+        });
+      }
+
+      form.querySelector("#cont_search").addEventListener("input", renderList);
+      form.querySelector("#cont_add").addEventListener("click", async () => {
+        const company = form.querySelector("#cont_company").value.trim();
+        const matchedCustomer = customers.find(c => normalizeText(c.company_name) === normalizeText(company));
         await apiCreateContact({
           name: form.querySelector("#cont_name").value.trim(),
-          company_name: form.querySelector("#cont_company").value.trim(),
+          company_name: company,
+          customer_id: matchedCustomer ? matchedCustomer.id || "" : "",
           phone_number: form.querySelector("#cont_phone").value.trim(),
           email: form.querySelector("#cont_email").value.trim(),
         });
-        renderContactsTab();
+        await renderContactsTab();
       });
+
+      renderList();
     }
 
     async function renderAddressesTab() {
-      btnCustomers.className = "btn";
-      btnContacts.className = "btn";
-      btnAddresses.className = "btn btn-orange";
-      const [items, customers] = await Promise.all([apiListAddresses({ limit: 1000 }).catch(() => []), apiListCustomers().catch(() => [])]);
+      setTab("addresses");
+      let [items, customers] = await Promise.all([apiListAddresses({ limit: 1000 }).catch(() => []), apiListCustomers().catch(() => [])]);
       body.innerHTML = "";
       const customerListId = `addr-company-${Math.random().toString(36).slice(2)}`;
       const form = document.createElement("div");
@@ -5139,6 +5277,7 @@ function renderCustomersView() {
       body.appendChild(form);
       const list = form.querySelector("#addr_list");
       const search = form.querySelector("#addr_search");
+
       function renderList() {
         const q = String(search.value || "").toLowerCase().trim();
         const filtered = items.filter(a => !q || [a.address, a.customer, a.company_name, a.label, a.notes, a.job_number, a.source].join(" ").toLowerCase().includes(q));
@@ -5147,29 +5286,45 @@ function renderCustomersView() {
         filtered.slice(0, 500).forEach(a => {
           const row = document.createElement("div");
           row.className = "jobrow";
-          row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(a.address || "")}</div><div class="badge">${escapeHtml(a.source || "saved")}</div></div><div class="jobrow-addr">${escapeHtml(a.customer || a.company_name || "")}${a.job_number ? ` - Job #${escapeHtml(a.job_number)}` : ""}</div><div class="hint">${escapeHtml(a.label || a.notes || "")}</div>`;
+          const canEdit = String(a.source || "saved") === "saved" || !String(a.id || "").includes("-");
+          row.innerHTML = `
+            <div class="jobrow-top">
+              <div><div class="jobrow-name">${escapeHtml(a.address || "")}</div><div class="jobrow-addr">${escapeHtml(a.customer || a.company_name || "")}${a.job_number ? ` - Job #${escapeHtml(a.job_number)}` : ""}</div></div>
+              <div style="display:flex; gap:8px; align-items:center;"><div class="badge">${escapeHtml(a.source || "saved")}</div>${canEdit ? `<button class="btn" data-edit-address="${escapeHtml(a.id || "")}">Edit</button>` : ""}</div>
+            </div>
+            <div class="hint">${escapeHtml(a.label || a.notes || "")}</div>
+          `;
+          const edit = row.querySelector("[data-edit-address]");
+          if (edit) edit.addEventListener("click", () => editAddress(a));
           list.appendChild(row);
         });
       }
+
       form.querySelector("#addr_add").addEventListener("click", async () => {
         const address = form.querySelector("#addr_address").value.trim();
         if (!address) return alert("Address is required.");
         await apiCreateAddress({
           customer: form.querySelector("#addr_customer").value.trim(),
+          company_name: form.querySelector("#addr_customer").value.trim(),
           address,
           label: form.querySelector("#addr_label").value.trim(),
           notes: form.querySelector("#addr_notes").value.trim(),
         });
-        renderAddressesTab();
+        items = await apiListAddresses({ limit: 1000 }).catch(() => []);
+        form.querySelector("#addr_address").value = "";
+        form.querySelector("#addr_label").value = "";
+        form.querySelector("#addr_notes").value = "";
+        renderList();
       });
+
       form.querySelector("#addr_refresh").addEventListener("click", renderAddressesTab);
       search.addEventListener("input", renderList);
       renderList();
     }
 
-    btnCustomers.addEventListener("click", ()=>{ activeTab = "customers"; renderCustomersTab(); });
-    btnContacts.addEventListener("click", ()=>{ activeTab = "contacts"; renderContactsTab(); });
-    btnAddresses.addEventListener("click", ()=>{ activeTab = "addresses"; renderAddressesTab(); });
+    btnCustomers.addEventListener("click", () => renderCustomersTab());
+    btnContacts.addEventListener("click", () => renderContactsTab());
+    btnAddresses.addEventListener("click", () => renderAddressesTab());
 
     root.appendChild(card);
     root.appendChild(tabs);
@@ -5180,7 +5335,6 @@ function renderCustomersView() {
     currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : activeTab === "contacts" ? renderContactsTab() : renderAddressesTab() };
     renderCustomersTab();
   }
-
   function renderContactsView() {
     renderCustomersView();
   }

@@ -43,3 +43,13 @@ def create_address(request: Request, payload: AddressCreate, x_api_key: Optional
         return {"ok": True, "item": item}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.put("/{item_id}")
+def update_address(request: Request, item_id: str, payload: AddressCreate, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    try:
+        item = _store(request).update(item_id, payload.dict())
+        return {"ok": True, "item": item}
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))

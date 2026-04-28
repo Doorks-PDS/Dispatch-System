@@ -186,3 +186,28 @@ class AddressStore:
         items.append(item)
         self._save_manual(items)
         return item
+
+    def update(self, item_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+        item_id = str(item_id or "").strip()
+        if not item_id:
+            raise ValueError("Address ID is required")
+        address = _clean(payload.get("address"))
+        if not address:
+            raise ValueError("Address is required")
+
+        items = self._load_manual()
+        for item in items:
+            if str(item.get("id") or "") == item_id:
+                item.update({
+                    "address": address,
+                    "customer": _clean(payload.get("customer") or payload.get("company_name") or item.get("customer")),
+                    "company_name": _clean(payload.get("company_name") or payload.get("customer") or item.get("company_name")),
+                    "label": _clean(payload.get("label") or item.get("label")),
+                    "notes": _clean(payload.get("notes") or item.get("notes")),
+                    "updated_at": _now_iso(),
+                    "source": "saved",
+                })
+                self._save_manual(items)
+                return item
+
+        raise ValueError("Address not found")
