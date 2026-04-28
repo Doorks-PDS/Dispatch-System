@@ -763,6 +763,13 @@
     });
     return data.item;
   }
+
+  async function apiDeleteAddress(id) {
+    const data = await fetchJSON(`/addresses/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+    return data.ok;
+  }
  
   async function apiListContacts(params = {}) {
     const qs = new URLSearchParams(params);
@@ -5030,9 +5037,9 @@ function renderCustomersView() {
     clearWorkspaceActions();
 
     const root = document.createElement("div");
-    const card = document.createElement("div");
-    card.className = "card";
-    card.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers, contacts, and saved job-site addresses.</div>`;
+    const header = document.createElement("div");
+    header.className = "card";
+    header.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers, contacts, and saved addresses.</div>`;
 
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
@@ -5063,16 +5070,16 @@ function renderCustomersView() {
       btnAddresses.className = tab === "addresses" ? "btn btn-orange" : "btn";
     }
 
-    function searchHit(item, q, keys) {
-      const query = String(q || "").toLowerCase().trim();
-      if (!query) return true;
-      return keys.map(k => String(item?.[k] || "")).join(" ").toLowerCase().includes(query);
+    function itemMatches(item, q, keys) {
+      if (!q) return true;
+      const hay = keys.map(k => String(item?.[k] || "")).join(" ").toLowerCase();
+      return hay.includes(String(q || "").toLowerCase());
     }
 
     async function editCustomer(item) {
       const company_name = (prompt("Customer name:", item.company_name || "") || "").trim();
       if (!company_name) return;
-      const address = (prompt("Address:", item.address || "") || "").trim();
+      const address = (prompt("Street Address:", item.address || "") || "").trim();
       const phone_number = (prompt("Phone:", item.phone_number || "") || "").trim();
       const email = (prompt("Email:", item.email || "") || "").trim();
       const notes = (prompt("Notes:", item.notes || "") || "").trim();
@@ -5098,11 +5105,11 @@ function renderCustomersView() {
       const email = (prompt("Email:", item.email || "") || "").trim();
       const title = (prompt("Title:", item.title || "") || "").trim();
       const notes = (prompt("Notes:", item.notes || "") || "").trim();
-      const matchedCustomer = (await apiListCustomers().catch(() => [])).find(c => normalizeText(c.company_name) === normalizeText(company_name));
+      const matched = (customers || []).find(c => normalizeText(c.company_name) === normalizeText(company_name));
       await apiUpdateContact(item.id, {
         name,
         company_name,
-        customer_id: matchedCustomer ? matchedCustomer.id || "" : item.customer_id || "",
+        customer_id: matched ? matched.id || "" : item.customer_id || "",
         phone_number,
         cell_phone,
         email,
@@ -5113,14 +5120,12 @@ function renderCustomersView() {
     }
 
     async function editAddress(item) {
-      const source = String(item.source || "saved");
-      const legacyId = String(item.id || "").includes("-");
-      if (source !== "saved" && legacyId) {
-        alert("Legacy CSV addresses cannot be edited directly. Add it as a saved address if you need to change it.");
+      if (item.readonly || String(item.source || "") !== "saved") {
+        alert("Legacy CSV addresses are read-only. Add this as a saved address if you need to edit it.");
         return;
       }
       const customer = (prompt("Customer:", item.customer || item.company_name || "") || "").trim();
-      const address = (prompt("Address:", item.address || "") || "").trim();
+      const address = (prompt("Street Address:", item.address || "") || "").trim();
       if (!address) return;
       const label = (prompt("Label / Location:", item.label || "") || "").trim();
       const notes = (prompt("Notes:", item.notes || "") || "").trim();
@@ -5132,33 +5137,26 @@ function renderCustomersView() {
       setTab("customers");
       const items = await apiListCustomers().catch(() => []);
       body.innerHTML = "";
-
-      const top = document.createElement("div");
-      top.className = "card";
-      top.innerHTML = `
+      const panel = document.createElement("div");
+      panel.className = "card";
+      panel.innerHTML = `
         <h3>Customers</h3>
-        <div class="hint">Search, add, and edit customer records.</div>
+        <div class="hint">Search, add, and edit customers.</div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
-          <input class="input" id="cust_search" placeholder="Search customers, addresses, phone, email..." style="flex:1; min-width:220px;" />
+          <input class="input" id="cust_search" placeholder="Search customers, address, phone, email..." style="flex:1; min-width:220px;" />
           <button class="btn btn-orange" id="cust_add">Add Customer</button>
         </div>
+        <div id="cust_list" style="display:grid; gap:8px; margin-top:12px;"></div>
       `;
-      body.appendChild(top);
-
-      const list = document.createElement("div");
-      list.style.display = "grid";
-      list.style.gap = "8px";
-      list.style.marginTop = "12px";
-      body.appendChild(list);
+      body.appendChild(panel);
+      const list = panel.querySelector("#cust_list");
+      const search = panel.querySelector("#cust_search");
 
       function renderList() {
-        const q = top.querySelector("#cust_search").value;
-        const filtered = items.filter(c => searchHit(c, q, ["company_name", "address", "city", "state", "zip_code", "phone_number", "email", "notes"]));
+        const q = search.value.trim();
+        const filtered = items.filter(c => itemMatches(c, q, ["company_name", "address", "phone_number", "email", "notes"]));
         list.innerHTML = "";
-        if (!filtered.length) {
-          list.innerHTML = `<div class="hint">No customers found.</div>`;
-          return;
-        }
+        if (!filtered.length) { list.innerHTML = `<div class="hint">No customers found.</div>`; return; }
         filtered.forEach(c => {
           const row = document.createElement("div");
           row.className = "jobrow";
@@ -5167,36 +5165,27 @@ function renderCustomersView() {
               <div>
                 <div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>
                 <div class="jobrow-addr">${escapeHtml(c.address || "")}</div>
+                <div class="hint">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
               </div>
-              <button class="btn" data-edit-customer="${escapeHtml(c.id || "")}">Edit</button>
+              <button class="btn" data-edit> Edit </button>
             </div>
-            <div class="hint">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
-            ${c.notes ? `<div class="hint">${escapeHtml(c.notes || "")}</div>` : ""}
           `;
-          row.querySelector("[data-edit-customer]").addEventListener("click", () => editCustomer(c));
+          row.querySelector("[data-edit]").addEventListener("click", () => editCustomer(c));
           list.appendChild(row);
         });
       }
 
-      top.querySelector("#cust_search").addEventListener("input", renderList);
-      top.querySelector("#cust_add").addEventListener("click", async () => {
+      panel.querySelector("#cust_add").addEventListener("click", async () => {
         const name = (prompt("Customer name:") || "").trim();
         if (!name) return;
-        const address = (prompt("Customer address (optional):") || "").trim();
-        const phone = (prompt("Customer phone (optional):") || "").trim();
-        const email = (prompt("Customer email (optional):") || "").trim();
-        const contactName = (prompt("Primary contact name (optional):") || "").trim();
-        const contactPhone = (prompt("Primary contact phone (optional):") || "").trim();
-        const contactEmail = (prompt("Primary contact email (optional):") || "").trim();
-        await apiCreateCustomer({ company_name: name, address, phone_number: phone, email });
-        if (contactName || contactPhone || contactEmail) {
-          try {
-            await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail });
-          } catch {}
-        }
+        const address = (prompt("Street address (optional):") || "").trim();
+        const phone = (prompt("Phone (optional):") || "").trim();
+        const email = (prompt("Email (optional):") || "").trim();
+        const created = await apiCreateCustomer({ company_name: name, address, phone_number: phone, email });
         await renderCustomersTab();
       });
 
+      search.addEventListener("input", renderList);
       renderList();
     }
 
@@ -5204,41 +5193,33 @@ function renderCustomersView() {
       setTab("contacts");
       const [items, customers] = await Promise.all([apiListContacts().catch(() => []), apiListCustomers().catch(() => [])]);
       body.innerHTML = "";
-
       const companyListId = `contact-company-${Math.random().toString(36).slice(2)}`;
-      const form = document.createElement("div");
-      form.className = "card";
-      form.innerHTML = `
+      const panel = document.createElement("div");
+      panel.className = "card";
+      panel.innerHTML = `
         <h3>Contacts</h3>
-        <div class="hint">Search, add, and edit contacts.</div>
-        <div class="grid2" style="margin-top:10px;">
+        <div class="grid2">
           <div><div class="label">Name</div><input class="input" id="cont_name" /></div>
           <div><div class="label">Company</div><input class="input" id="cont_company" list="${companyListId}" placeholder="Link to existing customer" /></div>
           <div><div class="label">Phone</div><input class="input" id="cont_phone" /></div>
           <div><div class="label">Email</div><input class="input" id="cont_email" /></div>
         </div>
-        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
           <button class="btn btn-orange" id="cont_add">Add Contact</button>
         </div>
         <div style="margin-top:12px;"><input class="input" id="cont_search" placeholder="Search contacts, company, phone, email..." /></div>
+        <div id="cont_list" style="display:grid; gap:8px; margin-top:12px;"></div>
       `;
-      form.appendChild(buildCustomerDatalist(companyListId, customers));
-      body.appendChild(form);
-
-      const list = document.createElement("div");
-      list.style.display = "grid";
-      list.style.gap = "8px";
-      list.style.marginTop = "12px";
-      body.appendChild(list);
+      panel.appendChild(buildCustomerDatalist(companyListId, customers));
+      body.appendChild(panel);
+      const list = panel.querySelector("#cont_list");
+      const search = panel.querySelector("#cont_search");
 
       function renderList() {
-        const q = form.querySelector("#cont_search").value;
-        const filtered = items.filter(c => searchHit(c, q, ["name", "company_name", "phone_number", "cell_phone", "email", "title", "notes"]));
+        const q = search.value.trim();
+        const filtered = items.filter(c => itemMatches(c, q, ["name", "company_name", "phone_number", "cell_phone", "email", "title", "notes"]));
         list.innerHTML = "";
-        if (!filtered.length) {
-          list.innerHTML = `<div class="hint">No contacts found.</div>`;
-          return;
-        }
+        if (!filtered.length) { list.innerHTML = `<div class="hint">No contacts found.</div>`; return; }
         filtered.forEach(c => {
           const row = document.createElement("div");
           row.className = "jobrow";
@@ -5247,48 +5228,49 @@ function renderCustomersView() {
               <div>
                 <div class="jobrow-name">${escapeHtml(c.name || "")}</div>
                 <div class="hint">${escapeHtml(c.company_name || "")}</div>
+                <div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.cell_phone ? ` / ${escapeHtml(c.cell_phone)}` : ""}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
               </div>
-              <button class="btn" data-edit-contact="${escapeHtml(c.id || "")}">Edit</button>
+              <button class="btn" data-edit> Edit </button>
             </div>
-            <div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.cell_phone ? ` / ${escapeHtml(c.cell_phone)}` : ""}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
-            ${c.title ? `<div class="hint">${escapeHtml(c.title || "")}</div>` : ""}
           `;
-          row.querySelector("[data-edit-contact]").addEventListener("click", () => editContact(c, customers));
+          row.querySelector("[data-edit]").addEventListener("click", () => editContact(c, customers));
           list.appendChild(row);
         });
       }
 
-      form.querySelector("#cont_search").addEventListener("input", renderList);
-      form.querySelector("#cont_add").addEventListener("click", async () => {
-        const company = form.querySelector("#cont_company").value.trim();
-        const matchedCustomer = customers.find(c => normalizeText(c.company_name) === normalizeText(company));
+      panel.querySelector("#cont_add").addEventListener("click", async () => {
+        const company = panel.querySelector("#cont_company").value.trim();
+        const matched = customers.find(c => normalizeText(c.company_name) === normalizeText(company));
         await apiCreateContact({
-          name: form.querySelector("#cont_name").value.trim(),
+          name: panel.querySelector("#cont_name").value.trim(),
           company_name: company,
-          customer_id: matchedCustomer ? matchedCustomer.id || "" : "",
-          phone_number: form.querySelector("#cont_phone").value.trim(),
-          email: form.querySelector("#cont_email").value.trim(),
+          customer_id: matched ? matched.id || "" : "",
+          phone_number: panel.querySelector("#cont_phone").value.trim(),
+          email: panel.querySelector("#cont_email").value.trim(),
         });
         await renderContactsTab();
       });
 
+      search.addEventListener("input", renderList);
       renderList();
     }
 
     async function renderAddressesTab() {
       setTab("addresses");
-      let [items, customers] = await Promise.all([apiListAddresses({ limit: 1000 }).catch(() => []), apiListCustomers().catch(() => [])]);
+      let [items, customers] = await Promise.all([
+        apiListAddresses({ limit: 1500, include_legacy: true }).catch(() => []),
+        apiListCustomers().catch(() => [])
+      ]);
       body.innerHTML = "";
-
       const customerListId = `addr-company-${Math.random().toString(36).slice(2)}`;
-      const form = document.createElement("div");
-      form.className = "card";
-      form.innerHTML = `
+      const panel = document.createElement("div");
+      panel.className = "card";
+      panel.innerHTML = `
         <h3>Addresses</h3>
-        <div class="hint">Saved job-site addresses used for Dispatch, Sales Lead, Door Records, and documents. Legacy addresses are seeded from billable time and tech notes CSVs.</div>
+        <div class="hint">Saved addresses behave like CRM records. Legacy CSV addresses are shown as read-only suggestions.</div>
         <div class="grid2" style="margin-top:12px;">
           <div><div class="label">Customer</div><input class="input" id="addr_customer" list="${customerListId}" placeholder="Link to existing customer" /></div>
-          <div><div class="label">Address</div><input class="input" id="addr_address" placeholder="Job-site address" /></div>
+          <div><div class="label">Street Address</div><input class="input" id="addr_address" placeholder="Job-site address" /></div>
           <div><div class="label">Label / Location</div><input class="input" id="addr_label" placeholder="Optional, e.g. North Building" /></div>
           <div><div class="label">Notes</div><input class="input" id="addr_notes" placeholder="Optional notes" /></div>
         </div>
@@ -5299,66 +5281,67 @@ function renderCustomersView() {
         <div style="margin-top:12px;"><input class="input" id="addr_search" placeholder="Search addresses, customers, job numbers..." /></div>
         <div id="addr_list" style="display:grid; gap:8px; margin-top:12px;"></div>
       `;
-      form.appendChild(buildCustomerDatalist(customerListId, customers));
-      body.appendChild(form);
+      panel.appendChild(buildCustomerDatalist(customerListId, customers));
+      body.appendChild(panel);
 
-      const list = form.querySelector("#addr_list");
-      const search = form.querySelector("#addr_search");
-
-      async function reloadAddresses() {
-        items = await apiListAddresses({ limit: 1000 }).catch(() => []);
-        renderList();
-      }
+      const list = panel.querySelector("#addr_list");
+      const search = panel.querySelector("#addr_search");
 
       function renderList() {
-        const q = String(search.value || "").toLowerCase().trim();
+        const q = search.value.trim().toLowerCase();
         const filtered = items.filter(a => !q || [a.address, a.customer, a.company_name, a.label, a.notes, a.job_number, a.source].join(" ").toLowerCase().includes(q));
         list.innerHTML = "";
-        if (!filtered.length) {
-          list.innerHTML = `<div class="hint">No addresses found.</div>`;
-          return;
-        }
+        if (!filtered.length) { list.innerHTML = `<div class="hint">No addresses found.</div>`; return; }
         filtered.slice(0, 500).forEach(a => {
+          const isSaved = String(a.source || "") === "saved";
           const row = document.createElement("div");
           row.className = "jobrow";
-          const source = String(a.source || "saved");
-          const canEdit = source === "saved" || !String(a.id || "").includes("-");
           row.innerHTML = `
             <div class="jobrow-top">
               <div>
                 <div class="jobrow-name">${escapeHtml(a.address || "")}</div>
                 <div class="jobrow-addr">${escapeHtml(a.customer || a.company_name || "")}${a.job_number ? ` - Job #${escapeHtml(a.job_number)}` : ""}</div>
+                <div class="hint">${escapeHtml(a.label || a.notes || "")}</div>
               </div>
-              <div style="display:flex; gap:8px; align-items:center;">
-                <div class="badge">${escapeHtml(source)}</div>
-                ${canEdit ? `<button class="btn" data-edit-address="${escapeHtml(a.id || "")}">Edit</button>` : ""}
+              <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+                <div class="badge">${escapeHtml(a.source || "saved")}</div>
+                ${isSaved ? `<button class="btn" data-edit> Edit </button><button class="btn" data-delete> Delete </button>` : ""}
               </div>
             </div>
-            <div class="hint">${escapeHtml(a.label || a.notes || "")}</div>
           `;
-          const edit = row.querySelector("[data-edit-address]");
+          const edit = row.querySelector("[data-edit]");
           if (edit) edit.addEventListener("click", () => editAddress(a));
+          const del = row.querySelector("[data-delete]");
+          if (del) del.addEventListener("click", async () => {
+            if (!confirm("Delete this saved address?")) return;
+            await apiDeleteAddress(a.id);
+            await renderAddressesTab();
+          });
           list.appendChild(row);
         });
       }
 
-      form.querySelector("#addr_add").addEventListener("click", async () => {
-        const address = form.querySelector("#addr_address").value.trim();
+      panel.querySelector("#addr_add").addEventListener("click", async () => {
+        const address = panel.querySelector("#addr_address").value.trim();
         if (!address) return alert("Address is required.");
+        const customer = panel.querySelector("#addr_customer").value.trim();
+        const matched = customers.find(c => normalizeText(c.company_name) === normalizeText(customer));
         await apiCreateAddress({
-          customer: form.querySelector("#addr_customer").value.trim(),
-          company_name: form.querySelector("#addr_customer").value.trim(),
+          customer,
+          company_name: customer,
+          customer_id: matched ? matched.id || "" : "",
           address,
-          label: form.querySelector("#addr_label").value.trim(),
-          notes: form.querySelector("#addr_notes").value.trim(),
+          label: panel.querySelector("#addr_label").value.trim(),
+          notes: panel.querySelector("#addr_notes").value.trim(),
         });
-        form.querySelector("#addr_address").value = "";
-        form.querySelector("#addr_label").value = "";
-        form.querySelector("#addr_notes").value = "";
-        await reloadAddresses();
+        items = await apiListAddresses({ limit: 1500, include_legacy: true }).catch(() => []);
+        panel.querySelector("#addr_address").value = "";
+        panel.querySelector("#addr_label").value = "";
+        panel.querySelector("#addr_notes").value = "";
+        renderList();
       });
 
-      form.querySelector("#addr_refresh").addEventListener("click", reloadAddresses);
+      panel.querySelector("#addr_refresh").addEventListener("click", renderAddressesTab);
       search.addEventListener("input", renderList);
       renderList();
     }
@@ -5367,16 +5350,17 @@ function renderCustomersView() {
     btnContacts.addEventListener("click", () => renderContactsTab());
     btnAddresses.addEventListener("click", () => renderAddressesTab());
 
-    root.appendChild(card);
+    root.appendChild(header);
     root.appendChild(tabs);
     root.appendChild(body);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
 
-    currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : activeTab === "contacts" ? renderContactsTab() : renderAddressesTab() };
+    currentView = {
+      refresh: () => activeTab === "customers" ? renderCustomersTab() : activeTab === "contacts" ? renderContactsTab() : renderAddressesTab()
+    };
     renderCustomersTab();
   }
-
   function renderContactsView() {
     renderCustomersView();
   }

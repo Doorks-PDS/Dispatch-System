@@ -69,6 +69,13 @@ def _clean_job_site_address(raw: Any, company: str = "") -> str:
 
 
 class AddressStore:
+    """
+    Saved addresses now behave like CRM customers/contacts:
+    - manual saved records live in addresses.json
+    - create/update/list_saved only touches that JSON file
+    - legacy CSV addresses are optional read-only suggestions for autocomplete
+    """
+
     def __init__(self, project_root: str | Path):
         self.project_root = Path(project_root)
         self.data_dir = get_writable_data_dir(self.project_root)
@@ -79,21 +86,33 @@ class AddressStore:
 
     def _ensure(self) -> None:
         if not self.path.exists():
-            _atomic_write_json(self.path, {"version": 1, "items": []})
+            _atomic_write_json(self.path, {"items": []})
 
     def _load_items(self) -> List[Dict[str, Any]]:
         self._ensure()
-        data = _read_json(self.path, {"version": 1, "items": []})
+        data = _read_json(self.path, {"items": []})
         if isinstance(data, list):
             items = data
         elif isinstance(data, dict):
             items = data.get("items", [])
         else:
             items = []
-        return [x for x in items if isinstance(x, dict)]
+        changed = False
+        clean_items: List[Dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if not item.get("id"):
+                item["id"] = uuid.uuid4().hex
+                changed = True
+            item["source"] = "saved"
+            clean_items.append(item)
+        if changed:
+            self._save_items(clean_items)
+        return clean_items
 
     def _save_items(self, items: List[Dict[str, Any]]) -> None:
-        _atomic_write_json(self.path, {"version": 1, "items": items})
+        _atomic_write_json(self.path, {"items": items})
 
     def _read_csv_rows(self, path: Optional[Path], source: str) -> List[Dict[str, Any]]:
         if not path or not path.exists():
@@ -108,32 +127,31 @@ class AddressStore:
                     address = _clean_job_site_address(raw_addr, company)
                     if not address:
                         continue
+                    job_number = _clean(row.get("Job Number") or row.get("Job #") or "")
                     out.append({
-                        "id": f"{source}-{uuid.uuid5(uuid.NAMESPACE_URL, source + '|' + address + '|' + _clean(row.get('Job Number'))).hex}",
+                        "id": f"{source}-{uuid.uuid5(uuid.NAMESPACE_URL, source + '|' + address + '|' + job_number).hex}",
                         "address": address,
                         "customer": company,
                         "company_name": company,
                         "contact": _clean(row.get("Contact Name") or ""),
-                        "job_number": _clean(row.get("Job Number") or row.get("Job #") or ""),
+                        "job_number": job_number,
                         "date": _clean(row.get("Date Job Performed") or row.get("Date") or ""),
+                        "label": "",
+                        "notes": "",
                         "source": source,
+                        "readonly": True,
                     })
         except Exception:
             return []
         return out
 
-    def _seed_addresses(self) -> List[Dict[str, Any]]:
+    def list_legacy(self) -> List[Dict[str, Any]]:
         rows: List[Dict[str, Any]] = []
         rows.extend(self._read_csv_rows(self.billable_time_csv, "billable_time"))
         rows.extend(self._read_csv_rows(self.tech_notes_csv, "tech_notes"))
         return rows
 
-    def list(self, q: str = "", limit: int = 1000) -> List[Dict[str, Any]]:
-        qn = _normalize_key(q)
-        combined: List[Dict[str, Any]] = []
-        combined.extend(self._load_items())
-        combined.extend(self._seed_addresses())
-
+    def _dedupe(self, combined: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         dedup: Dict[str, Dict[str, Any]] = {}
         for item in combined:
             address = _clean(item.get("address"))
@@ -142,21 +160,43 @@ class AddressStore:
             key = _normalize_key(address)
             existing = dedup.get(key)
             if existing:
-                # Manual records are loaded first, so keep them and fill any blanks from legacy seed rows.
-                for k in ["customer", "company_name", "contact", "job_number", "label", "notes"]:
-                    if not existing.get(k) and item.get(k):
-                        existing[k] = item.get(k)
-                existing["source"] = existing.get("source") or item.get("source") or "saved"
+                # Saved manual records win. Legacy only fills blanks.
+                if existing.get("source") == "saved":
+                    for k in ["customer", "company_name", "contact", "job_number", "label", "notes"]:
+                        if not existing.get(k) and item.get(k):
+                            existing[k] = item.get(k)
+                elif item.get("source") == "saved":
+                    merged = dict(existing)
+                    merged.update(item)
+                    merged["source"] = "saved"
+                    merged["readonly"] = False
+                    dedup[key] = merged
             else:
                 dedup[key] = dict(item)
+        return list(dedup.values())
 
-        items = list(dedup.values())
+    def list(self, q: str = "", limit: int = 1000, include_legacy: bool = True, saved_only: bool = False) -> List[Dict[str, Any]]:
+        qn = _normalize_key(q)
+        saved = self._load_items()
+        combined: List[Dict[str, Any]] = list(saved)
+        if include_legacy and not saved_only:
+            combined.extend(self.list_legacy())
+
+        items = self._dedupe(combined)
         if qn:
             items = [
                 item for item in items
-                if qn in _normalize_key(" ".join(str(item.get(k) or "") for k in ["address", "customer", "company_name", "contact", "job_number", "label", "notes", "source"]))
+                if qn in _normalize_key(" ".join(str(item.get(k) or "") for k in [
+                    "address", "customer", "company_name", "contact", "job_number", "label", "notes", "source"
+                ]))
             ]
-        items.sort(key=lambda x: (_clean(x.get("customer") or x.get("company_name")), _clean(x.get("address"))))
+
+        # Saved addresses first so the Addresses tab shows what you created at the top.
+        items.sort(key=lambda x: (
+            0 if str(x.get("source") or "") == "saved" else 1,
+            _clean(x.get("customer") or x.get("company_name")),
+            _clean(x.get("address")),
+        ))
         return items[: max(1, min(int(limit or 1000), 5000))]
 
     def create(self, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -172,10 +212,12 @@ class AddressStore:
                     "address": address,
                     "customer": _clean(payload.get("customer") or payload.get("company_name") or item.get("customer")),
                     "company_name": _clean(payload.get("company_name") or payload.get("customer") or item.get("company_name")),
+                    "customer_id": _clean(payload.get("customer_id") or item.get("customer_id")),
                     "label": _clean(payload.get("label") or item.get("label")),
                     "notes": _clean(payload.get("notes") or item.get("notes")),
                     "updated_at": _now_iso(),
                     "source": "saved",
+                    "readonly": False,
                 })
                 self._save_items(items)
                 return item
@@ -185,9 +227,11 @@ class AddressStore:
             "address": address,
             "customer": _clean(payload.get("customer") or payload.get("company_name")),
             "company_name": _clean(payload.get("company_name") or payload.get("customer")),
+            "customer_id": _clean(payload.get("customer_id")),
             "label": _clean(payload.get("label")),
             "notes": _clean(payload.get("notes")),
             "source": "saved",
+            "readonly": False,
             "created_at": _now_iso(),
             "updated_at": _now_iso(),
         }
@@ -210,11 +254,21 @@ class AddressStore:
                     "address": address,
                     "customer": _clean(payload.get("customer") or payload.get("company_name") or item.get("customer")),
                     "company_name": _clean(payload.get("company_name") or payload.get("customer") or item.get("company_name")),
+                    "customer_id": _clean(payload.get("customer_id") or item.get("customer_id")),
                     "label": _clean(payload.get("label") or item.get("label")),
                     "notes": _clean(payload.get("notes") or item.get("notes")),
                     "updated_at": _now_iso(),
                     "source": "saved",
+                    "readonly": False,
                 })
                 self._save_items(items)
                 return item
         raise ValueError("Address not found")
+
+    def delete(self, item_id: str) -> None:
+        item_id = str(item_id or "").strip()
+        items = self._load_items()
+        kept = [x for x in items if str(x.get("id") or "") != item_id]
+        if len(kept) == len(items):
+            raise ValueError("Address not found")
+        self._save_items(kept)
