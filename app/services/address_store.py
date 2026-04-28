@@ -81,13 +81,18 @@ class AddressStore:
         if not self.path.exists():
             _atomic_write_json(self.path, {"version": 1, "items": []})
 
-    def _load_manual(self) -> List[Dict[str, Any]]:
+    def _load_items(self) -> List[Dict[str, Any]]:
         self._ensure()
         data = _read_json(self.path, {"version": 1, "items": []})
-        items = data.get("items", []) if isinstance(data, dict) else []
+        if isinstance(data, list):
+            items = data
+        elif isinstance(data, dict):
+            items = data.get("items", [])
+        else:
+            items = []
         return [x for x in items if isinstance(x, dict)]
 
-    def _save_manual(self, items: List[Dict[str, Any]]) -> None:
+    def _save_items(self, items: List[Dict[str, Any]]) -> None:
         _atomic_write_json(self.path, {"version": 1, "items": items})
 
     def _read_csv_rows(self, path: Optional[Path], source: str) -> List[Dict[str, Any]]:
@@ -118,15 +123,15 @@ class AddressStore:
         return out
 
     def _seed_addresses(self) -> List[Dict[str, Any]]:
-        rows = []
+        rows: List[Dict[str, Any]] = []
         rows.extend(self._read_csv_rows(self.billable_time_csv, "billable_time"))
         rows.extend(self._read_csv_rows(self.tech_notes_csv, "tech_notes"))
         return rows
 
     def list(self, q: str = "", limit: int = 1000) -> List[Dict[str, Any]]:
         qn = _normalize_key(q)
-        combined = []
-        combined.extend(self._load_manual())
+        combined: List[Dict[str, Any]] = []
+        combined.extend(self._load_items())
         combined.extend(self._seed_addresses())
 
         dedup: Dict[str, Dict[str, Any]] = {}
@@ -137,7 +142,7 @@ class AddressStore:
             key = _normalize_key(address)
             existing = dedup.get(key)
             if existing:
-                # Prefer manual/customer-enriched records, but keep legacy job number/source hints when missing.
+                # Manual records are loaded first, so keep them and fill any blanks from legacy seed rows.
                 for k in ["customer", "company_name", "contact", "job_number", "label", "notes"]:
                     if not existing.get(k) and item.get(k):
                         existing[k] = item.get(k)
@@ -158,11 +163,13 @@ class AddressStore:
         address = _clean(payload.get("address"))
         if not address:
             raise ValueError("Address is required")
-        items = self._load_manual()
+
+        items = self._load_items()
         key = _normalize_key(address)
         for item in items:
             if _normalize_key(item.get("address")) == key:
                 item.update({
+                    "address": address,
                     "customer": _clean(payload.get("customer") or payload.get("company_name") or item.get("customer")),
                     "company_name": _clean(payload.get("company_name") or payload.get("customer") or item.get("company_name")),
                     "label": _clean(payload.get("label") or item.get("label")),
@@ -170,8 +177,9 @@ class AddressStore:
                     "updated_at": _now_iso(),
                     "source": "saved",
                 })
-                self._save_manual(items)
+                self._save_items(items)
                 return item
+
         item = {
             "id": uuid.uuid4().hex,
             "address": address,
@@ -184,7 +192,7 @@ class AddressStore:
             "updated_at": _now_iso(),
         }
         items.append(item)
-        self._save_manual(items)
+        self._save_items(items)
         return item
 
     def update(self, item_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -195,7 +203,7 @@ class AddressStore:
         if not address:
             raise ValueError("Address is required")
 
-        items = self._load_manual()
+        items = self._load_items()
         for item in items:
             if str(item.get("id") or "") == item_id:
                 item.update({
@@ -207,7 +215,6 @@ class AddressStore:
                     "updated_at": _now_iso(),
                     "source": "saved",
                 })
-                self._save_manual(items)
+                self._save_items(items)
                 return item
-
         raise ValueError("Address not found")

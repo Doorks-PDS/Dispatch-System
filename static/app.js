@@ -5032,7 +5032,7 @@ function renderCustomersView() {
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers, contacts, and saved job-site addresses in one place.</div>`;
+    card.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers, contacts, and saved job-site addresses.</div>`;
 
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
@@ -5063,10 +5063,10 @@ function renderCustomersView() {
       btnAddresses.className = tab === "addresses" ? "btn btn-orange" : "btn";
     }
 
-    function includesQuery(item, query, keys) {
+    function searchHit(item, q, keys) {
+      const query = String(q || "").toLowerCase().trim();
       if (!query) return true;
-      const hay = keys.map(k => String(item && item[k] || "")).join(" ").toLowerCase();
-      return hay.includes(query.toLowerCase());
+      return keys.map(k => String(item?.[k] || "")).join(" ").toLowerCase().includes(query);
     }
 
     async function editCustomer(item) {
@@ -5097,7 +5097,8 @@ function renderCustomersView() {
       const cell_phone = (prompt("Cell phone:", item.cell_phone || "") || "").trim();
       const email = (prompt("Email:", item.email || "") || "").trim();
       const title = (prompt("Title:", item.title || "") || "").trim();
-      const matchedCustomer = (customers || []).find(c => normalizeText(c.company_name) === normalizeText(company_name));
+      const notes = (prompt("Notes:", item.notes || "") || "").trim();
+      const matchedCustomer = (await apiListCustomers().catch(() => [])).find(c => normalizeText(c.company_name) === normalizeText(company_name));
       await apiUpdateContact(item.id, {
         name,
         company_name,
@@ -5106,13 +5107,15 @@ function renderCustomersView() {
         cell_phone,
         email,
         title,
-        notes: item.notes || "",
+        notes,
       });
       await renderContactsTab();
     }
 
     async function editAddress(item) {
-      if (String(item.source || "saved") !== "saved" && String(item.id || "").includes("-")) {
+      const source = String(item.source || "saved");
+      const legacyId = String(item.id || "").includes("-");
+      if (source !== "saved" && legacyId) {
         alert("Legacy CSV addresses cannot be edited directly. Add it as a saved address if you need to change it.");
         return;
       }
@@ -5131,10 +5134,12 @@ function renderCustomersView() {
       body.innerHTML = "";
 
       const top = document.createElement("div");
+      top.className = "card";
       top.innerHTML = `
-        <div class="hint">Add, search, and edit customers.</div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:8px;">
-          <input class="input" id="cust_search" placeholder="Search customers, address, phone, email..." style="flex:1; min-width:220px;" />
+        <h3>Customers</h3>
+        <div class="hint">Search, add, and edit customer records.</div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px;">
+          <input class="input" id="cust_search" placeholder="Search customers, addresses, phone, email..." style="flex:1; min-width:220px;" />
           <button class="btn btn-orange" id="cust_add">Add Customer</button>
         </div>
       `;
@@ -5147,19 +5152,24 @@ function renderCustomersView() {
       body.appendChild(list);
 
       function renderList() {
-        const q = String(top.querySelector("#cust_search").value || "").trim().toLowerCase();
-        const filtered = items.filter(c => includesQuery(c, q, ["company_name", "address", "city", "state", "zip_code", "phone_number", "email", "notes"]));
+        const q = top.querySelector("#cust_search").value;
+        const filtered = items.filter(c => searchHit(c, q, ["company_name", "address", "city", "state", "zip_code", "phone_number", "email", "notes"]));
         list.innerHTML = "";
-        if (!filtered.length) { list.innerHTML = `<div class="hint">No customers found.</div>`; return; }
+        if (!filtered.length) {
+          list.innerHTML = `<div class="hint">No customers found.</div>`;
+          return;
+        }
         filtered.forEach(c => {
           const row = document.createElement("div");
           row.className = "jobrow";
           row.innerHTML = `
             <div class="jobrow-top">
-              <div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>
+              <div>
+                <div class="jobrow-name">${escapeHtml(c.company_name || "")}</div>
+                <div class="jobrow-addr">${escapeHtml(c.address || "")}</div>
+              </div>
               <button class="btn" data-edit-customer="${escapeHtml(c.id || "")}">Edit</button>
             </div>
-            <div class="jobrow-addr">${escapeHtml(c.address || "")}</div>
             <div class="hint">${escapeHtml(c.phone_number || "")}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
             ${c.notes ? `<div class="hint">${escapeHtml(c.notes || "")}</div>` : ""}
           `;
@@ -5180,7 +5190,9 @@ function renderCustomersView() {
         const contactEmail = (prompt("Primary contact email (optional):") || "").trim();
         await apiCreateCustomer({ company_name: name, address, phone_number: phone, email });
         if (contactName || contactPhone || contactEmail) {
-          try { await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail }); } catch {}
+          try {
+            await apiCreateContact({ name: contactName || name, company_name: name, phone_number: contactPhone, email: contactEmail });
+          } catch {}
         }
         await renderCustomersTab();
       });
@@ -5192,18 +5204,22 @@ function renderCustomersView() {
       setTab("contacts");
       const [items, customers] = await Promise.all([apiListContacts().catch(() => []), apiListCustomers().catch(() => [])]);
       body.innerHTML = "";
+
       const companyListId = `contact-company-${Math.random().toString(36).slice(2)}`;
       const form = document.createElement("div");
       form.className = "card";
       form.innerHTML = `
         <h3>Contacts</h3>
-        <div class="grid2">
+        <div class="hint">Search, add, and edit contacts.</div>
+        <div class="grid2" style="margin-top:10px;">
           <div><div class="label">Name</div><input class="input" id="cont_name" /></div>
           <div><div class="label">Company</div><input class="input" id="cont_company" list="${companyListId}" placeholder="Link to existing customer" /></div>
           <div><div class="label">Phone</div><input class="input" id="cont_phone" /></div>
           <div><div class="label">Email</div><input class="input" id="cont_email" /></div>
         </div>
-        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="cont_add">Add Contact</button></div>
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-orange" id="cont_add">Add Contact</button>
+        </div>
         <div style="margin-top:12px;"><input class="input" id="cont_search" placeholder="Search contacts, company, phone, email..." /></div>
       `;
       form.appendChild(buildCustomerDatalist(companyListId, customers));
@@ -5216,16 +5232,22 @@ function renderCustomersView() {
       body.appendChild(list);
 
       function renderList() {
-        const q = String(form.querySelector("#cont_search").value || "").trim().toLowerCase();
-        const filtered = items.filter(c => includesQuery(c, q, ["name", "company_name", "phone_number", "cell_phone", "email", "title", "notes"]));
+        const q = form.querySelector("#cont_search").value;
+        const filtered = items.filter(c => searchHit(c, q, ["name", "company_name", "phone_number", "cell_phone", "email", "title", "notes"]));
         list.innerHTML = "";
-        if (!filtered.length) { list.innerHTML = `<div class="hint">No contacts found.</div>`; return; }
+        if (!filtered.length) {
+          list.innerHTML = `<div class="hint">No contacts found.</div>`;
+          return;
+        }
         filtered.forEach(c => {
           const row = document.createElement("div");
           row.className = "jobrow";
           row.innerHTML = `
             <div class="jobrow-top">
-              <div><div class="jobrow-name">${escapeHtml(c.name || "")}</div><div class="hint">${escapeHtml(c.company_name || "")}</div></div>
+              <div>
+                <div class="jobrow-name">${escapeHtml(c.name || "")}</div>
+                <div class="hint">${escapeHtml(c.company_name || "")}</div>
+              </div>
               <button class="btn" data-edit-contact="${escapeHtml(c.id || "")}">Edit</button>
             </div>
             <div class="jobrow-addr">${escapeHtml(c.phone_number || "")}${c.cell_phone ? ` / ${escapeHtml(c.cell_phone)}` : ""}${c.email ? ` - ${escapeHtml(c.email)}` : ""}</div>
@@ -5257,6 +5279,7 @@ function renderCustomersView() {
       setTab("addresses");
       let [items, customers] = await Promise.all([apiListAddresses({ limit: 1000 }).catch(() => []), apiListCustomers().catch(() => [])]);
       body.innerHTML = "";
+
       const customerListId = `addr-company-${Math.random().toString(36).slice(2)}`;
       const form = document.createElement("div");
       form.className = "card";
@@ -5269,28 +5292,47 @@ function renderCustomersView() {
           <div><div class="label">Label / Location</div><input class="input" id="addr_label" placeholder="Optional, e.g. North Building" /></div>
           <div><div class="label">Notes</div><input class="input" id="addr_notes" placeholder="Optional notes" /></div>
         </div>
-        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="addr_add">Add Address</button><button class="btn" id="addr_refresh">Refresh</button></div>
+        <div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn btn-orange" id="addr_add">Add Address</button>
+          <button class="btn" id="addr_refresh">Refresh</button>
+        </div>
         <div style="margin-top:12px;"><input class="input" id="addr_search" placeholder="Search addresses, customers, job numbers..." /></div>
         <div id="addr_list" style="display:grid; gap:8px; margin-top:12px;"></div>
       `;
       form.appendChild(buildCustomerDatalist(customerListId, customers));
       body.appendChild(form);
+
       const list = form.querySelector("#addr_list");
       const search = form.querySelector("#addr_search");
+
+      async function reloadAddresses() {
+        items = await apiListAddresses({ limit: 1000 }).catch(() => []);
+        renderList();
+      }
 
       function renderList() {
         const q = String(search.value || "").toLowerCase().trim();
         const filtered = items.filter(a => !q || [a.address, a.customer, a.company_name, a.label, a.notes, a.job_number, a.source].join(" ").toLowerCase().includes(q));
         list.innerHTML = "";
-        if (!filtered.length) { list.innerHTML = `<div class="hint">No addresses found.</div>`; return; }
+        if (!filtered.length) {
+          list.innerHTML = `<div class="hint">No addresses found.</div>`;
+          return;
+        }
         filtered.slice(0, 500).forEach(a => {
           const row = document.createElement("div");
           row.className = "jobrow";
-          const canEdit = String(a.source || "saved") === "saved" || !String(a.id || "").includes("-");
+          const source = String(a.source || "saved");
+          const canEdit = source === "saved" || !String(a.id || "").includes("-");
           row.innerHTML = `
             <div class="jobrow-top">
-              <div><div class="jobrow-name">${escapeHtml(a.address || "")}</div><div class="jobrow-addr">${escapeHtml(a.customer || a.company_name || "")}${a.job_number ? ` - Job #${escapeHtml(a.job_number)}` : ""}</div></div>
-              <div style="display:flex; gap:8px; align-items:center;"><div class="badge">${escapeHtml(a.source || "saved")}</div>${canEdit ? `<button class="btn" data-edit-address="${escapeHtml(a.id || "")}">Edit</button>` : ""}</div>
+              <div>
+                <div class="jobrow-name">${escapeHtml(a.address || "")}</div>
+                <div class="jobrow-addr">${escapeHtml(a.customer || a.company_name || "")}${a.job_number ? ` - Job #${escapeHtml(a.job_number)}` : ""}</div>
+              </div>
+              <div style="display:flex; gap:8px; align-items:center;">
+                <div class="badge">${escapeHtml(source)}</div>
+                ${canEdit ? `<button class="btn" data-edit-address="${escapeHtml(a.id || "")}">Edit</button>` : ""}
+              </div>
             </div>
             <div class="hint">${escapeHtml(a.label || a.notes || "")}</div>
           `;
@@ -5310,14 +5352,13 @@ function renderCustomersView() {
           label: form.querySelector("#addr_label").value.trim(),
           notes: form.querySelector("#addr_notes").value.trim(),
         });
-        items = await apiListAddresses({ limit: 1000 }).catch(() => []);
         form.querySelector("#addr_address").value = "";
         form.querySelector("#addr_label").value = "";
         form.querySelector("#addr_notes").value = "";
-        renderList();
+        await reloadAddresses();
       });
 
-      form.querySelector("#addr_refresh").addEventListener("click", renderAddressesTab);
+      form.querySelector("#addr_refresh").addEventListener("click", reloadAddresses);
       search.addEventListener("input", renderList);
       renderList();
     }
@@ -5335,6 +5376,7 @@ function renderCustomersView() {
     currentView = { refresh: () => activeTab === "customers" ? renderCustomersTab() : activeTab === "contacts" ? renderContactsTab() : renderAddressesTab() };
     renderCustomersTab();
   }
+
   function renderContactsView() {
     renderCustomersView();
   }
