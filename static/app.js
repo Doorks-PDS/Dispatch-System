@@ -494,6 +494,15 @@
     openDrawer("Import Legacy Job", async (drawerBody, overlay) => {
       const card = document.createElement("div");
       card.className = "card";
+ 
+      const dateRow = document.createElement("div");
+      dateRow.style.marginTop = "0";
+      dateRow.innerHTML = `
+        <div class="label">Date</div>
+        <input class="input" id="cf_date" type="date" />
+      `;
+      dateRow.querySelector("#cf_date").value = new Date().toISOString().slice(0, 10);
+      card.appendChild(dateRow);
       const defaultDate = String(job.date || "").trim() || new Date().toISOString().slice(0, 10);
       const defaultNumber = String(job.job_number || "").trim();
       card.innerHTML = `
@@ -1682,84 +1691,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
   }
  
   
-  
-  function getJobAttachmentUrl(jobId, file, inline = true) {
-    const filename = encodeURIComponent(file.filename || file.name || "");
-    return `/calendar/jobs/${encodeURIComponent(jobId)}/attachments/${filename}${inline ? "?inline=1" : ""}`;
-  }
-
-  function isImageAttachment(file) {
-    const name = String(file?.filename || file?.name || "").toLowerCase();
-    const mime = String(file?.mime_type || file?.content_type || "").toLowerCase();
-    return mime.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|heic|heif)$/i.test(name);
-  }
-
-  function openAttachmentCarousel(job, startIndex = 0) {
-    const attachments = Array.isArray(job?.attachments) ? job.attachments : [];
-    if (!attachments.length) return;
-    let index = Math.max(0, Math.min(startIndex, attachments.length - 1));
-    const overlay = document.createElement("div");
-    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;";
-    const close = document.createElement("button");
-    close.textContent = "×";
-    close.style.cssText = "position:absolute;top:14px;right:18px;font-size:34px;color:white;background:transparent;border:0;cursor:pointer;font-weight:900;";
-    const left = document.createElement("button");
-    left.textContent = "‹";
-    left.style.cssText = "position:absolute;left:18px;top:50%;transform:translateY(-50%);font-size:56px;color:white;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
-    const right = document.createElement("button");
-    right.textContent = "›";
-    right.style.cssText = "position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:56px;color:white;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
-    const content = document.createElement("div");
-    content.style.cssText = "max-width:92vw;max-height:86vh;display:flex;flex-direction:column;align-items:center;gap:10px;color:white;";
-    const mediaWrap = document.createElement("div");
-    mediaWrap.style.cssText = "max-width:92vw;max-height:78vh;display:flex;align-items:center;justify-content:center;";
-    const caption = document.createElement("div");
-    caption.style.cssText = "font-weight:800;text-align:center;color:white;";
-    const actions = document.createElement("div");
-    actions.style.cssText = "display:flex;gap:8px;justify-content:center;";
-    function render() {
-      const file = attachments[index];
-      const url = getJobAttachmentUrl(job.id, file, true);
-      mediaWrap.innerHTML = "";
-      if (isImageAttachment(file)) {
-        const img = document.createElement("img");
-        img.src = url;
-        img.alt = file.filename || "Attachment";
-        img.style.cssText = "max-width:92vw;max-height:78vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.55);background:white;";
-        mediaWrap.appendChild(img);
-      } else {
-        const box = document.createElement("div");
-        box.style.cssText = "background:white;color:#111827;border-radius:14px;padding:22px;max-width:720px;text-align:center;";
-        box.innerHTML = `<div style="font-weight:900;font-size:20px;margin-bottom:8px;">${escapeHtml(file.filename || "Attachment")}</div><div class="hint">Preview not available for this file type.</div>`;
-        mediaWrap.appendChild(box);
-      }
-      caption.textContent = `${index + 1} of ${attachments.length} — ${file.filename || ""}`;
-      actions.innerHTML = "";
-      const openBtn = document.createElement("a");
-      openBtn.className = "btn";
-      openBtn.textContent = "Open";
-      openBtn.href = url;
-      openBtn.target = "_blank";
-      openBtn.rel = "noopener";
-      actions.appendChild(openBtn);
-      left.style.display = attachments.length > 1 ? "block" : "none";
-      right.style.display = attachments.length > 1 ? "block" : "none";
-    }
-    function prev() { index = (index - 1 + attachments.length) % attachments.length; render(); }
-    function next() { index = (index + 1) % attachments.length; render(); }
-    function cleanup() { document.removeEventListener("keydown", keyHandler); overlay.remove(); }
-    function keyHandler(e) { if (e.key === "Escape") cleanup(); if (e.key === "ArrowLeft") prev(); if (e.key === "ArrowRight") next(); }
-    close.addEventListener("click", cleanup);
-    left.addEventListener("click", e => { e.stopPropagation(); prev(); });
-    right.addEventListener("click", e => { e.stopPropagation(); next(); });
-    overlay.addEventListener("click", e => { if (e.target === overlay) cleanup(); });
-    document.addEventListener("keydown", keyHandler);
-    content.appendChild(mediaWrap); content.appendChild(caption); content.appendChild(actions);
-    overlay.appendChild(close); overlay.appendChild(left); overlay.appendChild(right); overlay.appendChild(content);
-    document.body.appendChild(overlay); render();
-  }
-
-function formatFormDate(value) {
+  function formatFormDate(value) {
     if (!value) return "";
     const s = String(value || "").slice(0, 10);
     const p = s.split("-");
@@ -1770,12 +1702,12 @@ function formatFormDate(value) {
 function renderAttachmentSection(titleText, items, options = {}) {
     const wrap = document.createElement("div");
     wrap.style.marginTop = "10px";
- 
+
     const title = document.createElement("div");
     title.className = "label";
     title.textContent = titleText;
     wrap.appendChild(title);
- 
+
     const list = Array.isArray(items) ? items : [];
     if (!list.length) {
       const empty = document.createElement("div");
@@ -1785,18 +1717,23 @@ function renderAttachmentSection(titleText, items, options = {}) {
       wrap.appendChild(empty);
       return wrap;
     }
- 
+
+    const carouselFiles = list.map(file => ({
+      ...file,
+      url: typeof options.urlBuilder === "function" ? options.urlBuilder(file) : ""
+    }));
+
     const box = document.createElement("div");
     box.style.display = "grid";
     box.style.gap = "8px";
     box.style.marginTop = "8px";
- 
-    list.forEach(file => {
+
+    list.forEach((file, i) => {
       const filename = file.filename || "Attachment";
-      const url = typeof options.urlBuilder === "function" ? options.urlBuilder(file) : "";
+      const url = carouselFiles[i].url || "";
       const row = document.createElement("div");
       row.className = "jobrow";
- 
+
       const top = document.createElement("div");
       top.className = "jobrow-top";
       const name = document.createElement("div");
@@ -1807,46 +1744,123 @@ function renderAttachmentSection(titleText, items, options = {}) {
       meta.textContent = formatBytes(file.bytes || 0);
       top.appendChild(name);
       top.appendChild(meta);
- 
+
       const stamp = document.createElement("div");
       stamp.className = "jobrow-addr";
       stamp.textContent = formatStamp(file.created_at) || "Saved";
- 
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
       actions.style.marginTop = "8px";
       actions.style.flexWrap = "wrap";
- 
+
       if (url) {
-        if (isImageFilename(filename)) {
-          const viewBtn = document.createElement("button");
-          styleActionButton(viewBtn, "blue", true);
-          viewBtn.textContent = "Open";
-          viewBtn.addEventListener("click", () => openImagePreview(filename, `${url}${url.includes("?") ? "&" : "?"}inline=1`));
-          actions.appendChild(viewBtn);
-        } else {
-          const openLink = document.createElement("a");
-          openLink.href = `${url}${url.includes("?") ? "&" : "?"}inline=1`;
-          openLink.target = "_blank";
-          openLink.rel = "noopener noreferrer";
-          openLink.textContent = "Open";
-          openLink.className = "btn";
-          styleActionButton(openLink, "blue", true);
-          actions.appendChild(openLink);
-        }
+        const viewBtn = document.createElement("button");
+        styleActionButton(viewBtn, "blue", true);
+        viewBtn.textContent = "Open";
+        viewBtn.addEventListener("click", () => openAttachmentCarousel(carouselFiles, i));
+        actions.appendChild(viewBtn);
       }
- 
+
       row.appendChild(top);
       row.appendChild(stamp);
       if (actions.childNodes.length) row.appendChild(actions);
       box.appendChild(row);
     });
- 
+
     wrap.appendChild(box);
     return wrap;
   }
- 
+
+  function openAttachmentCarousel(files, startIndex = 0) {
+    const attachments = (Array.isArray(files) ? files : []).filter(f => f && f.url);
+    if (!attachments.length) return;
+
+    let index = Math.max(0, Math.min(startIndex, attachments.length - 1));
+
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:99999;display:flex;align-items:center;justify-content:center;padding:22px;";
+
+    const close = document.createElement("button");
+    close.textContent = "×";
+    close.style.cssText = "position:absolute;top:14px;right:18px;font-size:38px;line-height:1;color:#fff;background:transparent;border:0;cursor:pointer;font-weight:900;";
+
+    const left = document.createElement("button");
+    left.textContent = "‹";
+    left.style.cssText = "position:absolute;left:18px;top:50%;transform:translateY(-50%);font-size:56px;color:#fff;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
+
+    const right = document.createElement("button");
+    right.textContent = "›";
+    right.style.cssText = "position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:56px;color:#fff;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
+
+    const content = document.createElement("div");
+    content.style.cssText = "max-width:92vw;max-height:88vh;display:flex;flex-direction:column;align-items:center;gap:10px;color:white;";
+
+    const mediaWrap = document.createElement("div");
+    mediaWrap.style.cssText = "max-width:92vw;max-height:78vh;display:flex;align-items:center;justify-content:center;";
+
+    const caption = document.createElement("div");
+    caption.style.cssText = "font-weight:800;text-align:center;color:#fff;";
+
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:8px;justify-content:center;";
+
+    function render() {
+      const file = attachments[index];
+      const inlineUrl = `${file.url}${String(file.url).includes("?") ? "&" : "?"}inline=1`;
+      mediaWrap.innerHTML = "";
+      if (isImageFilename(file.filename || "")) {
+        const img = document.createElement("img");
+        img.src = inlineUrl;
+        img.alt = file.filename || "Attachment";
+        img.style.cssText = "max-width:92vw;max-height:78vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.55);background:white;";
+        mediaWrap.appendChild(img);
+      } else {
+        const frame = document.createElement("iframe");
+        frame.src = inlineUrl;
+        frame.style.cssText = "width:88vw;height:76vh;background:white;border:0;border-radius:12px;";
+        mediaWrap.appendChild(frame);
+      }
+      caption.textContent = `${index + 1} of ${attachments.length} — ${file.filename || "Attachment"}`;
+      actions.innerHTML = "";
+      const openLink = document.createElement("a");
+      openLink.className = "btn";
+      openLink.href = inlineUrl;
+      openLink.target = "_blank";
+      openLink.rel = "noopener noreferrer";
+      openLink.textContent = "Open in New Tab";
+      actions.appendChild(openLink);
+      left.style.display = attachments.length > 1 ? "block" : "none";
+      right.style.display = attachments.length > 1 ? "block" : "none";
+    }
+
+    function prev() { index = (index - 1 + attachments.length) % attachments.length; render(); }
+    function next() { index = (index + 1) % attachments.length; render(); }
+    function cleanup() { document.removeEventListener("keydown", keyHandler); overlay.remove(); }
+    function keyHandler(e) {
+      if (e.key === "Escape") cleanup();
+      if (e.key === "ArrowLeft") prev();
+      if (e.key === "ArrowRight") next();
+    }
+
+    close.addEventListener("click", cleanup);
+    left.addEventListener("click", (e) => { e.stopPropagation(); prev(); });
+    right.addEventListener("click", (e) => { e.stopPropagation(); next(); });
+    overlay.addEventListener("click", (e) => { if (e.target === overlay) cleanup(); });
+    document.addEventListener("keydown", keyHandler);
+
+    content.appendChild(mediaWrap);
+    content.appendChild(caption);
+    content.appendChild(actions);
+    overlay.appendChild(close);
+    overlay.appendChild(left);
+    overlay.appendChild(right);
+    overlay.appendChild(content);
+    document.body.appendChild(overlay);
+    render();
+  }
+
   function openEditSavedForm(job, formIndex, container, ctx) {
     const f = formsOf(job)[formIndex];
     if (!f) return;
@@ -1859,15 +1873,20 @@ function renderAttachmentSection(titleText, items, options = {}) {
  
       const card = document.createElement("div");
       card.className = "card";
+
+      const dateRow = document.createElement("div");
+      dateRow.style.marginTop = "0";
+      dateRow.innerHTML = `
+        <div class="label">Date</div>
+        <input class="input" id="ef_date" type="date" />
+      `;
+      dateRow.querySelector("#ef_date").value = String(f.date || f.created_at || new Date().toISOString()).slice(0, 10);
+      card.appendChild(dateRow);
  
       let stSel = null;
       if (!isSalesLead) {
         const statusWrap = document.createElement("div");
-        statusWrap.innerHTML = `<div>
-          <div class="label">Date</div>
-          <input class="input" id="cf_date" type="date" />
-        </div>
-        <div class="label">Status</div>`;
+        statusWrap.innerHTML = `<div class="label">Status</div>`;
         stSel = document.createElement("select");
         stSel.className = "input";
         JOB_STATUS_OPTIONS.forEach(s => {
@@ -2032,6 +2051,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
           const updatedForms = [...formsOf(job)];
           const next = { ...updatedForms[formIndex] };
  
+          next.date = card.querySelector("#ef_date")?.value || next.date || new Date().toISOString().slice(0,10);
           next.technician_name = techSel.value;
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
           next.door_type = doorSel.value;
@@ -2178,6 +2198,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       body.style.whiteSpace = "pre-wrap";
  
       const lines = [];
+      if (f.date || f.created_at) lines.push(`Date: ${formatFormDate(f.date || f.created_at)}`);
       if (f.technician_name) lines.push(`Tech: ${f.technician_name}`);
       if (f.door_type) lines.push(`Door Type: ${f.door_type}`);
       if (f.door_location) lines.push(`Door Location: ${f.door_location}`);
@@ -2677,6 +2698,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       drawerBody.innerHTML = "";
       const card = document.createElement("div");
       card.className = "card";
+
+      const formDateRow = document.createElement("div");
+      formDateRow.style.marginTop = "0";
+      formDateRow.innerHTML = `
+        <div class="label">Date</div>
+        <input class="input" id="cf_form_date" type="date" />
+      `;
+      formDateRow.querySelector("#cf_form_date").value = new Date().toISOString().slice(0, 10);
+      card.appendChild(formDateRow);
  
       let stSel = null;
       if (!isSalesLead) {
@@ -2699,11 +2729,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       techRow.className = "grid2";
       techRow.style.marginTop = "10px";
       techRow.innerHTML = `
-        <div><div>
-          <div class="label">Date</div>
-          <input class="input" id="rf_date" type="date" />
-        </div>
-        <div class="label">Technician Name</div><select class="input" id="cf_tech"></select></div>
+        <div><div class="label">Technician Name</div><select class="input" id="cf_tech"></select></div>
         <div><div class="label">Door Type</div><select class="input" id="cf_door_type"></select></div>
       `;
  
@@ -2808,6 +2834,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         try {
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
           const payload = {
+            date: card.querySelector("#cf_form_date")?.value || new Date().toISOString().slice(0, 10),
             technician_name: techSel.value,
             door_type: doorSel.value,
             door_location: locRow.querySelector("#cf_door_loc").value.trim(),
@@ -7856,21 +7883,3 @@ function renderSaddlebackView() {
     refreshBadges();
   })();
 })();
-
-  document.addEventListener("click", function attachmentCarouselDelegation(e) {
-    const link = e.target && e.target.closest ? e.target.closest('a[href*="/calendar/jobs/"][href*="/attachments/"], button[data-attachment-index]') : null;
-    if (!link || !window.__CURRENT_JOB_FOR_ATTACHMENTS) return;
-    try {
-      e.preventDefault();
-      const href = link.getAttribute("href") || "";
-      const attachments = window.__CURRENT_JOB_FOR_ATTACHMENTS.attachments || [];
-      let idx = Number(link.getAttribute("data-attachment-index"));
-      if (!Number.isFinite(idx) || idx < 0) {
-        const matchName = decodeURIComponent((href.split("/attachments/")[1] || "").split("?")[0] || "");
-        idx = attachments.findIndex(a => String(a.filename || "") === matchName);
-      }
-      openAttachmentCarousel(window.__CURRENT_JOB_FOR_ATTACHMENTS, Math.max(0, idx));
-    } catch (err) {
-      console.warn("attachment carousel fallback", err);
-    }
-  });

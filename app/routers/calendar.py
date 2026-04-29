@@ -77,7 +77,6 @@ class JobUpdate(BaseModel):
 
 
 class CompletionCreate(BaseModel):
-    date: Optional[str] = ""
     form_date: Optional[str] = ""
     technician_name: Optional[str] = ""
     door_type: Optional[str] = ""
