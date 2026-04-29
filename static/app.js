@@ -1681,7 +1681,93 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     });
   }
  
-  function renderAttachmentSection(titleText, items, options = {}) {
+  
+  
+  function getJobAttachmentUrl(jobId, file, inline = true) {
+    const filename = encodeURIComponent(file.filename || file.name || "");
+    return `/calendar/jobs/${encodeURIComponent(jobId)}/attachments/${filename}${inline ? "?inline=1" : ""}`;
+  }
+
+  function isImageAttachment(file) {
+    const name = String(file?.filename || file?.name || "").toLowerCase();
+    const mime = String(file?.mime_type || file?.content_type || "").toLowerCase();
+    return mime.startsWith("image/") || /\.(png|jpg|jpeg|gif|webp|bmp|heic|heif)$/i.test(name);
+  }
+
+  function openAttachmentCarousel(job, startIndex = 0) {
+    const attachments = Array.isArray(job?.attachments) ? job.attachments : [];
+    if (!attachments.length) return;
+    let index = Math.max(0, Math.min(startIndex, attachments.length - 1));
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px;";
+    const close = document.createElement("button");
+    close.textContent = "×";
+    close.style.cssText = "position:absolute;top:14px;right:18px;font-size:34px;color:white;background:transparent;border:0;cursor:pointer;font-weight:900;";
+    const left = document.createElement("button");
+    left.textContent = "‹";
+    left.style.cssText = "position:absolute;left:18px;top:50%;transform:translateY(-50%);font-size:56px;color:white;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
+    const right = document.createElement("button");
+    right.textContent = "›";
+    right.style.cssText = "position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:56px;color:white;background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
+    const content = document.createElement("div");
+    content.style.cssText = "max-width:92vw;max-height:86vh;display:flex;flex-direction:column;align-items:center;gap:10px;color:white;";
+    const mediaWrap = document.createElement("div");
+    mediaWrap.style.cssText = "max-width:92vw;max-height:78vh;display:flex;align-items:center;justify-content:center;";
+    const caption = document.createElement("div");
+    caption.style.cssText = "font-weight:800;text-align:center;color:white;";
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;gap:8px;justify-content:center;";
+    function render() {
+      const file = attachments[index];
+      const url = getJobAttachmentUrl(job.id, file, true);
+      mediaWrap.innerHTML = "";
+      if (isImageAttachment(file)) {
+        const img = document.createElement("img");
+        img.src = url;
+        img.alt = file.filename || "Attachment";
+        img.style.cssText = "max-width:92vw;max-height:78vh;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.55);background:white;";
+        mediaWrap.appendChild(img);
+      } else {
+        const box = document.createElement("div");
+        box.style.cssText = "background:white;color:#111827;border-radius:14px;padding:22px;max-width:720px;text-align:center;";
+        box.innerHTML = `<div style="font-weight:900;font-size:20px;margin-bottom:8px;">${escapeHtml(file.filename || "Attachment")}</div><div class="hint">Preview not available for this file type.</div>`;
+        mediaWrap.appendChild(box);
+      }
+      caption.textContent = `${index + 1} of ${attachments.length} — ${file.filename || ""}`;
+      actions.innerHTML = "";
+      const openBtn = document.createElement("a");
+      openBtn.className = "btn";
+      openBtn.textContent = "Open";
+      openBtn.href = url;
+      openBtn.target = "_blank";
+      openBtn.rel = "noopener";
+      actions.appendChild(openBtn);
+      left.style.display = attachments.length > 1 ? "block" : "none";
+      right.style.display = attachments.length > 1 ? "block" : "none";
+    }
+    function prev() { index = (index - 1 + attachments.length) % attachments.length; render(); }
+    function next() { index = (index + 1) % attachments.length; render(); }
+    function cleanup() { document.removeEventListener("keydown", keyHandler); overlay.remove(); }
+    function keyHandler(e) { if (e.key === "Escape") cleanup(); if (e.key === "ArrowLeft") prev(); if (e.key === "ArrowRight") next(); }
+    close.addEventListener("click", cleanup);
+    left.addEventListener("click", e => { e.stopPropagation(); prev(); });
+    right.addEventListener("click", e => { e.stopPropagation(); next(); });
+    overlay.addEventListener("click", e => { if (e.target === overlay) cleanup(); });
+    document.addEventListener("keydown", keyHandler);
+    content.appendChild(mediaWrap); content.appendChild(caption); content.appendChild(actions);
+    overlay.appendChild(close); overlay.appendChild(left); overlay.appendChild(right); overlay.appendChild(content);
+    document.body.appendChild(overlay); render();
+  }
+
+function formatFormDate(value) {
+    if (!value) return "";
+    const s = String(value || "").slice(0, 10);
+    const p = s.split("-");
+    if (p.length === 3) return `${p[1]}/${p[2]}/${p[0]}`;
+    return s;
+  }
+
+function renderAttachmentSection(titleText, items, options = {}) {
     const wrap = document.createElement("div");
     wrap.style.marginTop = "10px";
  
@@ -1777,7 +1863,11 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       let stSel = null;
       if (!isSalesLead) {
         const statusWrap = document.createElement("div");
-        statusWrap.innerHTML = `<div class="label">Status</div>`;
+        statusWrap.innerHTML = `<div>
+          <div class="label">Date</div>
+          <input class="input" id="cf_date" type="date" />
+        </div>
+        <div class="label">Status</div>`;
         stSel = document.createElement("select");
         stSel.className = "input";
         JOB_STATUS_OPTIONS.forEach(s => {
@@ -2609,7 +2699,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       techRow.className = "grid2";
       techRow.style.marginTop = "10px";
       techRow.innerHTML = `
-        <div><div class="label">Technician Name</div><select class="input" id="cf_tech"></select></div>
+        <div><div>
+          <div class="label">Date</div>
+          <input class="input" id="rf_date" type="date" />
+        </div>
+        <div class="label">Technician Name</div><select class="input" id="cf_tech"></select></div>
         <div><div class="label">Door Type</div><select class="input" id="cf_door_type"></select></div>
       `;
  
@@ -7762,3 +7856,21 @@ function renderSaddlebackView() {
     refreshBadges();
   })();
 })();
+
+  document.addEventListener("click", function attachmentCarouselDelegation(e) {
+    const link = e.target && e.target.closest ? e.target.closest('a[href*="/calendar/jobs/"][href*="/attachments/"], button[data-attachment-index]') : null;
+    if (!link || !window.__CURRENT_JOB_FOR_ATTACHMENTS) return;
+    try {
+      e.preventDefault();
+      const href = link.getAttribute("href") || "";
+      const attachments = window.__CURRENT_JOB_FOR_ATTACHMENTS.attachments || [];
+      let idx = Number(link.getAttribute("data-attachment-index"));
+      if (!Number.isFinite(idx) || idx < 0) {
+        const matchName = decodeURIComponent((href.split("/attachments/")[1] || "").split("?")[0] || "");
+        idx = attachments.findIndex(a => String(a.filename || "") === matchName);
+      }
+      openAttachmentCarousel(window.__CURRENT_JOB_FOR_ATTACHMENTS, Math.max(0, idx));
+    } catch (err) {
+      console.warn("attachment carousel fallback", err);
+    }
+  });

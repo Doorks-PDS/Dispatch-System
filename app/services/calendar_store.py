@@ -207,6 +207,7 @@ class CalendarStore:
         if any([tech_name, notes, parts_used, addl, lead_recs, lead_parts, lead_time, ready_to_quote, time_onsite_hours is not None]):
             completion_forms.append({
                 "id": uuid.uuid4().hex,
+                "date": str(legacy.get("date") or legacy.get("scheduled_date") or "").strip(),
                 "created_at": str(legacy.get("updated_at") or legacy.get("created_at") or _now_iso()),
                 "updated_at": str(legacy.get("updated_at") or legacy.get("created_at") or _now_iso()),
                 "technician_name": tech_name,
@@ -726,6 +727,7 @@ class CalendarStore:
 
             form = {
                 "id": form_id,
+                "date": str(payload.get("date") or payload.get("form_date") or datetime.now().strftime("%Y-%m-%d")).strip(),
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
                 "technician_name": str(payload.get("technician_name") or "").strip(),
@@ -771,7 +773,11 @@ class CalendarStore:
                 if str(f.get("id")) != form_id:
                     continue
 
+                if "form_date" in payload and "date" not in payload:
+                    payload["date"] = payload.get("form_date")
+
                 for k in [
+                    "date",
                     "technician_name",
                     "door_type",
                     "door_location",
