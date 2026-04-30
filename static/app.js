@@ -6024,18 +6024,223 @@ function renderEmployeesView() {
           renderItems();
         } catch (e) { alert(e.message || String(e)); }
       });
+      async function applyHelperPrefill() {
+        const helper = ctx && ctx.helperPrefill ? ctx.helperPrefill : null;
+        if (!helper || editDoc) return;
+
+        const trip = items.find(it => it.code === "TRIP" || it.kind === "trip" || it.description === "Trip Charge");
+        if (trip) {
+          trip.code = "TRIP";
+          trip.description = "Trip Charge";
+          trip.kind = "trip";
+          trip.taxable = false;
+          trip.qty = Number(helper.tripQty || 0);
+          trip.rate = Number(pricing.trip || trip.rate || 175);
+        }
+
+        const fuel = items.find(it => it.code === "FUEL" || it.kind === "fuel" || it.description === "Fuel Surcharge");
+        if (fuel) {
+          fuel.code = "FUEL";
+          fuel.description = "Fuel Surcharge";
+          fuel.kind = "fuel";
+          fuel.taxable = false;
+          fuel.qty = Number(helper.fuelQty || 0);
+          fuel.rate = Number(pricing.fuel || fuel.rate || 20);
+        }
+
+        const hours = Number(helper.hours || 0);
+        if (hours > 0) {
+          let desc = "Single Tech Labor";
+          let qty = hours;
+          let rate = Number(pricing.labor || 175);
+          if (helper.laborType === "crew") {
+            desc = "Crew Tech Labor";
+            rate = Number(pricing.crew_labor || 235);
+          } else if (helper.laborType === "other") {
+            const count = Math.max(1, Number(helper.techCount || 1));
+            desc = `${count} Tech Labor`;
+            qty = hours;
+            rate = Number(helper.customRate || pricing.labor || 175);
+          }
+          items.push(createDocLineItem({ code: "LABOR", description: desc, qty, rate, kind: "labor", taxable: false }));
+        }
+
+        const partsText = String(helper.partsText || "").trim();
+        if (partsText) {
+          partsText.split(/\n+/).map(s => s.trim()).filter(Boolean).forEach(line => {
+            items.push(createDocLineItem({ code: "PART", description: line, qty: 1, rate: 0, kind: "part", taxable: true }));
+          });
+        }
+
+        if (helper.autoFill) {
+          try {
+            const completionForms = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
+            const crew = helper.laborType === "crew" || helper.laborType === "other" || completionForms.length > 1;
+            const resp = await apiAutoFillDescription({
+              job_id: job ? (job.id || "") : "",
+              customer: dom.customer.value.trim() || (job && job.customer) || "",
+              address: dom.address.value.trim() || (job && job.address) || "",
+              door_location: (job && (job.door_location || job.location_on_site)) || "",
+              door_id: (job && (job.door_id || job.opening_id)) || "",
+              office_notes: (job && job.office_notes) || "",
+              job_notes: (job && job.job_notes) || "",
+              completion_forms: completionForms,
+              recommendation_forms: completionForms.filter(f => f && (f.ready_to_quote || f.parts_required || f.time_required)),
+              crew: !!crew,
+              trips: Number(helper.tripQty || 1),
+              type: docType,
+              doc_type: docType,
+              kind: docType,
+              dates: [dom.date.value || ""],
+            });
+            dom.work.value = String((resp && resp.description) || "");
+          } catch (e) {
+            console.warn("helper autofill failed", e);
+          }
+        }
+      }
+
+      await applyHelperPrefill();
       if (!editDoc && pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default");
       renderItems();
       card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload={ job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""), customer:dom.customer.value.trim(), address:dom.address.value.trim(), work:dom.work.value.trim(), labor:serializeDocItems(items,true), parts:serializeDocItems(items,false), number:dom.number.value.trim(), po_number:dom.po.value.trim(), invoice_number: docType === "invoice" ? dom.number.value.trim() : "", job_number:dom.job.value.trim(), tax_rate:Number(getCurrentTaxRateValue()||0), completed_by: dom.completedBy.value || "", items: items, date: dom.date.value || "", ship_to: dom.ship.value.trim() }; const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
  
+
+  function openEstimateInvoiceHelper(job = null, initialType = "estimate", container = null, ctx = null) {
+    // Keep edits to existing saved docs direct; helper is only for new job estimate/invoice.
+    if ((job && job.__docEdit) || (ctx && ctx.skipHelper)) {
+      return openEstimateInvoiceDrawer(job, initialType, container, ctx);
+    }
+
+    openDrawer(initialType === "invoice" ? "Invoice Helper" : "Estimate Helper", async (drawerBody, overlay) => {
+      const pricing = await apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }));
+      const card = document.createElement("div");
+      card.className = "card";
+      card.innerHTML = `
+        <h3>${initialType === "invoice" ? "Invoice Helper" : "Estimate Helper"}</h3>
+        <div class="hint">Answer a few quick questions to prefill the editable ${initialType === "invoice" ? "invoice" : "estimate"}. You can still edit everything before saving.</div>
+
+        <div class="card" style="padding:12px; margin-top:12px;">
+          <div class="jobrow-top">
+            <div>
+              <div class="jobrow-name">Want Help?</div>
+              <div class="hint">Choose No to skip this helper and open the normal editable page.</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button class="btn btn-orange" id="help_yes">Yes</button>
+              <button class="btn" id="help_no">No</button>
+            </div>
+          </div>
+        </div>
+
+        <div id="helper_questions" style="display:none; margin-top:12px;">
+          <div class="grid2">
+            <div>
+              <div class="label">Trip Charge Quantity</div>
+              <input class="input" id="helper_trip_qty" type="number" min="0" step="1" value="1" />
+            </div>
+            <div>
+              <div class="label">Fuel Surcharge Quantity</div>
+              <input class="input" id="helper_fuel_qty" type="number" min="0" step="1" value="1" />
+            </div>
+          </div>
+
+          <div class="card" style="padding:12px; margin-top:12px;">
+            <div class="label">Labor Type</div>
+            <select class="input" id="helper_labor_type">
+              <option value="tech">Tech</option>
+              <option value="crew">Crew</option>
+              <option value="other">Other</option>
+            </select>
+            <div id="helper_other_wrap" class="grid2" style="display:none; margin-top:10px;">
+              <div>
+                <div class="label">Total Techs</div>
+                <input class="input" id="helper_tech_count" type="number" min="1" step="1" value="1" />
+              </div>
+              <div>
+                <div class="label">Custom Labor Rate</div>
+                <input class="input" id="helper_custom_rate" type="number" min="0" step="0.01" value="${Number(pricing.labor || 175)}" />
+              </div>
+            </div>
+          </div>
+
+          <div class="grid2" style="margin-top:12px;">
+            <div>
+              <div class="label">Time Onsite / Labor Hours</div>
+              <input class="input" id="helper_hours" type="number" min="0" step="0.25" placeholder="e.g., 2.5" />
+            </div>
+            <div>
+              <div class="label">Auto Fill Description?</div>
+              <select class="input" id="helper_auto_fill">
+                <option value="yes">Yes</option>
+                <option value="no">No</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="margin-top:12px;">
+            <div class="label">Parts / Materials</div>
+            <textarea id="helper_parts" placeholder="Enter parts, one per line. You can still edit/add parts in the estimate or invoice." style="min-height:100px;"></textarea>
+          </div>
+
+          <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
+            <button class="btn btn-orange" id="helper_continue">Continue to Editable ${initialType === "invoice" ? "Invoice" : "Estimate"}</button>
+            <button class="btn" id="helper_cancel">Cancel</button>
+          </div>
+        </div>
+      `;
+      drawerBody.appendChild(card);
+
+      const questions = card.querySelector("#helper_questions");
+      const laborType = card.querySelector("#helper_labor_type");
+      const otherWrap = card.querySelector("#helper_other_wrap");
+
+      function updateLaborMode() {
+        otherWrap.style.display = laborType.value === "other" ? "grid" : "none";
+      }
+      laborType.addEventListener("change", updateLaborMode);
+      updateLaborMode();
+
+      card.querySelector("#help_no").addEventListener("click", () => {
+        if (overlay) overlay.remove();
+        openEstimateInvoiceDrawer(job, initialType, container, { ...(ctx || {}), skipHelper: true });
+      });
+
+      card.querySelector("#help_yes").addEventListener("click", () => {
+        questions.style.display = "block";
+        card.querySelector("#help_yes").disabled = true;
+      });
+
+      card.querySelector("#helper_cancel").addEventListener("click", () => {
+        if (overlay) overlay.remove();
+      });
+
+      card.querySelector("#helper_continue").addEventListener("click", () => {
+        const helperPrefill = {
+          tripQty: Number(card.querySelector("#helper_trip_qty").value || 0),
+          fuelQty: Number(card.querySelector("#helper_fuel_qty").value || 0),
+          laborType: laborType.value,
+          techCount: Number(card.querySelector("#helper_tech_count").value || 1),
+          customRate: Number(card.querySelector("#helper_custom_rate").value || pricing.labor || 175),
+          hours: Number(card.querySelector("#helper_hours").value || 0),
+          partsText: String(card.querySelector("#helper_parts").value || "").trim(),
+          autoFill: card.querySelector("#helper_auto_fill").value === "yes",
+        };
+        if (overlay) overlay.remove();
+        openEstimateInvoiceDrawer(job, initialType, container, { ...(ctx || {}), skipHelper: true, helperPrefill });
+      });
+    });
+  }
+
+
 function openEstimateDrawer(job, container = null, ctx = null) {
-    return openEstimateInvoiceDrawer(job, "estimate", container, ctx);
+    return openEstimateInvoiceHelper(job, "estimate", container, ctx);
   }
  
   function openInvoiceDrawer(job, container = null, ctx = null) {
-    return openEstimateInvoiceDrawer(job, "invoice", container, ctx);
+    return openEstimateInvoiceHelper(job, "invoice", container, ctx);
   }
  
   function renderEstimatePage() {
