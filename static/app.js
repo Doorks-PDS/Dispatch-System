@@ -5845,35 +5845,12 @@ function renderEmployeesView() {
       .join("\n");
   }
  
-  function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null, guideData = null) {
+  function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
       const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
       let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems().map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
-      if (guideData && !editDoc) {
-        items = [];
-        const tripQty = Math.max(0, Number(guideData.tripQty || 0));
-        const fuelQty = Math.max(0, Number(guideData.fuelQty || 0));
-        if (tripQty) items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:tripQty, rate:Number(pricing.trip || 175), kind:"trip", taxable:false }));
-        if (fuelQty) items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:fuelQty, rate:Number(pricing.fuel || 20), kind:"fuel", taxable:false }));
-        const hours = Math.max(0, Number(guideData.hours || 0));
-        const techCount = Math.max(1, Number(guideData.techCount || 1));
-        if (hours) {
-          if (guideData.laborMode === "crew") {
-            items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:hours, rate:Number(pricing.crew_labor || 235), kind:"labor", taxable:false }));
-          } else if (guideData.laborMode === "other") {
-            const rate = Number(guideData.customRate || pricing.labor || 175);
-            items.push(createDocLineItem({ code:"LABOR", description:`Labor (${techCount} Tech${techCount === 1 ? "" : "s"})`, qty:hours * techCount, rate, kind:"labor", taxable:false }));
-          } else {
-            items.push(createDocLineItem({ code:"LABOR", description:"Single Tech Labor", qty:hours, rate:Number(pricing.labor || 175), kind:"labor", taxable:false }));
-          }
-        }
-        String(guideData.partsText || "").split(/
-+/).map(s => s.trim()).filter(Boolean).forEach(line => {
-          items.push(createDocLineItem({ code:"PART", description:line, qty:1, rate:0, kind:"part", taxable:true }));
-        });
-      }
       let currentPartResults = [];
       drawerBody.innerHTML = "";
       const card = document.createElement("div");
@@ -6049,114 +6026,16 @@ function renderEmployeesView() {
       });
       if (!editDoc && pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default");
       renderItems();
-      if (guideData && guideData.autoFill) {
-        setTimeout(() => {
-          const btn = card.querySelector("#doc_auto_fill");
-          if (btn) btn.click();
-        }, 80);
-      }
       card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload={ job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""), customer:dom.customer.value.trim(), address:dom.address.value.trim(), work:dom.work.value.trim(), labor:serializeDocItems(items,true), parts:serializeDocItems(items,false), number:dom.number.value.trim(), po_number:dom.po.value.trim(), invoice_number: docType === "invoice" ? dom.number.value.trim() : "", job_number:dom.job.value.trim(), tax_rate:Number(getCurrentTaxRateValue()||0), completed_by: dom.completedBy.value || "", items: items, date: dom.date.value || "", ship_to: dom.ship.value.trim() }; const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
  
-
-  function openEstimateInvoiceHelpModal(job, docType = "estimate", container = null, ctx = null) {
-    const title = docType === "invoice" ? "Invoice Helper" : "Estimate Helper";
-    const overlay = document.createElement("div");
-    overlay.style.cssText = "position:fixed;inset:0;background:rgba(15,23,42,.58);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px;";
-    const modal = document.createElement("div");
-    modal.className = "card";
-    modal.style.cssText = "width:min(720px,96vw);max-height:88vh;overflow:auto;box-shadow:0 25px 80px rgba(0,0,0,.35);";
-    modal.innerHTML = `
-      <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;">
-        <div><h3 style="margin:0;">${title}</h3><div class="hint">Answer a few quick questions and Doorks will prefill the editable ${docType}.</div></div>
-        <button class="btn" id="eh_close" title="Close">×</button>
-      </div>
-      <div id="eh_step"></div>
-    `;
-    overlay.appendChild(modal);
-    document.body.appendChild(overlay);
-    const step = modal.querySelector("#eh_step");
-    const state = {
-      help: null,
-      tripQty: 1,
-      fuelQty: 1,
-      laborMode: "tech",
-      techCount: 1,
-      customRate: "",
-      hours: "",
-      partsText: "",
-      autoFill: true,
-    };
-    function close() { overlay.remove(); }
-    modal.querySelector("#eh_close").addEventListener("click", close);
-    function btn(label, cls = "btn") {
-      const b = document.createElement("button");
-      b.className = cls;
-      b.type = "button";
-      b.textContent = label;
-      return b;
-    }
-    function renderWantHelp() {
-      step.innerHTML = `<div style="margin-top:16px;"><div class="label">Want Help?</div><div class="hint">Choose No to open the normal editable ${docType}. Choose Yes to prefill trip, fuel, labor, parts, and optional description.</div><div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;"></div></div>`;
-      const row = step.querySelector("div div:last-child");
-      const no = btn("No — open normal form", "btn");
-      const yes = btn("Yes — help me fill it out", "btn btn-orange");
-      no.addEventListener("click", () => { close(); openEstimateInvoiceDrawer(job, docType, container, ctx, null); });
-      yes.addEventListener("click", () => renderCharges());
-      row.append(no, yes);
-    }
-    function renderCharges() {
-      step.innerHTML = `
-        <div style="margin-top:16px;display:grid;gap:12px;">
-          <div><div class="label">Trip Charge Quantity</div><input class="input" id="eh_trip" type="number" min="0" step="1" value="${state.tripQty}" /></div>
-          <div><div class="label">Fuel Surcharge Quantity</div><input class="input" id="eh_fuel" type="number" min="0" step="1" value="${state.fuelQty}" /></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn" id="eh_back">Back</button><button class="btn btn-orange" id="eh_next">Next</button></div>
-        </div>`;
-      step.querySelector("#eh_back").onclick = renderWantHelp;
-      step.querySelector("#eh_next").onclick = () => { state.tripQty = Number(step.querySelector("#eh_trip").value || 0); state.fuelQty = Number(step.querySelector("#eh_fuel").value || 0); renderLabor(); };
-    }
-    function renderLabor() {
-      step.innerHTML = `
-        <div style="margin-top:16px;display:grid;gap:12px;">
-          <div><div class="label">Labor Type</div><select class="input" id="eh_labor"><option value="tech">Tech</option><option value="crew">Crew</option><option value="other">Other</option></select></div>
-          <div id="eh_other_wrap" style="display:none;grid-template-columns:1fr 1fr;gap:10px;"><div><div class="label">Total Techs</div><input class="input" id="eh_tech_count" type="number" min="1" step="1" value="${state.techCount}" /></div><div><div class="label">Custom Labor Rate</div><input class="input" id="eh_rate" type="number" min="0" step="0.01" placeholder="Optional" value="${state.customRate}" /></div></div>
-          <div><div class="label">Time Onsite / Estimated Labor Hours</div><input class="input" id="eh_hours" type="number" min="0" step="0.25" value="${state.hours}" placeholder="Example: 2.5" /></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn" id="eh_back">Back</button><button class="btn btn-orange" id="eh_next">Next</button></div>
-        </div>`;
-      const labor = step.querySelector("#eh_labor");
-      labor.value = state.laborMode;
-      const otherWrap = step.querySelector("#eh_other_wrap");
-      function sync() { otherWrap.style.display = labor.value === "other" ? "grid" : "none"; }
-      labor.onchange = sync; sync();
-      step.querySelector("#eh_back").onclick = renderCharges;
-      step.querySelector("#eh_next").onclick = () => { state.laborMode = labor.value; state.hours = step.querySelector("#eh_hours").value; state.techCount = Number(step.querySelector("#eh_tech_count")?.value || 1); state.customRate = step.querySelector("#eh_rate")?.value || ""; renderParts(); };
-    }
-    function renderParts() {
-      step.innerHTML = `
-        <div style="margin-top:16px;display:grid;gap:12px;">
-          <div><div class="label">Parts</div><textarea id="eh_parts" placeholder="Enter one part per line. You can still edit/add parts from the parts list on the next screen." style="min-height:120px;">${state.partsText || ""}</textarea><div class="hint">Example: (1x) Folger Adams EL Strike</div></div>
-          <div><div class="label">Auto Fill Description?</div><select class="input" id="eh_auto"><option value="yes">Yes</option><option value="no">No</option></select></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap;"><button class="btn" id="eh_back">Back</button><button class="btn btn-orange" id="eh_finish">Open Editable ${docType === "invoice" ? "Invoice" : "Estimate"}</button></div>
-        </div>`;
-      step.querySelector("#eh_auto").value = state.autoFill ? "yes" : "no";
-      step.querySelector("#eh_back").onclick = renderLabor;
-      step.querySelector("#eh_finish").onclick = () => {
-        state.partsText = step.querySelector("#eh_parts").value;
-        state.autoFill = step.querySelector("#eh_auto").value === "yes";
-        close();
-        openEstimateInvoiceDrawer(job, docType, container, ctx, { ...state });
-      };
-    }
-    renderWantHelp();
-  }
-
 function openEstimateDrawer(job, container = null, ctx = null) {
-    return openEstimateInvoiceHelpModal(job, "estimate", container, ctx);
+    return openEstimateInvoiceDrawer(job, "estimate", container, ctx);
   }
  
   function openInvoiceDrawer(job, container = null, ctx = null) {
-    return openEstimateInvoiceHelpModal(job, "invoice", container, ctx);
+    return openEstimateInvoiceDrawer(job, "invoice", container, ctx);
   }
  
   function renderEstimatePage() {
