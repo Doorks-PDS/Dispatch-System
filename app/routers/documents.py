@@ -253,10 +253,20 @@ def _extract_approval_scope(job_notes: str) -> List[str]:
 
 def _strip_checkin_checkout(text: str) -> str:
     clean = _clean_text(text)
-    clean = re.sub(r"^arrived\s+onsite\s+and\s+checked\s+in\s+with\s+customer\.?\s*", "", clean, flags=re.I)
-    clean = re.sub(r"^we\s+arrived\s+onsite\s+and\s+called\s+the\s+contact.*?(?:property\.|property)", "", clean, flags=re.I)
-    clean = re.sub(r"\s*cleaned\s+up\s+and\s+checked\s+out,?\.?$", "", clean, flags=re.I)
-    clean = re.sub(r"\s*finished\s+up\s+with\s+clean\s+up.*$", " Cleaned up work area.", clean, flags=re.I)
+    if not clean:
+        return ""
+    cleanup_patterns = [
+        r"^arrived\s+(?:on\s+site|onsite)\s*(?:and|,)?\s*(?:met\s+with\s+contact\.?\s*)?(?:checked\s+in\s*(?:with\s+customer)?\.?\s*)?",
+        r"^tech(?:nician)?\s+arrived\s+(?:on\s+site|onsite)\s*(?:and)?\s*(?:checked\s+in\s*(?:with\s+customer)?\.?\s*)?",
+        r"^we\s+arrived\s+(?:on\s+site|onsite).*?(?:property\.|property)",
+        r"\s*(?:cleaned\s+up|cleaned\s+up,?\s+checked\s+out|checked\s+out)\.?$",
+        r"\s*sign\s*off\s*sheet\s*included\s*in\s*pictures\.?$",
+    ]
+    for pat in cleanup_patterns:
+        clean = re.sub(pat, "", clean, flags=re.I)
+    clean = re.sub(r"\bwe\b", "technicians", clean, flags=re.I)
+    clean = re.sub(r"\bi\b", "technician", clean, flags=re.I)
+    clean = re.sub(r"\s+", " ", clean).strip(" ,.-")
     return _clean_text(clean)
 
 
@@ -264,12 +274,14 @@ def _normalize_findings(text: str, door_location: str, door_type: str) -> str:
     clean = _strip_checkin_checkout(text)
     if not clean:
         return ""
-    if clean.lower().startswith("moved to "):
-        clean = re.sub(r"^moved\s+to\s+", "At the ", clean, flags=re.I)
-    elif door_location or door_type:
-        target = " ".join(x for x in [door_location, door_type] if x).strip()
-        if target and target.lower() not in clean.lower():
-            clean = f"At the {target}, {clean[0].lower() + clean[1:] if clean else clean}"
+    clean = re.sub(r"^moved\s+to\s+", "", clean, flags=re.I).strip()
+    clean = re.sub(r"^at\s+the\s+", "", clean, flags=re.I).strip()
+    target = " ".join(x for x in [door_location, door_type] if x).strip()
+    if target and target.lower() not in clean.lower():
+        clean = f"At the {target}, {clean[0].lower() + clean[1:] if clean else clean}"
+    else:
+        if clean and not clean.lower().startswith("at the") and target:
+            clean = f"At the {target}, {clean[0].lower() + clean[1:]}"
     return _as_sentence(clean)
 
 
@@ -293,36 +305,63 @@ def _proposal_title(data: dict[str, Any], form: dict[str, Any]) -> str:
     return title or "Opening"
 
 
-def _invoice_summary(tech_notes: str, parts_used: str = "") -> List[str]:
+
+def _field_action_sentence(sentence: str, crew: bool = False) -> str:
+    s = _strip_checkin_checkout(sentence)
+    if not s:
+        return ""
+    low = s.lower()
+    actor = "Technicians" if crew else "Technician"
+    plural_actor = "Technicians"
+    replacements = [
+        (r"^(?:technicians\s+)?took\s+(.+?)\s+down", f"{plural_actor} removed \\1"),
+        (r"^(?:technicians\s+)?swapped\s+out\s+", f"{actor} replaced "),
+        (r"^(?:technicians\s+)?switched\s+out\s+", f"{actor} replaced "),
+        (r"^(?:technicians\s+)?ran\s+to\s+.+?\s+and\s+picked\s+.+?\s+up\s+and\s+installed\s+", f"{actor} installed "),
+        (r"^(?:technicians\s+)?after\s+inspecting\s+", f"{actor} inspected the opening and "),
+        (r"^(?:technicians\s+)?once\s+.+?\s+", ""),
+    ]
+    for pat, rep in replacements:
+        s = re.sub(pat, rep, s, flags=re.I)
+    if re.search(r"\b(replaced|removed|installed|adjusted|reset|serviced|repaired|lubed|secured|cut|mounted|tested)\b", s, flags=re.I):
+        if not re.match(r"^(Technician|Technicians)\b", s):
+            s = f"{actor} {s[0].lower() + s[1:]}"
+    return _as_sentence(s)
+
+def _invoice_summary(tech_notes: str, parts_used: str = "", crew: bool = False) -> List[str]:
     clean = _strip_checkin_checkout(tech_notes)
     if not clean:
         return []
 
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
     selected: List[str] = []
+    action_words = ["replaced", "removed", "installed", "reset", "adjusted", "repaired", "serviced", "lubed", "secured", "cut", "mounted", "hung", "tested", "confirmed", "verified"]
 
     for s in sentences:
         low = s.lower()
-        if any(word in low for word in ["replaced", "removed", "installed", "reset", "adjusted", "repaired", "serviced"]):
-            selected.append(_as_sentence(s))
-        elif any(word in low for word in ["tested", "confirmed", "verified"]):
-            selected.append(_as_sentence(s))
+        if any(word in low for word in action_words):
+            action = _field_action_sentence(s, crew=crew)
+            if action and action.lower() not in [x.lower() for x in selected]:
+                selected.append(action)
         if len(selected) >= 3:
             break
 
     if not selected and sentences:
-        selected.append(_as_sentence(sentences[0]))
+        first = _field_action_sentence(sentences[0], crew=crew)
+        if first:
+            selected.append(first)
 
     if parts_used and _clean_text(parts_used).lower() not in {"none", "n/a", "na", "no"}:
         part_text = _clean_text(parts_used)
         if not any(part_text.lower() in line.lower() for line in selected):
-            selected.insert(0, f"Installed/replaced {part_text}.")
+            selected.insert(0, f"{'Technicians' if crew else 'Technician'} installed/replaced {part_text}.")
 
-    # Always keep invoice concise.
+    if not any("tested" in line.lower() or "confirmed" in line.lower() for line in selected):
+        selected.append("Tested operation and confirmed proper function.")
     if not any("clean" in line.lower() for line in selected):
-        selected.append("Tested operation and cleaned up work area.")
+        selected.append("Cleaned up work area.")
 
-    return selected[:4]
+    return selected[:5]
 
 
 def generate_description_from_data(data: dict[str, Any]) -> str:
@@ -345,7 +384,7 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
 
     if doc_type == "invoice":
         lines: List[str] = [f"{tech} arrived onsite and checked in with customer."]
-        summary_lines = _invoice_summary(form_tech_notes or payload_notes or office_notes or job_notes, parts_used)
+        summary_lines = _invoice_summary(form_tech_notes or payload_notes or office_notes or job_notes, parts_used, crew=crew)
         lines.extend(summary_lines)
         lines.append("********JOB COMPLETE*********")
         return " ".join(line for line in lines if line).strip()
