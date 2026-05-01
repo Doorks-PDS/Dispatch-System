@@ -5845,7 +5845,60 @@ function renderEmployeesView() {
     ];
   }
  
-  function serializeDocItems(items, laborOnly) {
+  
+  function exportEstimateInvoiceToQuickBooksCSV(payload, docType = "invoice") {
+    const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const cleanDate = (value) => {
+      const s = String(value || "").slice(0, 10);
+      const p = s.split("-");
+      if (p.length === 3) return `${p[1]}/${p[2]}/${p[0]}`;
+      return s;
+    };
+    const number = payload.number || payload.invoice_number || payload.estimate_number || payload.job_number || "";
+    const header = ["Customer","Email","Document Type","Document No","Date","PO Number","Job Number","Item","Description","Qty","Rate","Amount","Taxable"];
+    const rows = [];
+
+    (payload.items || []).forEach((item) => {
+      const qty = Number(item.qty || 0);
+      const rate = Number(item.rate || 0);
+      const amount = qty * rate;
+      if (!qty && !rate && !String(item.description || "").trim()) return;
+      rows.push([
+        payload.customer || "",
+        payload.email || "",
+        docType === "estimate" ? "Estimate" : "Invoice",
+        number,
+        cleanDate(payload.date || ""),
+        payload.po_number || "",
+        payload.job_number || "",
+        item.code || item.kind || "Service",
+        item.description || "",
+        qty,
+        rate.toFixed(2),
+        amount.toFixed(2),
+        item.taxable === false ? "No" : "Yes",
+      ]);
+    });
+
+    if (!rows.length) {
+      alert("No line items found to export.");
+      return;
+    }
+
+    const csv = [header, ...rows].map(row => row.map(esc).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const safeNumber = String(number || "quickbooks_export").replace(/[^a-z0-9_-]+/gi, "_");
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${safeNumber}_quickbooks.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+function serializeDocItems(items, laborOnly) {
     return items
       .filter(it => laborOnly ? it.kind === "labor" : it.kind !== "labor")
       .map(it => `${it.code || "ITEM"} - ${it.description} | Qty ${Number(it.qty || 0)} @ $${money(it.rate)} = $${money(Number(it.qty) * Number(it.rate))}${it.taxable === false ? " | Non-Taxable" : ""}`)
@@ -5938,7 +5991,7 @@ function renderEmployeesView() {
             <div class="jobrow-top" style="font-weight:1000; margin-top:6px;"><div>Total</div><div id="doc_total">$0.00</div></div>
           </div>
         </div>
-        <div style="display:flex; gap:8px; margin-top:12px;"><button class="btn btn-orange" id="doc_generate">Generate PDF</button><button class="btn" id="doc_cancel">Cancel</button></div>`;
+        <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;"><button class="btn btn-orange" id="doc_generate">Generate PDF</button><button class="btn" id="doc_qb_export">Export to QuickBooks CSV</button><button class="btn" id="doc_cancel">Cancel</button></div>`;
       drawerBody.appendChild(card);
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
       const completedSel = card.querySelector("#doc_completed_by");
@@ -6110,7 +6163,38 @@ function renderEmployeesView() {
       await applyHelperPrefill();
       if (!editDoc && pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default");
       renderItems();
-      card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload={ job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""), customer:dom.customer.value.trim(), address:dom.address.value.trim(), work:dom.work.value.trim(), labor:serializeDocItems(items,true), parts:serializeDocItems(items,false), number:dom.number.value.trim(), po_number:dom.po.value.trim(), invoice_number: docType === "invoice" ? dom.number.value.trim() : "", job_number:dom.job.value.trim(), tax_rate:Number(getCurrentTaxRateValue()||0), completed_by: dom.completedBy.value || "", items: items, date: dom.date.value || "", ship_to: dom.ship.value.trim() }; const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
+      
+      function buildCurrentDocPayloadForExport() {
+        return {
+          job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""),
+          customer: dom.customer.value.trim(),
+          email: job ? (job.email || "") : "",
+          address: dom.address.value.trim(),
+          work: dom.work.value.trim(),
+          labor: serializeDocItems(items, true),
+          parts: serializeDocItems(items, false),
+          number: dom.number.value.trim(),
+          po_number: dom.po.value.trim(),
+          invoice_number: docType === "invoice" ? dom.number.value.trim() : "",
+          estimate_number: docType === "estimate" ? dom.number.value.trim() : "",
+          job_number: dom.job.value.trim(),
+          tax_rate: Number(getCurrentTaxRateValue() || 0),
+          completed_by: dom.completedBy.value || "",
+          items: items,
+          date: dom.date.value || "",
+          ship_to: dom.ship.value.trim()
+        };
+      }
+
+      const qbExportBtn = card.querySelector("#doc_qb_export");
+      if (qbExportBtn) {
+        qbExportBtn.addEventListener("click", () => {
+          const payload = buildCurrentDocPayloadForExport();
+          exportEstimateInvoiceToQuickBooksCSV(payload, docType);
+        });
+      }
+
+card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
  
