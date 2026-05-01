@@ -2832,9 +2832,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
       btnSave.addEventListener("click", async () => {
         try {
+          const selectedDate = (card.querySelector("#cf_form_date")?.value || "").trim();
+          if (!selectedDate) { alert("Date is required."); card.querySelector("#cf_form_date")?.focus(); return; }
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
+          if (!isSalesLead) {
+            const timeValue = card.querySelector("#cf_time")?.value.trim();
+            if (!timeValue) { alert("Time onsite is required."); card.querySelector("#cf_time")?.focus(); return; }
+          }
           const payload = {
-            date: card.querySelector("#cf_form_date")?.value || new Date().toISOString().slice(0, 10),
+            date: selectedDate,
+            form_date: selectedDate,
             technician_name: techSel.value,
             door_type: doorSel.value,
             door_location: locRow.querySelector("#cf_door_loc").value.trim(),
@@ -6116,6 +6123,87 @@ function renderEmployeesView() {
 
     openDrawer(initialType === "invoice" ? "Invoice Helper" : "Estimate Helper", async (drawerBody, overlay) => {
       const pricing = await apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }));
+      const forms = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
+
+      function helperFormDate(value) {
+        if (!value) return "";
+        const s = String(value || "").slice(0, 10);
+        const parts = s.split("-");
+        if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+        return s;
+      }
+
+      function isRecommendationForm(form) {
+        return !!(form && (
+          form.ready_to_quote ||
+          form.parts_required ||
+          form.time_required ||
+          form.recommendations
+        ));
+      }
+
+      function formSummaryHtml(form, typeLabel) {
+        const rows = [];
+        const addRow = (label, value) => {
+          const clean = String(value || "").trim();
+          if (clean) rows.push(`<div style="margin-top:8px;"><div class="label">${label}</div><div style="white-space:pre-wrap; font-weight:800;">${escapeHtml(clean)}</div></div>`);
+        };
+
+        addRow("Date", helperFormDate(form.date || form.form_date || form.created_at));
+        addRow("Tech", form.technician_name);
+        addRow("Door Type", form.door_type);
+        addRow("Door Location", form.door_location);
+
+        if (typeLabel === "Recommendation") {
+          addRow("Recommendations", form.recommendations || form.additional_recommendations || form.tech_notes);
+          addRow("Parts Required", form.parts_required);
+          addRow("Time Required", form.time_required);
+          addRow("Ready to Quote", form.ready_to_quote ? "Yes" : "");
+        } else {
+          addRow("Time Onsite", form.time_onsite_hours ? `${form.time_onsite_hours} hour(s)` : "");
+          addRow("Tech Notes", form.tech_notes);
+          addRow("Parts Used", form.parts_used);
+          addRow("Additional Recommendations", form.additional_recommendations || form.recommendations);
+        }
+
+        return `
+          <div class="jobrow" style="align-items:stretch;">
+            <div class="jobrow-top">
+              <div>
+                <div class="jobrow-name">${typeLabel} Form${form.date ? ` — ${escapeHtml(helperFormDate(form.date))}` : ""}</div>
+                <div class="hint">${escapeHtml([form.door_location, form.door_type].filter(Boolean).join(" • ") || "No door/location entered")}</div>
+              </div>
+              ${form.ready_to_quote ? `<div class="badge">Ready to Quote</div>` : ""}
+            </div>
+            <div style="margin-top:8px;">${rows.join("") || `<div class="hint">No details saved on this form.</div>`}</div>
+          </div>
+        `;
+      }
+
+      function renderReferencePanel(kind) {
+        const panel = card.querySelector("#helper_reference_panel");
+        if (!panel) return;
+        const wanted = kind === "recommendation" ? forms.filter(isRecommendationForm) : forms.filter(f => !isRecommendationForm(f));
+        const label = kind === "recommendation" ? "Recommendation" : "Completion";
+        panel.style.display = "block";
+        panel.innerHTML = `
+          <div class="card" style="padding:12px; margin-top:12px; background:#f9fafb;">
+            <div class="jobrow-top">
+              <div>
+                <div class="jobrow-name">${label} Forms</div>
+                <div class="hint">Reference only — this helps you see what the tech entered before building the ${initialType === "invoice" ? "invoice" : "estimate"}.</div>
+              </div>
+              <button class="btn" id="helper_reference_close">Hide</button>
+            </div>
+            <div style="display:grid; gap:10px; margin-top:10px;">
+              ${wanted.length ? wanted.map(f => formSummaryHtml(f, label)).join("") : `<div class="hint">No ${label.toLowerCase()} forms found for this job.</div>`}
+            </div>
+          </div>
+        `;
+        const close = panel.querySelector("#helper_reference_close");
+        if (close) close.addEventListener("click", () => { panel.style.display = "none"; panel.innerHTML = ""; });
+      }
+
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
@@ -6136,6 +6224,20 @@ function renderEmployeesView() {
         </div>
 
         <div id="helper_questions" style="display:none; margin-top:12px;">
+          <div class="card" style="padding:12px; margin-bottom:12px;">
+            <div class="jobrow-top">
+              <div>
+                <div class="jobrow-name">Job Reference</div>
+                <div class="hint">${escapeHtml(job ? `${job.customer || ""}${job.job_number ? ` • Job #${job.job_number}` : ""}` : "No job selected")}</div>
+              </div>
+              <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                <button class="btn" id="helper_view_completion">Completion Form</button>
+                <button class="btn" id="helper_view_recommendation">Recommendation Form</button>
+              </div>
+            </div>
+            <div id="helper_reference_panel" style="display:none;"></div>
+          </div>
+
           <div class="grid2">
             <div>
               <div class="label">Trip Charge Quantity</div>
@@ -6202,6 +6304,11 @@ function renderEmployeesView() {
       }
       laborType.addEventListener("change", updateLaborMode);
       updateLaborMode();
+
+      const completionBtn = card.querySelector("#helper_view_completion");
+      const recommendationBtn = card.querySelector("#helper_view_recommendation");
+      if (completionBtn) completionBtn.addEventListener("click", () => renderReferencePanel("completion"));
+      if (recommendationBtn) recommendationBtn.addEventListener("click", () => renderReferencePanel("recommendation"));
 
       card.querySelector("#help_no").addEventListener("click", () => {
         if (overlay) overlay.remove();

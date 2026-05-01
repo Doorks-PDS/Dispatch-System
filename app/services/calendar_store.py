@@ -693,6 +693,9 @@ class CalendarStore:
                 continue
 
             form_id = uuid.uuid4().hex
+            form_date = str(payload.get("date") or payload.get("form_date") or "").strip()
+            if not form_date:
+                raise ValueError("Date is required")
             door_type = str(payload.get("door_type") or "").strip()
             if not door_type:
                 raise ValueError("Door type is required")
@@ -709,6 +712,8 @@ class CalendarStore:
                 time_hours_f = None
             if time_hours_f is not None:
                 time_hours_f = max(0.0, round_half(time_hours_f))
+            if str(j.get("kind") or "dispatch") != "sales_lead" and time_hours_f is None:
+                raise ValueError("Time onsite is required")
 
             ready_to_quote = bool(payload.get("ready_to_quote", False))
             old_status = str(j.get("status") or "")
@@ -727,7 +732,7 @@ class CalendarStore:
 
             form = {
                 "id": form_id,
-                "date": str(payload.get("date") or payload.get("form_date") or datetime.now().strftime("%Y-%m-%d")).strip(),
+                "date": form_date,
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
                 "technician_name": str(payload.get("technician_name") or "").strip(),
