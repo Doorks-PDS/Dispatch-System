@@ -1497,13 +1497,10 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     const onCustomerChange = () => {
       renderOptions();
       const match = findMatchingContact(filteredContacts(), contactInput.value, customerInput ? customerInput.value : "");
-      if (!match) {
-        contactInput.value = "";
-        if (phoneInput) phoneInput.value = "";
-        if (emailInput) emailInput.value = "";
-      } else {
+      if (match) {
         applyFromContact(true);
       }
+      // Preserve manually entered contact/phone/email if this is not a saved CRM contact.
     };
  
     renderOptions();
@@ -2601,11 +2598,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         }) : [];
         renderEditContacts();
         const exact = editLiveContacts.find(c => normalizeText(c.name) === normalizeText(editContactInput.value));
-        if (!exact && (forceClear || company)) {
-          editContactInput.value = "";
-          editPhoneInput.value = "";
-          editEmailInput.value = "";
+        if (exact) {
+          if (!String(editPhoneInput.value || "").trim()) editPhoneInput.value = pickContactPhone(exact) || "";
+          if (!String(editEmailInput.value || "").trim()) editEmailInput.value = exact.email || "";
         }
+        // Preserve manually entered contact/phone/email if this is not a saved CRM contact.
       };
       wireContactAutofill({
         contacts: editLiveContacts,
@@ -2634,10 +2631,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       drawerBody.appendChild(card);
  
       addWrap.querySelector("#ej_add_customer").addEventListener("click", async () => {
-        const name = prompt("New customer company name:");
-        if (!name) return;
+        const name = prompt("New customer company name:", editCustomerInput.value.trim());
+        if (!name || !name.trim()) return;
+        const address = prompt("Customer address:", row1.querySelector("#ej_address").value.trim());
+        const phone = prompt("Customer phone:", editPhoneInput.value.trim());
+        const email = prompt("Customer email:", editEmailInput.value.trim());
         try {
-          await apiCreateCustomer({ company_name: name.trim() });
+          const created = await apiCreateCustomer({
+            company_name: name.trim(),
+            address: (address || "").trim(),
+            phone_number: (phone || "").trim(),
+            email: (email || "").trim(),
+          });
+          const item = created && created.item ? created.item : created;
+          editCustomerInput.value = (item && item.company_name) || name.trim();
+          if (item && item.address && !row1.querySelector("#ej_address").value.trim()) row1.querySelector("#ej_address").value = item.address;
           alert("Customer added.");
         } catch (e) {
           alert(e.message || String(e));
@@ -2645,15 +2653,30 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
  
       addWrap.querySelector("#ej_add_contact").addEventListener("click", async () => {
-        const name = prompt("Contact name:");
-        if (!name) return;
+        const name = prompt("Contact name:", editContactInput.value.trim());
+        if (!name || !name.trim()) return;
+        const phone = prompt("Contact phone:", editPhoneInput.value.trim());
+        const email = prompt("Contact email:", editEmailInput.value.trim());
         try {
-          await apiCreateContact({
+          const created = await apiCreateContact({
             name: name.trim(),
-            company_name: rowJob.querySelector("#ej_customer").value.trim(),
-            phone_number: row2.querySelector("#ej_phone").value.trim(),
-            email: row2.querySelector("#ej_email").value.trim(),
+            company_name: editCustomerInput.value.trim(),
+            phone_number: (phone || "").trim(),
+            email: (email || "").trim(),
           });
+          const item = created && created.item ? created.item : created;
+          const contactItem = item || {
+            name: name.trim(),
+            company_name: editCustomerInput.value.trim(),
+            phone_number: (phone || "").trim(),
+            email: (email || "").trim(),
+          };
+          contacts.push(contactItem);
+          editLiveContacts.push(contactItem);
+          renderEditContacts();
+          editContactInput.value = contactItem.name || name.trim();
+          editPhoneInput.value = pickContactPhone(contactItem) || (phone || "").trim();
+          editEmailInput.value = contactItem.email || (email || "").trim();
           alert("Contact added.");
         } catch (e) {
           alert(e.message || String(e));
@@ -3145,9 +3168,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         notes.appendChild(ta);
  
         const addWrap = document.createElement("div");
-        addWrap.className = "hint";
+        addWrap.className = "grid2";
         addWrap.style.marginTop = "12px";
-        addWrap.textContent = "Add customers and contacts in the Customers and Contacts sections.";
+        addWrap.innerHTML = `
+          <div><button class="btn" id="nj_add_customer">+ New Customer</button></div>
+          <div><button class="btn" id="nj_add_contact">+ New Contact</button></div>
+        `;
  
         const actions = document.createElement("div");
         actions.style.display = "flex";
@@ -3188,11 +3214,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           liveContacts.splice(0, liveContacts.length, ...filtered);
           renderNewJobContacts();
           const exact = liveContacts.find(c => normalizeText(c.name) === normalizeText(newJobContactInput.value));
-          if (!exact && (forceClear || company)) {
-            newJobContactInput.value = "";
-            newJobPhoneInput.value = "";
-            newJobEmailInput.value = "";
+          if (exact) {
+            if (!String(newJobPhoneInput.value || "").trim()) newJobPhoneInput.value = pickContactPhone(exact) || "";
+            if (!String(newJobEmailInput.value || "").trim()) newJobEmailInput.value = exact.email || "";
           }
+          // Preserve manually entered contact/phone/email if this is not a saved CRM contact.
         };
         wireContactAutofill({
           contacts: liveContacts,
@@ -3245,6 +3271,73 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.appendChild(actions);
  
         container.appendChild(card);
+
+        const addCustomerBtn = addWrap.querySelector("#nj_add_customer");
+        const addContactBtn = addWrap.querySelector("#nj_add_contact");
+
+        if (addCustomerBtn) {
+          addCustomerBtn.addEventListener("click", async () => {
+            const companyName = prompt("New customer name:", newJobCustomerInput.value.trim());
+            if (!companyName || !companyName.trim()) return;
+            const address = prompt("Customer address:", addressInput ? addressInput.value.trim() : "");
+            const phone = prompt("Customer phone:", "");
+            const email = prompt("Customer email:", "");
+            try {
+              const created = await apiCreateCustomer({
+                company_name: companyName.trim(),
+                address: (address || "").trim(),
+                phone_number: (phone || "").trim(),
+                email: (email || "").trim(),
+              });
+              const item = created && created.item ? created.item : created;
+              if (item && item.company_name) {
+                customers.push(item);
+                newJobCustomerInput.value = item.company_name || companyName.trim();
+                if (addressInput && item.address && !addressInput.value.trim()) addressInput.value = item.address;
+              } else {
+                newJobCustomerInput.value = companyName.trim();
+              }
+              alert("Customer added.");
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+        }
+
+        if (addContactBtn) {
+          addContactBtn.addEventListener("click", async () => {
+            const contactName = prompt("New contact name:", newJobContactInput.value.trim());
+            if (!contactName || !contactName.trim()) return;
+            const phone = prompt("Contact phone:", newJobPhoneInput.value.trim());
+            const email = prompt("Contact email:", newJobEmailInput.value.trim());
+            const companyName = newJobCustomerInput.value.trim();
+            try {
+              const created = await apiCreateContact({
+                name: contactName.trim(),
+                company_name: companyName,
+                phone_number: (phone || "").trim(),
+                email: (email || "").trim(),
+              });
+              const item = created && created.item ? created.item : created;
+              const contactItem = item || {
+                name: contactName.trim(),
+                company_name: companyName,
+                phone_number: (phone || "").trim(),
+                email: (email || "").trim(),
+              };
+              contacts.push(contactItem);
+              liveContacts.push(contactItem);
+              renderNewJobContacts();
+              newJobContactInput.value = contactItem.name || contactName.trim();
+              newJobPhoneInput.value = pickContactPhone(contactItem) || (phone || "").trim();
+              newJobEmailInput.value = contactItem.email || (email || "").trim();
+              alert("Contact added.");
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+        }
+
  
         row0.querySelector("#nj_date").value = defaultDate;
         const newJobNumberInput = row4.querySelector("#nj_job_number");
