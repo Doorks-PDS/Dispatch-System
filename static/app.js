@@ -2148,6 +2148,21 @@ function renderAttachmentSection(titleText, items, options = {}) {
         openLink.textContent = "Open PDF";
         styleActionButton(openLink, "blue", true);
         actions.appendChild(openLink);
+        const qbBtn = document.createElement("button");
+        qbBtn.type = "button";
+        qbBtn.textContent = "Export to QuickBooks CSV";
+        styleActionButton(qbBtn, "orange", true);
+        qbBtn.addEventListener("click", () => {
+          exportEstimateInvoiceToQuickBooksCSV({
+            ...doc,
+            email: job && job.email ? job.email : (doc.email || ""),
+            job_number: doc.job_number || (job && job.job_number) || "",
+            po_number: doc.po_number || (job && job.po_number) || "",
+            invoice_number: doc.type === "invoice" ? (doc.number || doc.invoice_number || "") : (doc.invoice_number || ""),
+            estimate_number: doc.type === "estimate" ? (doc.number || doc.estimate_number || "") : (doc.estimate_number || ""),
+          }, doc.type || "invoice");
+        });
+        actions.appendChild(qbBtn);
         row.appendChild(top);
         row.appendChild(sub);
         row.appendChild(actions);
