@@ -2545,10 +2545,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       notes.appendChild(ta);
  
       const addWrap = document.createElement("div");
-      addWrap.className = "grid2";
+      addWrap.className = "grid3";
       addWrap.style.marginTop = "12px";
+      addWrap.style.display = "grid";
+      addWrap.style.gridTemplateColumns = "repeat(auto-fit, minmax(160px, 1fr))";
+      addWrap.style.gap = "10px";
       addWrap.innerHTML = `
         <div><button class="btn" id="ej_add_customer">Add Customer</button></div>
+        <div><button class="btn" id="ej_add_address">Add Address</button></div>
         <div><button class="btn" id="ej_add_contact">Add Contact</button></div>
       `;
  
@@ -2631,52 +2635,52 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       drawerBody.appendChild(card);
  
       addWrap.querySelector("#ej_add_customer").addEventListener("click", async () => {
-        const name = prompt("New customer company name:", editCustomerInput.value.trim());
-        if (!name || !name.trim()) return;
-        const address = prompt("Customer address:", row1.querySelector("#ej_address").value.trim());
-        const phone = prompt("Customer phone:", editPhoneInput.value.trim());
-        const email = prompt("Customer email:", editEmailInput.value.trim());
+        const name = prompt("New customer company name:");
+        if (!name) return;
         try {
-          const created = await apiCreateCustomer({
-            company_name: name.trim(),
-            address: (address || "").trim(),
-            phone_number: (phone || "").trim(),
-            email: (email || "").trim(),
-          });
-          const item = created && created.item ? created.item : created;
-          editCustomerInput.value = (item && item.company_name) || name.trim();
-          if (item && item.address && !row1.querySelector("#ej_address").value.trim()) row1.querySelector("#ej_address").value = item.address;
+          await apiCreateCustomer({ company_name: name.trim() });
           alert("Customer added.");
         } catch (e) {
           alert(e.message || String(e));
         }
       });
  
+      const editAddAddressBtn = addWrap.querySelector("#ej_add_address");
+      if (editAddAddressBtn) {
+        editAddAddressBtn.addEventListener("click", async () => {
+          const address = prompt("New job-site address:", row1.querySelector("#ej_address").value.trim());
+          if (!address || !address.trim()) return;
+          const customerName = prompt("Customer for this address:", editCustomerInput.value.trim());
+          const label = prompt("Label / Location (optional):", "");
+          const notes = prompt("Notes (optional):", "");
+          try {
+            const created = await apiCreateAddress({
+              customer: (customerName || "").trim(),
+              company_name: (customerName || "").trim(),
+              address: address.trim(),
+              label: (label || "").trim(),
+              notes: (notes || "").trim(),
+            });
+            const item = created && created.item ? created.item : created;
+            row1.querySelector("#ej_address").value = (item && item.address) || address.trim();
+            if (editCustomerInput && customerName && !editCustomerInput.value.trim()) editCustomerInput.value = customerName.trim();
+            alert("Address added.");
+          } catch (e) {
+            alert(e.message || String(e));
+          }
+        });
+      }
+
       addWrap.querySelector("#ej_add_contact").addEventListener("click", async () => {
-        const name = prompt("Contact name:", editContactInput.value.trim());
-        if (!name || !name.trim()) return;
-        const phone = prompt("Contact phone:", editPhoneInput.value.trim());
-        const email = prompt("Contact email:", editEmailInput.value.trim());
+        const name = prompt("Contact name:");
+        if (!name) return;
         try {
-          const created = await apiCreateContact({
+          await apiCreateContact({
             name: name.trim(),
-            company_name: editCustomerInput.value.trim(),
-            phone_number: (phone || "").trim(),
-            email: (email || "").trim(),
+            company_name: rowJob.querySelector("#ej_customer").value.trim(),
+            phone_number: row2.querySelector("#ej_phone").value.trim(),
+            email: row2.querySelector("#ej_email").value.trim(),
           });
-          const item = created && created.item ? created.item : created;
-          const contactItem = item || {
-            name: name.trim(),
-            company_name: editCustomerInput.value.trim(),
-            phone_number: (phone || "").trim(),
-            email: (email || "").trim(),
-          };
-          contacts.push(contactItem);
-          editLiveContacts.push(contactItem);
-          renderEditContacts();
-          editContactInput.value = contactItem.name || name.trim();
-          editPhoneInput.value = pickContactPhone(contactItem) || (phone || "").trim();
-          editEmailInput.value = contactItem.email || (email || "").trim();
           alert("Contact added.");
         } catch (e) {
           alert(e.message || String(e));
@@ -3168,10 +3172,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         notes.appendChild(ta);
  
         const addWrap = document.createElement("div");
-        addWrap.className = "grid2";
+        addWrap.className = "grid3";
         addWrap.style.marginTop = "12px";
+        addWrap.style.display = "grid";
+        addWrap.style.gridTemplateColumns = "repeat(auto-fit, minmax(160px, 1fr))";
+        addWrap.style.gap = "10px";
         addWrap.innerHTML = `
           <div><button class="btn" id="nj_add_customer">+ New Customer</button></div>
+          <div><button class="btn" id="nj_add_address">+ New Address</button></div>
           <div><button class="btn" id="nj_add_contact">+ New Contact</button></div>
         `;
  
@@ -3273,6 +3281,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         container.appendChild(card);
 
         const addCustomerBtn = addWrap.querySelector("#nj_add_customer");
+        const addAddressBtn = addWrap.querySelector("#nj_add_address");
         const addContactBtn = addWrap.querySelector("#nj_add_contact");
 
         if (addCustomerBtn) {
@@ -3290,14 +3299,36 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 email: (email || "").trim(),
               });
               const item = created && created.item ? created.item : created;
-              if (item && item.company_name) {
-                customers.push(item);
-                newJobCustomerInput.value = item.company_name || companyName.trim();
-                if (addressInput && item.address && !addressInput.value.trim()) addressInput.value = item.address;
-              } else {
-                newJobCustomerInput.value = companyName.trim();
-              }
+              customers.push(item || { company_name: companyName.trim(), address: (address || "").trim() });
+              newJobCustomerInput.value = (item && item.company_name) || companyName.trim();
+              if (addressInput && item && item.address && !addressInput.value.trim()) addressInput.value = item.address;
               alert("Customer added.");
+            } catch (e) {
+              alert(e.message || String(e));
+            }
+          });
+        }
+
+        if (addAddressBtn) {
+          addAddressBtn.addEventListener("click", async () => {
+            const address = prompt("New job-site address:", addressInput ? addressInput.value.trim() : "");
+            if (!address || !address.trim()) return;
+            const customerName = prompt("Customer for this address:", newJobCustomerInput.value.trim());
+            const label = prompt("Label / Location (optional):", "");
+            const notes = prompt("Notes (optional):", "");
+            try {
+              const created = await apiCreateAddress({
+                customer: (customerName || "").trim(),
+                company_name: (customerName || "").trim(),
+                address: address.trim(),
+                label: (label || "").trim(),
+                notes: (notes || "").trim(),
+              });
+              const item = created && created.item ? created.item : created;
+              if (addressInput) addressInput.value = (item && item.address) || address.trim();
+              if (newJobCustomerInput && customerName && !newJobCustomerInput.value.trim()) newJobCustomerInput.value = customerName.trim();
+              if (Array.isArray(knownAddresses)) knownAddresses.push(item || { address: address.trim(), customer: (customerName || "").trim(), source: "saved" });
+              alert("Address added.");
             } catch (e) {
               alert(e.message || String(e));
             }
