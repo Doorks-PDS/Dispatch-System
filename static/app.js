@@ -433,11 +433,32 @@
     return label;
   }
  
-  function openDrawer(titleText, renderFn) {
+  
+  function showDoorksToast(message, kind = "success") {
+    const toast = document.createElement("div");
+    toast.textContent = message;
+    toast.style.position = "fixed";
+    toast.style.right = "18px";
+    toast.style.bottom = "18px";
+    toast.style.zIndex = "999999";
+    toast.style.padding = "12px 16px";
+    toast.style.borderRadius = "12px";
+    toast.style.fontWeight = "900";
+    toast.style.boxShadow = "0 16px 40px rgba(0,0,0,.18)";
+    toast.style.background = kind === "error" ? "#fee2e2" : "#dcfce7";
+    toast.style.color = kind === "error" ? "#991b1b" : "#166534";
+    toast.style.border = kind === "error" ? "1px solid #fecaca" : "1px solid #bbf7d0";
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2200);
+  }
+
+function openDrawer(titleText, renderFn) {
     document.querySelectorAll(".overlay").forEach(o => o.remove());
  
     const overlay = document.createElement("div");
-    overlay.className = "overlay";
+    
+    let lastOverlayCloseClick = 0;
+overlay.className = "overlay";
  
     const drawer = document.createElement("div");
     drawer.className = "drawer";
@@ -465,7 +486,10 @@
     document.body.appendChild(overlay);
  
     overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.remove();
+      if (e.target !== overlay) return;
+      const now = Date.now();
+      if (now - lastOverlayCloseClick < 450) overlay.remove();
+      lastOverlayCloseClick = now;
     });
     close.addEventListener("click", () => overlay.remove());
  
@@ -3159,7 +3183,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row4 = document.createElement("div");
         row4.className = "grid2";
         row4.innerHTML = `
-          <div><div class="label">Job #</div><input class="input" id="nj_job_number" placeholder="Auto fills next number" /></div>
+          <div><div class="label">Job #</div><input class="input" id="nj_job_number" placeholder="Required for dispatch" /></div>
           <div><div class="label">PO #</div><input class="input" id="nj_po" placeholder="PO #" /></div>
           <div><div class="label">Estimate #</div><input class="input" id="nj_est" placeholder="Estimate #" /></div>
           <div><div class="label">Invoice #</div><input class="input" id="nj_inv" placeholder="Invoice #" /></div>
@@ -3372,19 +3396,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
         row0.querySelector("#nj_date").value = defaultDate;
         const newJobNumberInput = row4.querySelector("#nj_job_number");
-        let manualNewJobNumber = false;
-        const refreshSuggestedJobNumber = async () => {
-          if (manualNewJobNumber) return;
-          const kind = stSel.value === "Sales Lead" ? "sales_lead" : "dispatch";
-          const suggested = await suggestNextJobNumber(kind, row0.querySelector("#nj_date").value);
-          newJobNumberInput.value = suggested;
-        };
-        newJobNumberInput.addEventListener("input", () => {
-          manualNewJobNumber = String(newJobNumberInput.value || "").trim().length > 0;
-        });
-        stSel.addEventListener("change", () => {
-          manualNewJobNumber = false;
-          refreshSuggestedJobNumber();
+        // Dispatch job numbers are manual now.
         });
         row0.querySelector("#nj_date").addEventListener("change", () => {
           manualNewJobNumber = false;
@@ -3397,6 +3409,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         btnSave.addEventListener("click", async () => {
           try {
             const status = stSel.value;
+            const manualJobNumber = row4.querySelector("#nj_job_number").value.trim();
+            if (status !== "Sales Lead" && !manualJobNumber) {
+              alert("Job # is required for dispatch.");
+              row4.querySelector("#nj_job_number").focus();
+              return;
+            }
             const payload = {
               kind: status === "Sales Lead" ? "sales_lead" : "dispatch",
               date: row0.querySelector("#nj_date").value,
@@ -3410,7 +3428,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               phone: row2.querySelector("#nj_phone").value.trim(),
               email: row3.querySelector("#nj_email").value.trim(),
               office_notes: row3.querySelector("#nj_office_notes").value.trim(),
-              job_number: row4.querySelector("#nj_job_number").value.trim(),
+              job_number: (typeof manualJobNumber !== "undefined" ? manualJobNumber : row4.querySelector("#nj_job_number").value.trim()),
               po_number: row4.querySelector("#nj_po").value.trim(),
               estimate_number: row4.querySelector("#nj_est").value.trim(),
               invoice_number: row4.querySelector("#nj_inv").value.trim(),
@@ -4271,7 +4289,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
  
     btnSave.addEventListener("click", async () => {
+      if (btnSave.disabled) return;
+      const originalSaveText = btnSave.textContent || "Save";
       try {
+        btnSave.disabled = true;
+        btnSave.textContent = "Saving...";
         await apiCreateTimecard({
           technician_name: ((currentUser && ["tech", "lead"].includes(String(currentUser.role || ""))) ? String(currentUser.name || currentUser.username || "") : form.querySelector("#tc_employee").value.trim()),
           date: form.querySelector("#tc_date").value,
@@ -4284,11 +4306,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           pto_hours: Number(form.querySelector("#tc_pto_hours").value || 0),
           notes: ta.value.trim(),
         });
+        btnSave.textContent = "Saved ✓";
+        showDoorksToast("Time card saved ✓");
         ta.value = "";
         form.querySelector("#tc_pto_hours").value = "";
         form.querySelector("#tc_use_pto").value = "no";
         await refresh();
+        setTimeout(() => {
+          btnSave.disabled = false;
+          btnSave.textContent = originalSaveText;
+        }, 1600);
       } catch (e) {
+        btnSave.disabled = false;
+        btnSave.textContent = originalSaveText;
         alert(e.message || String(e));
       }
     });
