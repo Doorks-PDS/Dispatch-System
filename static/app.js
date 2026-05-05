@@ -355,7 +355,7 @@
     return SALES_TAX_OPTIONS.find(opt => text.includes(String(opt.city).toLowerCase().replace(/ \(alt\)$/i, ""))) || null;
   }
  
-  
+
   function showDoorksToast(message, kind = "success") {
     const toast = document.createElement("div");
     toast.textContent = message;
@@ -374,7 +374,7 @@
     setTimeout(() => toast.remove(), 2200);
   }
 
-function statusPill(status) {
+  function statusPill(status) {
     const meta = STATUS_META[status] || STATUS_META["Dispatch"];
     const pill = document.createElement("span");
     pill.className = `pill ${meta.cls || ""}`;
@@ -3392,12 +3392,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row0.querySelector("#nj_date").value = defaultDate;
         const newJobNumberInput = row4.querySelector("#nj_job_number");
         // Dispatch job numbers are manual now. No auto-fill is applied.
-        });
-        row0.querySelector("#nj_date").addEventListener("change", () => {
-          manualNewJobNumber = false;
-          refreshSuggestedJobNumber();
-        });
-        refreshSuggestedJobNumber();
  
         btnCancel.addEventListener("click", () => overlay.remove());
  
