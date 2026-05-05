@@ -355,7 +355,26 @@
     return SALES_TAX_OPTIONS.find(opt => text.includes(String(opt.city).toLowerCase().replace(/ \(alt\)$/i, ""))) || null;
   }
  
-  function statusPill(status) {
+  
+  function showDoorksToast(message, kind = "success") {
+    const toast = document.createElement("div");
+    toast.textContent = message;
+    toast.style.position = "fixed";
+    toast.style.right = "18px";
+    toast.style.bottom = "18px";
+    toast.style.zIndex = "999999";
+    toast.style.padding = "12px 16px";
+    toast.style.borderRadius = "12px";
+    toast.style.fontWeight = "900";
+    toast.style.boxShadow = "0 16px 40px rgba(0,0,0,.18)";
+    toast.style.background = kind === "error" ? "#fee2e2" : "#dcfce7";
+    toast.style.color = kind === "error" ? "#991b1b" : "#166534";
+    toast.style.border = kind === "error" ? "1px solid #fecaca" : "1px solid #bbf7d0";
+    document.body.appendChild(toast);
+    setTimeout(() => toast.remove(), 2200);
+  }
+
+function statusPill(status) {
     const meta = STATUS_META[status] || STATUS_META["Dispatch"];
     const pill = document.createElement("span");
     pill.className = `pill ${meta.cls || ""}`;
@@ -433,32 +452,11 @@
     return label;
   }
  
-  
-  function showDoorksToast(message, kind = "success") {
-    const toast = document.createElement("div");
-    toast.textContent = message;
-    toast.style.position = "fixed";
-    toast.style.right = "18px";
-    toast.style.bottom = "18px";
-    toast.style.zIndex = "999999";
-    toast.style.padding = "12px 16px";
-    toast.style.borderRadius = "12px";
-    toast.style.fontWeight = "900";
-    toast.style.boxShadow = "0 16px 40px rgba(0,0,0,.18)";
-    toast.style.background = kind === "error" ? "#fee2e2" : "#dcfce7";
-    toast.style.color = kind === "error" ? "#991b1b" : "#166534";
-    toast.style.border = kind === "error" ? "1px solid #fecaca" : "1px solid #bbf7d0";
-    document.body.appendChild(toast);
-    setTimeout(() => toast.remove(), 2200);
-  }
-
-function openDrawer(titleText, renderFn) {
+  function openDrawer(titleText, renderFn) {
     document.querySelectorAll(".overlay").forEach(o => o.remove());
  
     const overlay = document.createElement("div");
-    
-    let lastOverlayCloseClick = 0;
-overlay.className = "overlay";
+    overlay.className = "overlay";
  
     const drawer = document.createElement("div");
     drawer.className = "drawer";
@@ -486,10 +484,7 @@ overlay.className = "overlay";
     document.body.appendChild(overlay);
  
     overlay.addEventListener("click", (e) => {
-      if (e.target !== overlay) return;
-      const now = Date.now();
-      if (now - lastOverlayCloseClick < 450) overlay.remove();
-      lastOverlayCloseClick = now;
+      if (e.target === overlay) overlay.remove();
     });
     close.addEventListener("click", () => overlay.remove());
  
@@ -3396,7 +3391,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
         row0.querySelector("#nj_date").value = defaultDate;
         const newJobNumberInput = row4.querySelector("#nj_job_number");
-        // Dispatch job numbers are manual now.
+        // Dispatch job numbers are manual now. No auto-fill is applied.
         });
         row0.querySelector("#nj_date").addEventListener("change", () => {
           manualNewJobNumber = false;
