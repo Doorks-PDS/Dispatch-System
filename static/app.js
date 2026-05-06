@@ -315,44 +315,29 @@
 
 
   const SALES_TAX_OPTIONS = [
-    { city: "", rate: 7.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.25 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.50 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.25 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.25 },
-    { city: "", rate: 7.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 9.25 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 9.25 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
-    { city: "", rate: 8.75 },
+    { city: "No Sales Tax", rate: 0 },
+    { city: "Default / Escondido", rate: 7.75 },
+    { city: "San Diego", rate: 7.75 },
+    { city: "Carlsbad", rate: 7.75 },
+    { city: "Oceanside", rate: 8.25 },
+    { city: "Vista", rate: 8.25 },
+    { city: "San Marcos", rate: 7.75 },
+    { city: "Encinitas", rate: 7.75 },
+    { city: "Poway", rate: 7.75 },
+    { city: "El Cajon", rate: 8.25 },
+    { city: "La Mesa", rate: 8.50 },
+    { city: "Chula Vista", rate: 8.75 },
+    { city: "National City", rate: 8.75 },
+    { city: "Imperial Beach", rate: 8.75 },
+    { city: "Temecula", rate: 8.75 },
+    { city: "Murrieta", rate: 8.75 },
+    { city: "Riverside", rate: 8.75 },
+    { city: "Irvine", rate: 7.75 },
+    { city: "Los Angeles", rate: 9.50 },
   ];
-
   function inferTaxCityFromAddress(address) {
     const text = String(address || "").toLowerCase();
-    return SALES_TAX_OPTIONS.find(opt => text.includes(String(opt.city).toLowerCase().replace(/ \(alt\)$/i, ""))) || null;
+    return SALES_TAX_OPTIONS.find(opt => opt.city && !/^no sales tax/i.test(opt.city) && text.includes(String(opt.city).toLowerCase().replace(/ \(alt\)$/i, ""))) || null;
   }
  
 
@@ -483,8 +468,12 @@
     overlay.appendChild(drawer);
     document.body.appendChild(overlay);
  
+    let lastOverlayOutsideClick = 0;
     overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.remove();
+      if (e.target !== overlay) return;
+      const now = Date.now();
+      if (now - lastOverlayOutsideClick < 450) overlay.remove();
+      lastOverlayOutsideClick = now;
     });
     close.addEventListener("click", () => overlay.remove());
  
@@ -984,6 +973,15 @@
     });
     return data.item || data;
   }
+
+  async function apiUpdateTimecard(itemId, payload) {
+    const data = await fetchJSON(`/timecards/${encodeURIComponent(itemId)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    return data.item || data;
+  }
  
   async function apiDeleteTimecard(itemId) {
     await fetchJSON(`/timecards/${itemId}`, { method: "DELETE" });
@@ -1317,7 +1315,7 @@
       badgeNotifications.style.display = unread ? "inline-flex" : "none";
       badgeNotifications.textContent = String(unread);
  
-      const statuses = ["Sales Lead", "Dispatch", "Quote", "Quote Sent", "Parts on Order", "Complete/Quote", "Complete"];
+      const statuses = ["Sales Lead", "Dispatch", "Quote", "Parts on Order", "Complete/Quote", "Complete"];
       let total = 0;
       for (const s of statuses) total += (await apiListJobs({ status: s, limit: 5000 })).length;
       badgeJobFlow.style.display = total ? "inline-flex" : "none";
@@ -2290,6 +2288,70 @@ function renderAttachmentSection(titleText, items, options = {}) {
     return wrap;
   }
  
+
+  async function promptUpdateQuoteTracking(job, refreshFn) {
+    const assigned = prompt("Who is working on this quote?", job.quote_assigned_to || "");
+    if (assigned === null) return;
+    const sentQuote = prompt("Sent quote / estimate number:", job.sent_quote_number || job.estimate_number || "");
+    if (sentQuote === null) return;
+    try {
+      await apiUpdateJob(job.id, {
+        quote_assigned_to: String(assigned || "").trim(),
+        sent_quote_number: String(sentQuote || "").trim(),
+      });
+      showDoorksToast("Quote tracking saved ✓");
+      if (refreshFn) await refreshFn();
+    } catch (e) { alert(e.message || String(e)); }
+  }
+
+  function openFollowUpJobFromQuote(originalJob, container, ctx = {}) {
+    openDrawer("Create Follow-Up Job", async (drawerBody, overlay) => {
+      const card = document.createElement("div");
+      card.className = "card";
+      const latestRec = (Array.isArray(originalJob.completion_forms) ? originalJob.completion_forms : []).slice().reverse().find(f => f && (f.recommendations || f.additional_recommendations || f.parts_required));
+      const recText = latestRec ? [latestRec.recommendations || latestRec.additional_recommendations || "", latestRec.parts_required ? `Parts Required: ${latestRec.parts_required}` : "", latestRec.time_required ? `Time Required: ${latestRec.time_required}` : ""].filter(Boolean).join("\n") : "";
+      card.innerHTML = `
+        <h3 style="margin:0;">Create Follow-Up Job</h3>
+        <div class="hint" style="margin-top:6px;">Creates a new dispatch from this sent quote and moves the original job to Done.</div>
+        <div class="grid2" style="margin-top:12px;">
+          <div><div class="label">Date</div><input class="input" id="fq_date" type="date" value="${new Date().toISOString().slice(0,10)}" /></div>
+          <div><div class="label">Job #</div><input class="input" id="fq_job" placeholder="Required" /></div>
+          <div><div class="label">Customer</div><input class="input" id="fq_customer" value="${escapeHtml(originalJob.customer || "")}" /></div>
+          <div><div class="label">Address</div><input class="input" id="fq_address" value="${escapeHtml(originalJob.address || "")}" /></div>
+          <div><div class="label">Contact</div><input class="input" id="fq_contact" value="${escapeHtml(originalJob.contact || "")}" /></div>
+          <div><div class="label">Phone</div><input class="input" id="fq_phone" value="${escapeHtml(originalJob.phone || "")}" /></div>
+          <div><div class="label">Email</div><input class="input" id="fq_email" value="${escapeHtml(originalJob.email || "")}" /></div>
+          <div><div class="label">PO #</div><input class="input" id="fq_po" value="${escapeHtml(originalJob.po_number || "")}" /></div>
+          <div><div class="label">Estimate #</div><input class="input" id="fq_est" value="${escapeHtml(originalJob.sent_quote_number || originalJob.estimate_number || "")}" /></div>
+          <div><div class="label">Original Job #</div><input class="input" id="fq_parent" value="${escapeHtml(originalJob.job_number || "")}" disabled /></div>
+        </div>
+        <div style="margin-top:12px;"><div class="label">Job Notes</div><textarea id="fq_notes" style="min-height:120px;">${escapeHtml([`Follow-up dispatch created from quote sent on job #${originalJob.job_number || ""}.`, recText].filter(Boolean).join("\n\n"))}</textarea></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;"><button class="btn btn-orange" id="fq_save">Create Job + Move Original to Done</button><button class="btn" id="fq_cancel">Cancel</button></div>
+      `;
+      drawerBody.appendChild(card);
+      card.querySelector("#fq_cancel").addEventListener("click", () => overlay.remove());
+      card.querySelector("#fq_save").addEventListener("click", async () => {
+        const jobNumber = card.querySelector("#fq_job").value.trim();
+        if (!jobNumber) { alert("Job # is required."); card.querySelector("#fq_job").focus(); return; }
+        try {
+          const created = await apiCreateJob({
+            kind: "dispatch", status: "Dispatch", date: card.querySelector("#fq_date").value, job_number: jobNumber,
+            customer: card.querySelector("#fq_customer").value.trim(), address: card.querySelector("#fq_address").value.trim(),
+            contact: card.querySelector("#fq_contact").value.trim(), phone: card.querySelector("#fq_phone").value.trim(), email: card.querySelector("#fq_email").value.trim(),
+            po_number: card.querySelector("#fq_po").value.trim(), estimate_number: card.querySelector("#fq_est").value.trim(),
+            job_notes: card.querySelector("#fq_notes").value.trim(), office_notes: `Created from original job #${originalJob.job_number || ""}`,
+            source_job_id: originalJob.id || "", source_job_number: originalJob.job_number || "",
+          });
+          await apiUpdateJob(originalJob.id, { status: "Done", followup_job_id: created.id || "", followup_job_number: created.job_number || jobNumber });
+          overlay.remove(); showDoorksToast("Follow-up job created ✓");
+          if (ctx && ctx.afterSave) await ctx.afterSave();
+          if (container) renderJobDetails(container, created, ctx);
+          refreshBadges();
+        } catch (e) { alert(e.message || String(e)); }
+      });
+    });
+  }
+
   function renderJobDetails(container, job, ctx) {
     container.innerHTML = "";
  
@@ -2326,6 +2388,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
       <div><div class="label">Email</div><div class="field">${job.email || ""}</div></div>
       <div><div class="label">PO #</div><div class="field">${job.po_number || ""}</div></div>
       <div><div class="label">Estimate #</div><div class="field">${job.estimate_number || ""}</div></div>
+      <div><div class="label">Sent Quote #</div><div class="field">${job.sent_quote_number || ""}</div></div>
+      <div><div class="label">Quote Assigned To</div><div class="field">${job.quote_assigned_to || ""}</div></div>
       <div><div class="label">Invoice #</div><div class="field">${job.invoice_number || ""}</div></div>
     `;
  
@@ -2442,6 +2506,27 @@ function renderAttachmentSection(titleText, items, options = {}) {
       secondaryActions.appendChild(b);
     }
  
+
+    if (["Quote", "Complete/Quote"].includes(String(job.status || ""))) {
+      const qt = document.createElement("button");
+      qt.className = "btn";
+      qt.textContent = "Set Quote Info";
+      qt.addEventListener("click", () => promptUpdateQuoteTracking(job, async () => {
+        const updated = await apiGetJob(job.id);
+        renderJobDetails(container, updated, ctx);
+        if (ctx && ctx.afterSave) await ctx.afterSave();
+      }));
+      primaryActions.appendChild(qt);
+    }
+
+    if (String(job.status || "") === "Quote Sent") {
+      const follow = document.createElement("button");
+      follow.className = "btn btn-orange";
+      follow.textContent = "Create Follow-Up Job";
+      follow.addEventListener("click", () => openFollowUpJobFromQuote(job, container, ctx));
+      primaryActions.appendChild(follow);
+    }
+
     actions.appendChild(primaryActions);
     if (secondaryActions.childNodes.length) actions.appendChild(secondaryActions);
  
@@ -3566,7 +3651,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
       const badge = document.createElement("span");
       badge.className = "badge";
-      badge.style.display = (def.status === "Done") ? "none" : "inline-flex";
+      badge.style.display = (def.status === "Done" || def.status === "Quote Sent") ? "none" : "inline-flex";
       badge.textContent = "0";
  
       b.appendChild(left);
@@ -3616,7 +3701,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     async function refresh() {
       tabEls.forEach(x => x.btn.classList.toggle("navbtn-active", x.def.status === active));
       for (const t of tabEls) {
-        if (t.def.status === "Done") continue;
+        if (t.def.status === "Done" || t.def.status === "Quote Sent") continue;
         if (t.def.status === "__ALL__") {
           const js = await apiListAllJobs({ q: allJobsQuery, limit: 5000 }).catch(() => []);
           t.badge.textContent = String(js.length);
@@ -3664,6 +3749,25 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
         row.appendChild(top);
         row.appendChild(addr);
+
+        if (["Quote", "Complete/Quote"].includes(String(j.status || ""))) {
+          const quoteMeta = document.createElement("div");
+          quoteMeta.className = "hint";
+          quoteMeta.style.marginTop = "6px";
+          quoteMeta.style.fontWeight = "900";
+          quoteMeta.textContent = `Quote By: ${j.quote_assigned_to || "Not Assigned"} | Sent Quote #: ${j.sent_quote_number || j.estimate_number || ""}`;
+          row.appendChild(quoteMeta);
+          const quoteBtn = document.createElement("button");
+          quoteBtn.className = "btn";
+          quoteBtn.textContent = "Set Quote Info";
+          quoteBtn.style.marginTop = "8px";
+          quoteBtn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            const full = await apiGetJob(j.id);
+            await promptUpdateQuoteTracking(full, refresh);
+          });
+          row.appendChild(quoteBtn);
+        }
  
         const techSummary = collectJobTechSummary(j);
         if (techSummary.length && ["Complete/Quote", "Complete", "Done"].includes(j.status)) {
@@ -4000,9 +4104,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           departure_time: "",
           signature_data: canvas.toDataURL("image/png"),
         };
-        await apiCreateSignoff(payload);
+        const resp = await apiCreateSignoff(payload);
         overlay.remove();
         alert("Sign off generated.");
+        if (resp && resp.doc && resp.doc.open_url) window.open(resp.doc.open_url, "_blank");
+        if (currentView && currentView.refresh) currentView.refresh();
       });
     });
   }
@@ -4105,45 +4211,101 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
   function openTimecardEditor(item, refreshFn) {
     openDrawer("Edit Time Card", async (drawerBody, overlay) => {
+      const selfOnly = currentUser && ["tech", "lead"].includes(String(currentUser.role || ""));
+      const selfName = (currentUser && (currentUser.name || currentUser.username)) ? String(currentUser.name || currentUser.username) : "";
+      const ownerName = String(item.technician_name || item.employee_name || item.employee || "").trim();
+      const canEdit = !selfOnly || ownerName.toLowerCase() === selfName.toLowerCase();
+
       const card = document.createElement("div");
       card.className = "card";
-      const hrs = calcTimeHours(item.start_time, item.end_time, !!item.lunch_taken, item.lunch_start, item.lunch_end);
       card.innerHTML = `
-        <h3 style="margin:0;">${item.technician_name || item.employee_name || item.employee || "Time Card"}</h3>
-        <div class="hint" style="margin-top:6px;">${formatDisplayDate(item.date || "")} - ${formatTimeRange12(item.start_time, item.end_time)} - ${hrs} hrs</div>
-        <div class="hint" style="margin-top:6px;">${escapeHtml(lunchSummary(item))}${item.supervisor_approved ? ' - Supervisor Approved' : ''}${item.use_pto ? ` - PTO ${escapeHtml(String(item.pto_hours || 0))} hrs` : ''}</div>
-        <div style="margin-top:12px;"><div class="label">Notes</div><div class="field" style="white-space:pre-wrap;">${item.notes || ""}</div></div>
+        <h3 style="margin:0;">Edit Time Card</h3>
+        <div class="hint" style="margin-top:6px;">${escapeHtml(ownerName || "Time Card")}</div>
+        ${!canEdit ? `<div class="hint" style="margin-top:8px; color:#b91c1c; font-weight:900;">You can only edit your own time cards.</div>` : ""}
+        <div class="grid2" style="margin-top:12px;">
+          <div><div class="label">Employee</div><input class="input" id="et_employee" value="${escapeHtml(ownerName)}" ${selfOnly ? "disabled" : ""} /></div>
+          <div><div class="label">Date</div><input class="input" id="et_date" type="date" value="${escapeHtml(String(item.date || "").slice(0,10))}" /></div>
+          <div><div class="label">Start Time</div><input class="input" id="et_start" type="time" value="${escapeHtml(item.start_time || "")}" /></div>
+          <div><div class="label">End Time</div><input class="input" id="et_end" type="time" value="${escapeHtml(item.end_time || "")}" /></div>
+          <div><div class="label">Lunch Taken</div><select class="input" id="et_lunch_taken"><option value="no">No</option><option value="yes">Yes</option></select></div>
+          <div><div class="label">Use PTO</div><select class="input" id="et_use_pto"><option value="no">No</option><option value="yes">Yes</option></select></div>
+          <div><div class="label">Lunch Start</div><input class="input" id="et_lunch_start" type="time" value="${escapeHtml(item.lunch_start || "")}" /></div>
+          <div><div class="label">Lunch End</div><input class="input" id="et_lunch_end" type="time" value="${escapeHtml(item.lunch_end || "")}" /></div>
+          <div><div class="label">PTO Hours</div><input class="input" id="et_pto_hours" type="number" step="0.25" value="${escapeHtml(String(item.pto_hours || ""))}" /></div>
+        </div>
+        <div style="margin-top:12px;"><div class="label">Notes</div><textarea id="et_notes">${escapeHtml(item.notes || "")}</textarea></div>
       `;
+      drawerBody.appendChild(card);
+      card.querySelector("#et_lunch_taken").value = item.lunch_taken ? "yes" : "no";
+      card.querySelector("#et_use_pto").value = item.use_pto ? "yes" : "no";
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
       actions.style.marginTop = "12px";
+      actions.style.flexWrap = "wrap";
+
+      const save = document.createElement("button");
+      save.className = "btn btn-orange";
+      save.textContent = "Save Changes";
+      save.disabled = !canEdit;
+      save.addEventListener("click", async () => {
+        if (!canEdit || save.disabled) return;
+        const oldText = save.textContent;
+        try {
+          save.disabled = true;
+          save.textContent = "Saving...";
+          await apiUpdateTimecard(item.id, {
+            technician_name: selfOnly ? selfName : card.querySelector("#et_employee").value.trim(),
+            date: card.querySelector("#et_date").value,
+            start_time: card.querySelector("#et_start").value,
+            end_time: card.querySelector("#et_end").value,
+            lunch_taken: card.querySelector("#et_lunch_taken").value === "yes",
+            lunch_start: card.querySelector("#et_lunch_start").value,
+            lunch_end: card.querySelector("#et_lunch_end").value,
+            use_pto: card.querySelector("#et_use_pto").value === "yes",
+            pto_hours: Number(card.querySelector("#et_pto_hours").value || 0),
+            notes: card.querySelector("#et_notes").value.trim(),
+          });
+          save.textContent = "Saved ✓";
+          showDoorksToast("Time card updated ✓");
+          await refreshFn();
+          setTimeout(() => { if (overlay && overlay.remove) overlay.remove(); }, 550);
+        } catch (e) {
+          save.disabled = false;
+          save.textContent = oldText;
+          alert(e.message || String(e));
+        }
+      });
+
       const close = document.createElement("button");
       close.className = "btn";
       close.textContent = "Close";
+      close.addEventListener("click", () => { if (overlay && overlay.remove) overlay.remove(); });
+
       const del = document.createElement("button");
       del.className = "btn";
       del.textContent = "Delete Time Card";
       del.style.borderColor = "#fecaca";
       del.style.color = "#b91c1c";
-      close.addEventListener("click", () => { if (overlay && overlay.remove) overlay.remove(); });
+      del.disabled = !canEdit;
       del.addEventListener("click", async () => {
+        if (!canEdit) return;
         if (!confirm("Delete this time card?")) return;
         try {
           await apiDeleteTimecard(item.id);
           if (overlay && overlay.remove) overlay.remove();
           await refreshFn();
-        } catch (e) {
-          alert(e.message || String(e));
-        }
+        } catch (e) { alert(e.message || String(e)); }
       });
+
+      actions.appendChild(save);
       actions.appendChild(close);
       actions.appendChild(del);
       card.appendChild(actions);
-      drawerBody.appendChild(card);
     });
   }
- 
+
   function renderTimeCardView() {
     setNavActive(navFormsTimeCard);
     setActiveChip("Forms");
@@ -4298,8 +4460,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         btnSave.textContent = "Saved ✓";
         showDoorksToast("Time card saved ✓");
         ta.value = "";
+        form.querySelector("#tc_start").value = "";
+        form.querySelector("#tc_end").value = "";
+        form.querySelector("#tc_lunch_taken").value = "no";
+        form.querySelector("#tc_lunch_start").value = "";
+        form.querySelector("#tc_lunch_end").value = "";
         form.querySelector("#tc_pto_hours").value = "";
         form.querySelector("#tc_use_pto").value = "no";
+        form.querySelector("#tc_date").value = new Date().toISOString().slice(0, 10);
         await refresh();
         setTimeout(() => {
           btnSave.disabled = false;
@@ -4460,7 +4628,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
 
     async function openTechBreakdown(emp, entries, monthVal, approvedPto) {
-      const timeoffItems = await apiListTimeOff({ employee: emp, limit: 500 }).catch(() => []);
+      const timeoffItems = await apiListTimeOff({ employee_name: emp, limit: 500 }).catch(() => []);
       const monthTimeoff = timeoffItems.filter(t => monthIncludesDate(monthVal, itemDateOf(t)));
 
       openDrawer(`${emp} Payroll Breakdown`, (drawerBody, overlay) => {
@@ -6352,7 +6520,7 @@ function serializeDocItems(items, laborOnly) {
         });
       }
 
-card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent" }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
+card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent", quote_assigned_to: dom.completedBy.value || (job.quote_assigned_to || ""), sent_quote_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.sent_quote_number || "") }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
  

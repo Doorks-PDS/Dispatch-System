@@ -38,6 +38,8 @@ class TimeCardCreate(BaseModel):
     lunch_start: str = ""
     lunch_end: str = ""
     notes: str = ""
+    use_pto: bool = False
+    pto_hours: float = 0
     supervisor_approved: bool = False
     supervisor_approved_at: str = ""
 
@@ -77,6 +79,11 @@ def update_timecard(request: Request, item_id: str, payload: TimeCardCreate, x_a
         _require(request, x_api_key)
     data = payload.dict()
     if role in {"tech", "lead"}:
+        own = _self_name(request).lower()
+        items = _store(request).list(limit=5000)
+        target = next((x for x in items if str(x.get("id") or "") == str(item_id)), None)
+        if not target or str(target.get("technician_name") or target.get("employee_name") or target.get("employee") or "").strip().lower() != own:
+            raise HTTPException(status_code=403, detail="You can only edit your own time cards")
         data["technician_name"] = _self_name(request)
         # tech/lead cannot self-approve via payroll style action
         data["supervisor_approved"] = False

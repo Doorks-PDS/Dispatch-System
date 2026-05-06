@@ -87,6 +87,8 @@ class TimeCardsStore:
             "lunch_end": str(payload.get("lunch_end") or "").strip(),
  
             "notes": str(payload.get("notes") or "").strip(),
+            "use_pto": bool(payload.get("use_pto", False)),
+            "pto_hours": float(payload.get("pto_hours") or 0),
             "supervisor_approved": bool(payload.get("supervisor_approved", False)),
             "supervisor_approved_at": str(payload.get("supervisor_approved_at") or "").strip(),
         }
@@ -116,6 +118,8 @@ class TimeCardsStore:
                     "lunch_start": str(payload.get("lunch_start") or existing.get("lunch_start") or "").strip(),
                     "lunch_end": str(payload.get("lunch_end") or existing.get("lunch_end") or "").strip(),
                     "notes": str(payload.get("notes") or existing.get("notes") or "").strip(),
+                    "use_pto": bool(payload.get("use_pto", existing.get("use_pto", False))),
+                    "pto_hours": float(payload.get("pto_hours", existing.get("pto_hours", 0)) or 0),
                     "supervisor_approved": bool(payload.get("supervisor_approved", existing.get("supervisor_approved", False))),
                     "supervisor_approved_at": str(payload.get("supervisor_approved_at") or existing.get("supervisor_approved_at") or "").strip(),
                 })

@@ -48,11 +48,13 @@ class TimeOffUpdate(BaseModel):
 
 
 @router.get("")
-def list_timeoff(request: Request, x_api_key: Optional[str] = Header(default=None), employee_name: str = Query(default=""), status: str = Query(default=""), limit: int = Query(default=500, ge=1, le=5000)):
+def list_timeoff(request: Request, x_api_key: Optional[str] = Header(default=None), employee_name: str = Query(default=""), employee: str = Query(default=""), status: str = Query(default=""), limit: int = Query(default=500, ge=1, le=5000)):
     user = _auth_user(request)
     role = _auth_role(request)
     if not user:
         _require(request, x_api_key)
+    if not employee_name and employee:
+        employee_name = employee
     if role in {"tech", "lead"}:
         employee_name = _self_name(request)
     return {"ok": True, "items": _store(request).list_items(employee_name=employee_name, status=status, limit=limit)}

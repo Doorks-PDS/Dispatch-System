@@ -521,6 +521,12 @@ class CalendarStore:
             "estimate_number": str(payload.get("estimate_number") or "").strip(),
             "invoice_number": str(payload.get("invoice_number") or "").strip(),
             "po_number": str(payload.get("po_number") or "").strip(),
+            "quote_assigned_to": str(payload.get("quote_assigned_to") or "").strip(),
+            "sent_quote_number": str(payload.get("sent_quote_number") or "").strip(),
+            "followup_job_id": str(payload.get("followup_job_id") or "").strip(),
+            "followup_job_number": str(payload.get("followup_job_number") or "").strip(),
+            "source_job_id": str(payload.get("source_job_id") or "").strip(),
+            "source_job_number": str(payload.get("source_job_number") or "").strip(),
             "job_notes": str(payload.get("job_notes") or "").strip(),
             "office_notes": str(payload.get("office_notes") or "").strip(),
             "attachments": [],
@@ -566,8 +572,9 @@ class CalendarStore:
 
         for k in [
             "date", "status", "customer", "contact", "phone", "email", "address",
-            "estimate_number", "invoice_number", "po_number", "job_notes", "office_notes",
-            "job_number", "kind", "completion_forms", "parts_order"
+            "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
+            "followup_job_id", "followup_job_number", "source_job_id", "source_job_number",
+            "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
         ]:
             if k in payload:
                 if k == "completion_forms":

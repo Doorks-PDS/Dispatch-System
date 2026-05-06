@@ -52,6 +52,12 @@ class JobCreate(BaseModel):
     office_notes: Optional[str] = ""
     job_number: Optional[str] = ""
     parts_order: Optional[Dict[str, Any]] = None
+    quote_assigned_to: Optional[str] = ""
+    sent_quote_number: Optional[str] = ""
+    followup_job_id: Optional[str] = ""
+    followup_job_number: Optional[str] = ""
+    source_job_id: Optional[str] = ""
+    source_job_number: Optional[str] = ""
 
 
 class JobUpdate(BaseModel):

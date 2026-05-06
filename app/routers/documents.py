@@ -483,7 +483,8 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
     store = _store(request)
     number = (payload.job_number or datetime.now().strftime("SIGNOFF-%Y%m%d-%H%M%S")).strip()
     safe_number = number.replace("/", "_").replace("\\", "_")
-    filename = f"SIGNOFF_{safe_number}.pdf"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"SIGNOFF_{safe_number}_{stamp}.pdf"
     path = store.dir / filename
 
     c = canvas.Canvas(str(path), pagesize=letter)
