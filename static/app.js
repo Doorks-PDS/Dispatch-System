@@ -316,8 +316,9 @@
 
   const SALES_TAX_OPTIONS = [
     { city: "No Sales Tax", rate: 0 },
-    { city: "Default / Escondido", rate: 7.75 },
+    { city: "Default / San Diego", rate: 7.75 },
     { city: "San Diego", rate: 7.75 },
+    { city: "Escondido", rate: 8.75 },
     { city: "Carlsbad", rate: 7.75 },
     { city: "Oceanside", rate: 8.25 },
     { city: "Vista", rate: 8.25 },
@@ -2162,6 +2163,21 @@ function renderAttachmentSection(titleText, items, options = {}) {
         openLink.textContent = "Open PDF";
         styleActionButton(openLink, "blue", true);
         actions.appendChild(openLink);
+        const emailBtn = document.createElement("button");
+        emailBtn.type = "button";
+        emailBtn.textContent = "Email";
+        styleActionButton(emailBtn, "green", true);
+        emailBtn.addEventListener("click", () => {
+          openEstimateInvoiceEmail({
+            ...doc,
+            email: job && job.email ? job.email : (doc.email || ""),
+            job_number: doc.job_number || (job && job.job_number) || "",
+            po_number: doc.po_number || (job && job.po_number) || "",
+            invoice_number: doc.type === "invoice" ? (doc.number || doc.invoice_number || "") : (doc.invoice_number || ""),
+            estimate_number: doc.type === "estimate" ? (doc.number || doc.estimate_number || "") : (doc.estimate_number || ""),
+          }, doc.type || "invoice");
+        });
+        actions.appendChild(emailBtn);
         const qbBtn = document.createElement("button");
         qbBtn.type = "button";
         qbBtn.textContent = "Export to QuickBooks CSV";
@@ -6172,7 +6188,25 @@ function renderEmployeesView() {
   }
  
   
-  function exportEstimateInvoiceToQuickBooksCSV(payload, docType = "invoice") {
+  
+  function openEstimateInvoiceEmail(doc, docType = "invoice") {
+    const typeLabel = docType === "estimate" ? "Estimate" : "Invoice";
+    const number = doc.number || doc.invoice_number || doc.estimate_number || "";
+    const customer = doc.customer || "Customer";
+    const address = doc.address || "";
+    const email = prompt("Customer email address:", doc.email || "");
+    if (email === null) return;
+
+    const subject = `${typeLabel} ${number ? `#${number}` : ""} - ${customer}`.trim();
+    const body = docType === "estimate"
+      ? `Hello,\n\nAttached is estimate ${number || ""} for the recommended work${address ? ` at ${address}` : ""}.\n\nPlease review and let us know if you would like us to proceed. Scheduling will be coordinated upon approval.\n\nThank you,\nPriority Door Systems`
+      : `Hello,\n\nAttached is invoice ${number || ""} for the completed work${address ? ` at ${address}` : ""}.\n\nPlease remit payment at your earliest convenience. Thank you for your business.\n\nThank you,\nPriority Door Systems`;
+
+    const mailto = `mailto:${encodeURIComponent((email || "").trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    window.location.href = mailto;
+  }
+
+function exportEstimateInvoiceToQuickBooksCSV(payload, docType = "invoice") {
     const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const cleanDate = (value) => {
       const s = String(value || "").slice(0, 10);
@@ -6374,7 +6408,7 @@ function serializeDocItems(items, laborOnly) {
         updateTotals();
       });
       dom.taxRateCustom.addEventListener("input", updateTotals);
-      dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); else if (pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default"); });
+      dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); else setTaxRateValue(7.75, "San Diego"); });
       const _docOpenPricingBtn = card.querySelector("#doc_open_pricing"); if (_docOpenPricingBtn) _docOpenPricingBtn.addEventListener("click", ()=> renderPricingSettingsView());
       const _docPromptBtn = card.querySelector("#doc_prompt_builder"); if (_docPromptBtn) _docPromptBtn.addEventListener("click", ()=> {
         const extra = prompt("Add extra wording or scope to the document description:", "");
@@ -6487,7 +6521,7 @@ function serializeDocItems(items, laborOnly) {
       }
 
       await applyHelperPrefill();
-      if (!editDoc && pricing && pricing.tax != null) setTaxRateValue(pricing.tax, "Default");
+      if (!editDoc) setTaxRateValue(7.75, "San Diego");
       renderItems();
       
       function buildCurrentDocPayloadForExport() {
@@ -6824,6 +6858,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
           open.rel = "noopener noreferrer";
           open.textContent = "Open";
           styleActionButton(open, "blue", true);
+          const emailBtn = document.createElement("button");
+          emailBtn.type = "button";
+          emailBtn.textContent = "Email";
+          styleActionButton(emailBtn, "green", true);
+          emailBtn.addEventListener("click", () => openEstimateInvoiceEmail(doc, doc.type || type));
           const edit = document.createElement("button");
           edit.type = "button";
           edit.textContent = "Edit";
@@ -6841,7 +6880,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
             await apiDeleteDocument(doc.filename);
             renderDocList(type);
           });
-          actions.append(open, edit, del);
+          actions.append(open, emailBtn, edit, del);
           row.appendChild(actions);
           list.appendChild(row);
         });
