@@ -7,7 +7,24 @@ DEFAULTS = {
     "fuel": 20,
     "labor": 175,
     "crew_labor": 235,
-    "tax": 7.75
+    "tax": 7.75,
+    "default_terms": "Due on Receipt",
+    "billing_terms": [
+        "Due on Receipt",
+        "100% Materials Deposit/Remainder Upon Complete",
+        "Net 5",
+        "Net 10",
+        "Net 15",
+        "Net 30",
+        "Net 60",
+        "Net 90"
+    ],
+    "tax_cities": [
+        {"city": "No Sales Tax", "rate": 0},
+        {"city": "Default / San Diego", "rate": 7.75},
+        {"city": "San Diego", "rate": 7.75},
+        {"city": "Escondido", "rate": 8.75}
+    ]
 }
 
 class PricingStore:
@@ -20,7 +37,15 @@ class PricingStore:
             self.save(DEFAULTS)
 
     def load(self):
-        return json.loads(self.path.read_text())
+        data = json.loads(self.path.read_text())
+        if not isinstance(data, dict):
+            data = {}
+        for key, value in DEFAULTS.items():
+            data.setdefault(key, value)
+        return data
 
     def save(self, data):
-        self.path.write_text(json.dumps(data, indent=2))
+        current = self.load() if self.path.exists() else dict(DEFAULTS)
+        if isinstance(data, dict):
+            current.update(data)
+        self.path.write_text(json.dumps(current, indent=2))

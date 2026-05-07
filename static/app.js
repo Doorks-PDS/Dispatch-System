@@ -314,7 +314,7 @@
   }
 
 
-  const SALES_TAX_OPTIONS = [
+  const DEFAULT_SALES_TAX_OPTIONS = [
     { city: "No Sales Tax", rate: 0 },
     { city: "Default / San Diego", rate: 7.75 },
     { city: "San Diego", rate: 7.75 },
@@ -336,6 +336,45 @@
     { city: "Irvine", rate: 7.75 },
     { city: "Los Angeles", rate: 9.50 },
   ];
+  const DEFAULT_BILLING_TERMS = [
+    "Due on Receipt",
+    "100% Materials Deposit/Remainder Upon Complete",
+    "Net 5",
+    "Net 10",
+    "Net 15",
+    "Net 30",
+    "Net 60",
+    "Net 90",
+  ];
+  let SALES_TAX_OPTIONS = loadBillingTaxOptions();
+  let BILLING_TERMS_OPTIONS = loadBillingTermsOptions();
+
+  function loadBillingTaxOptions() {
+    try {
+      const saved = JSON.parse(localStorage.getItem("doorks_sales_tax_options") || "null");
+      if (Array.isArray(saved) && saved.length) return saved;
+    } catch {}
+    return DEFAULT_SALES_TAX_OPTIONS.map(x => ({ ...x }));
+  }
+  function loadBillingTermsOptions() {
+    try {
+      const saved = JSON.parse(localStorage.getItem("doorks_billing_terms") || "null");
+      if (Array.isArray(saved) && saved.length) return saved.map(String).filter(Boolean);
+    } catch {}
+    return DEFAULT_BILLING_TERMS.slice();
+  }
+  function saveBillingTaxOptions(items) {
+    SALES_TAX_OPTIONS = (items || []).map(x => ({ city: String(x.city || "").trim(), rate: Number(x.rate || 0) })).filter(x => x.city);
+    localStorage.setItem("doorks_sales_tax_options", JSON.stringify(SALES_TAX_OPTIONS));
+  }
+  function saveBillingTermsOptions(items) {
+    BILLING_TERMS_OPTIONS = (items || []).map(x => String(x || "").trim()).filter(Boolean);
+    localStorage.setItem("doorks_billing_terms", JSON.stringify(BILLING_TERMS_OPTIONS));
+  }
+  function applyPricingBillingSettings(pricing = {}) {
+    if (Array.isArray(pricing.tax_cities) && pricing.tax_cities.length) saveBillingTaxOptions(pricing.tax_cities);
+    if (Array.isArray(pricing.billing_terms) && pricing.billing_terms.length) saveBillingTermsOptions(pricing.billing_terms);
+  }
   function inferTaxCityFromAddress(address) {
     const text = String(address || "").toLowerCase();
     return SALES_TAX_OPTIONS.find(opt => opt.city && !/^no sales tax/i.test(opt.city) && text.includes(String(opt.city).toLowerCase().replace(/ \(alt\)$/i, ""))) || null;
@@ -1230,7 +1269,7 @@
     if (logoutBtn) logoutBtn.style.display = loggedIn ? "inline-flex" : "none";
     if (loginStatus) {
       if (loggedIn) {
-        loginStatus.textContent = `${currentUser.name || currentUser.username} • ${String(currentUser.role || "").replace(/_/g, " ")}`;
+        loginStatus.textContent = `${currentUser.name || currentUser.username} â€¢ ${String(currentUser.role || "").replace(/_/g, " ")}`;
       } else if (awaitingPin) {
         loginStatus.textContent = message || "Enter your 4-digit PIN to continue.";
       } else {
@@ -1361,11 +1400,11 @@
     if (!fixed) return "";
     const normalized = fixed
       .replace(/\u00a0/g, " ")
-      .replace(/[–—]/g, "-")
-      .replace(/â€”|â€“/g, "-")
+      .replace(/[â€“â€”]/g, "-")
+      .replace(/Ã¢â‚¬â€|Ã¢â‚¬â€œ/g, "-")
       .trim();
     if (!normalized) return "";
-    if (/^(?:-|—|–|â€”|â€“|n\/a|na|none|null|undefined)*$/i.test(normalized)) return "";
+    if (/^(?:-|â€”|â€“|Ã¢â‚¬â€|Ã¢â‚¬â€œ|n\/a|na|none|null|undefined)*$/i.test(normalized)) return "";
     return normalized;
   }
 
@@ -1622,13 +1661,20 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     const forms = formsOf(job);
     const rollupForms = forms.filter(f => String(f.door_type || "").toLowerCase() === "roll up");
     const source = rollupForms.length ? rollupForms : forms;
+    if (!source.length) return [];
+    const byTech = new Map();
+    source.forEach(f => {
+      const name = String(f.technician_name || "").trim();
+      const hrs = Number(f.time_onsite_hours || 0);
+      if (!name && !hrs) return;
+      const key = name || "Tech";
+      byTech.set(key, (byTech.get(key) || 0) + hrs);
+    });
     const out = [];
-    if (!source.length) return out;
-    const techNames = Array.from(new Set(source.map(f => String(f.technician_name || "").trim()).filter(Boolean)));
-    const totalHours = source.reduce((sum, f) => sum + Number(f.time_onsite_hours || 0), 0);
     if (rollupForms.length) out.push("Roll Up");
-    if (techNames.length) out.push(`Tech: ${techNames.join(", ")}`);
-    if (totalHours > 0) out.push(`${Number(totalHours).toFixed(2)} hrs`);
+    byTech.forEach((hrs, name) => {
+      out.push(`${name} - ${Number(hrs || 0).toFixed(2)} hrs`);
+    });
     return out;
   }
  
@@ -1668,14 +1714,14 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
  
   function fixMojibake(v) {
     return String(v || "")
-      .replace(/Ã¢â‚¬â€/g, "â€”")
-      .replace(/Ã¢â‚¬â€œ/g, "â€“")
-      .replace(/Ã¢â‚¬Ëœ/g, "â€˜")
-      .replace(/Ã¢â‚¬â„¢/g, "â€™")
-      .replace(/Ã¢â‚¬Å“/g, "â€œ")
-      .replace(/Ã¢â‚¬Â/g, "â€")
-      .replace(/Ã‚/g, "")
-      .replace(/Â /g, " ");
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â/g, "Ã¢â‚¬â€")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“/g, "Ã¢â‚¬â€œ")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“/g, "Ã¢â‚¬Ëœ")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢/g, "Ã¢â‚¬â„¢")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ/g, "Ã¢â‚¬Å“")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â/g, "Ã¢â‚¬Â")
+      .replace(/Ãƒâ€š/g, "")
+      .replace(/Ã‚ /g, " ");
   }
  
   function escapeHtml(v) {
@@ -1798,15 +1844,15 @@ function renderAttachmentSection(titleText, items, options = {}) {
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:99999;display:flex;align-items:center;justify-content:center;padding:22px;";
 
     const close = document.createElement("button");
-    close.textContent = "×";
+    close.textContent = "Ã—";
     close.style.cssText = "position:absolute;top:14px;right:18px;font-size:38px;line-height:1;color:#fff;background:transparent;border:0;cursor:pointer;font-weight:900;";
 
     const left = document.createElement("button");
-    left.textContent = "‹";
+    left.textContent = "â€¹";
     left.style.cssText = "position:absolute;left:18px;top:50%;transform:translateY(-50%);font-size:56px;color:#fff;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
 
     const right = document.createElement("button");
-    right.textContent = "›";
+    right.textContent = "â€º";
     right.style.cssText = "position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:56px;color:#fff;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
 
     const content = document.createElement("div");
@@ -1837,7 +1883,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         frame.style.cssText = "width:88vw;height:76vh;background:white;border:0;border-radius:12px;";
         mediaWrap.appendChild(frame);
       }
-      caption.textContent = `${index + 1} of ${attachments.length} — ${file.filename || "Attachment"}`;
+      caption.textContent = `${index + 1} of ${attachments.length} â€” ${file.filename || "Attachment"}`;
       actions.innerHTML = "";
       const openLink = document.createElement("a");
       openLink.className = "btn";
@@ -2178,21 +2224,6 @@ function renderAttachmentSection(titleText, items, options = {}) {
           }, doc.type || "invoice");
         });
         actions.appendChild(emailBtn);
-        const qbBtn = document.createElement("button");
-        qbBtn.type = "button";
-        qbBtn.textContent = "Export to QuickBooks CSV";
-        styleActionButton(qbBtn, "orange", true);
-        qbBtn.addEventListener("click", () => {
-          exportEstimateInvoiceToQuickBooksCSV({
-            ...doc,
-            email: job && job.email ? job.email : (doc.email || ""),
-            job_number: doc.job_number || (job && job.job_number) || "",
-            po_number: doc.po_number || (job && job.po_number) || "",
-            invoice_number: doc.type === "invoice" ? (doc.number || doc.invoice_number || "") : (doc.invoice_number || ""),
-            estimate_number: doc.type === "estimate" ? (doc.number || doc.estimate_number || "") : (doc.estimate_number || ""),
-          }, doc.type || "invoice");
-        });
-        actions.appendChild(qbBtn);
         row.appendChild(top);
         row.appendChild(sub);
         row.appendChild(actions);
@@ -2308,14 +2339,14 @@ function renderAttachmentSection(titleText, items, options = {}) {
   async function promptUpdateQuoteTracking(job, refreshFn) {
     const assigned = prompt("Who is working on this quote?", job.quote_assigned_to || "");
     if (assigned === null) return;
-    const sentQuote = prompt("Sent quote / estimate number:", job.sent_quote_number || job.estimate_number || "");
+    const sentQuote = prompt("Sent quote / estimate number:", job.sent_quote_number || "");
     if (sentQuote === null) return;
     try {
       await apiUpdateJob(job.id, {
         quote_assigned_to: String(assigned || "").trim(),
         sent_quote_number: String(sentQuote || "").trim(),
       });
-      showDoorksToast("Quote tracking saved ✓");
+      showDoorksToast("Quote tracking saved âœ“");
       if (refreshFn) await refreshFn();
     } catch (e) { alert(e.message || String(e)); }
   }
@@ -2338,7 +2369,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
           <div><div class="label">Phone</div><input class="input" id="fq_phone" value="${escapeHtml(originalJob.phone || "")}" /></div>
           <div><div class="label">Email</div><input class="input" id="fq_email" value="${escapeHtml(originalJob.email || "")}" /></div>
           <div><div class="label">PO #</div><input class="input" id="fq_po" value="${escapeHtml(originalJob.po_number || "")}" /></div>
-          <div><div class="label">Estimate #</div><input class="input" id="fq_est" value="${escapeHtml(originalJob.sent_quote_number || originalJob.estimate_number || "")}" /></div>
+          <div><div class="label">Estimate #</div><input class="input" id="fq_est" value="${escapeHtml(originalJob.sent_quote_number || "")}" /></div>
           <div><div class="label">Original Job #</div><input class="input" id="fq_parent" value="${escapeHtml(originalJob.job_number || "")}" disabled /></div>
         </div>
         <div style="margin-top:12px;"><div class="label">Job Notes</div><textarea id="fq_notes" style="min-height:120px;">${escapeHtml([`Follow-up dispatch created from quote sent on job #${originalJob.job_number || ""}.`, recText].filter(Boolean).join("\n\n"))}</textarea></div>
@@ -2359,7 +2390,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
             source_job_id: originalJob.id || "", source_job_number: originalJob.job_number || "",
           });
           await apiUpdateJob(originalJob.id, { status: "Done", followup_job_id: created.id || "", followup_job_number: created.job_number || jobNumber });
-          overlay.remove(); showDoorksToast("Follow-up job created ✓");
+          overlay.remove(); showDoorksToast("Follow-up job created âœ“");
           if (ctx && ctx.afterSave) await ctx.afterSave();
           if (container) renderJobDetails(container, created, ctx);
           refreshBadges();
@@ -2526,7 +2557,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     if (["Quote", "Complete/Quote"].includes(String(job.status || ""))) {
       const qt = document.createElement("button");
       qt.className = "btn";
-      qt.textContent = "Set Quote Info";
+      qt.textContent = "Edit";
       qt.addEventListener("click", () => promptUpdateQuoteTracking(job, async () => {
         const updated = await apiGetJob(job.id);
         renderJobDetails(container, updated, ctx);
@@ -2657,6 +2688,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       row4.querySelector("#ej_inv").value = job.invoice_number || "";
       row4.querySelector("#ej_office_notes").value = job.office_notes || "";
+
+      const rowQuote = document.createElement("div");
+      rowQuote.className = "grid2";
+      rowQuote.innerHTML = `
+        <div><div class="label">Quote Assigned To</div><input class="input" id="ej_quote_assigned" /></div>
+        <div><div class="label">Sent Quote #</div><input class="input" id="ej_sent_quote" /></div>
+      `;
+      rowQuote.querySelector("#ej_quote_assigned").value = job.quote_assigned_to || "";
+      rowQuote.querySelector("#ej_sent_quote").value = job.sent_quote_number || "";
  
       const notes = document.createElement("div");
       notes.innerHTML = `<div class="label">Job Notes</div>`;
@@ -2749,6 +2789,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.appendChild(row2);
       card.appendChild(row3);
       card.appendChild(row4);
+      card.appendChild(rowQuote);
       card.appendChild(notes);
       card.appendChild(addWrap);
       card.appendChild(actions);
@@ -2825,6 +2866,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             invoice_number: row4.querySelector("#ej_inv").value.trim(),
             office_notes: row4.querySelector("#ej_office_notes").value.trim(),
             job_notes: ta.value.trim(),
+            quote_assigned_to: rowQuote.querySelector("#ej_quote_assigned").value.trim(),
+            sent_quote_number: rowQuote.querySelector("#ej_sent_quote").value.trim(),
           };
           const updated = await apiUpdateJob(job.id, payload);
           overlay.remove();
@@ -3771,11 +3814,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           quoteMeta.className = "hint";
           quoteMeta.style.marginTop = "6px";
           quoteMeta.style.fontWeight = "900";
-          quoteMeta.textContent = `Quote By: ${j.quote_assigned_to || "Not Assigned"} | Sent Quote #: ${j.sent_quote_number || j.estimate_number || ""}`;
+          quoteMeta.textContent = `Quote By: ${j.quote_assigned_to || "Not Assigned"} | Sent Quote #: ${j.sent_quote_number || ""}`;
           row.appendChild(quoteMeta);
           const quoteBtn = document.createElement("button");
           quoteBtn.className = "btn";
-          quoteBtn.textContent = "Set Quote Info";
+          quoteBtn.textContent = "Edit";
           quoteBtn.style.marginTop = "8px";
           quoteBtn.addEventListener("click", async (e) => {
             e.stopPropagation();
@@ -4283,8 +4326,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             pto_hours: Number(card.querySelector("#et_pto_hours").value || 0),
             notes: card.querySelector("#et_notes").value.trim(),
           });
-          save.textContent = "Saved ✓";
-          showDoorksToast("Time card updated ✓");
+          save.textContent = "Saved âœ“";
+          showDoorksToast("Time card updated âœ“");
           await refreshFn();
           setTimeout(() => { if (overlay && overlay.remove) overlay.remove(); }, 550);
         } catch (e) {
@@ -4473,8 +4516,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           pto_hours: Number(form.querySelector("#tc_pto_hours").value || 0),
           notes: ta.value.trim(),
         });
-        btnSave.textContent = "Saved ✓";
-        showDoorksToast("Time card saved ✓");
+        btnSave.textContent = "Saved âœ“";
+        showDoorksToast("Time card saved âœ“");
         ta.value = "";
         form.querySelector("#tc_start").value = "";
         form.querySelector("#tc_end").value = "";
@@ -4896,7 +4939,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="hint">${breakdown.worked.toFixed(2)} hrs</div>
           </div>
           <div class="jobrow-addr">Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | OT Adj ${empOtBank.toFixed(2)} | OT Total ${empOtTotal.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)}</div>
-          <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "—")}</div>
+          <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "â€”")}</div>
         `;
         row.addEventListener("click", () => openTechBreakdown(emp, entries, monthVal, approvedPto));
         rows.appendChild(row);
@@ -5212,7 +5255,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         metricCard("Entries", String(detailRows.length), "Logged roll up entries"),
         metricCard("Total Hours", totalHours.toFixed(2), "All technicians"),
         metricCard("Technicians", String(uniqueTechs), "With roll up hours"),
-        metricCard("Total Cost", totalCost.toFixed(2), "Hours × wage"),
+        metricCard("Total Cost", totalCost.toFixed(2), "Hours Ã— wage"),
       ].forEach(c => summaryWrap.appendChild(c));
       body.appendChild(summaryWrap);
 
@@ -5428,7 +5471,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           row.innerHTML = `
             <div class="jobrow-top">
               <div class="jobrow-name">${escapeHtml(entry.name)}</div>
-              <div class="hint">${entry.sent} sent • ${entry.approved} approved</div>
+              <div class="hint">${entry.sent} sent â€¢ ${entry.approved} approved</div>
             </div>
             <div class="hint" style="margin-top:6px;">Click to view estimate numbers</div>
           `;
@@ -6198,12 +6241,17 @@ function renderEmployeesView() {
     if (email === null) return;
 
     const subject = `${typeLabel} ${number ? `#${number}` : ""} - ${customer}`.trim();
-    const body = docType === "estimate"
-      ? `Hello,\n\nAttached is estimate ${number || ""} for the recommended work${address ? ` at ${address}` : ""}.\n\nPlease review and let us know if you would like us to proceed. Scheduling will be coordinated upon approval.\n\nThank you,\nPriority Door Systems`
-      : `Hello,\n\nAttached is invoice ${number || ""} for the completed work${address ? ` at ${address}` : ""}.\n\nPlease remit payment at your earliest convenience. Thank you for your business.\n\nThank you,\nPriority Door Systems`;
+    const estimateBody = `Hello,\n\nAttached is estimate ${number || ""} for the recommended work${address ? ` at ${address}` : ""}.\n\nPlease review and let us know if you would like us to proceed. Scheduling will be coordinated upon approval.\n\n***PLEASE NOTE: Invoices 10 days past due will automatically incur a Late Charge of $35 and after 15 days there will be a 22% APR interest charge applied***\n\nThank you,\nPriority Door Systems\n\n(760) 233-5037\nwww.prioritydoors.com`;
+    const invoiceBody = `Hello,\n\nAttached is invoice ${number || ""} for the completed work${address ? ` at ${address}` : ""}.\n\nPlease remit payment at your earliest convenience. Thank you for your business.\n\nThank you,\nPriority Door Systems\n\nAccounting Department\n(760) 233-5037\nwww.prioritydoors.com`;
+    const body = docType === "estimate" ? estimateBody : invoiceBody;
 
+    // Browser mailto links cannot attach files automatically. Open/download the PDF first,
+    // then open the email draft with the standard response so the user can attach it.
+    if (doc.download_url) {
+      try { window.open(doc.download_url, "_blank", "noopener,noreferrer"); } catch {}
+    }
     const mailto = `mailto:${encodeURIComponent((email || "").trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    window.location.href = mailto;
+    setTimeout(() => { window.location.href = mailto; }, 300);
   }
 
 function exportEstimateInvoiceToQuickBooksCSV(payload, docType = "invoice") {
@@ -6292,6 +6340,8 @@ function serializeDocItems(items, laborOnly) {
             </select>
             <input class="input" id="doc_tax_rate_custom" type="number" min="0" step="0.01" placeholder="Enter custom tax %" style="margin-top:8px; display:none;" />
             <div class="hint" id="doc_tax_rate_hint" style="margin-top:6px;">Choose a city tax rate or select Custom.</div>
+            <div class="label" style="margin-top:8px;">Terms</div>
+            <select class="input" id="doc_terms"></select>
             <div class="label" style="margin-top:8px;">Prepared By</div>
             <select class="input" id="doc_completed_by"><option value="">-- Select employee --</option></select>
           </div>
@@ -6351,14 +6401,15 @@ function serializeDocItems(items, laborOnly) {
             <div class="jobrow-top" style="font-weight:1000; margin-top:6px;"><div>Total</div><div id="doc_total">$0.00</div></div>
           </div>
         </div>
-        <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;"><button class="btn btn-orange" id="doc_generate">Generate PDF</button><button class="btn" id="doc_qb_export">Export to QuickBooks CSV</button><button class="btn" id="doc_cancel">Cancel</button></div>`;
+        <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;"><button class="btn btn-orange" id="doc_generate">Generate PDF</button><button class="btn" id="doc_cancel">Cancel</button></div>`;
       drawerBody.appendChild(card);
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
-      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel };
-      SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
+      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms") };
+      SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} â€” ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
+      BILLING_TERMS_OPTIONS.forEach(term => { const o=document.createElement("option"); o.value=term; o.textContent=term; dom.terms.appendChild(o); });
       if (!String(editDoc?.tax_rate || "").trim() && pricing && pricing.tax != null) {
         const taxDefault = Number(pricing.tax || 0);
         if (taxDefault) {
@@ -6374,6 +6425,7 @@ function serializeDocItems(items, laborOnly) {
         dom.taxRateSelect.value = ""; dom.taxRateCustom.value = ""; dom.taxRateCustom.style.display = "none"; dom.taxRateHint.textContent = "Choose a city tax rate or select Custom."; }
       function getCurrentTaxRateValue() { return dom.taxRateSelect.value === "__custom__" ? String(dom.taxRateCustom.value || "").trim() : String(dom.taxRateSelect.value || "").trim(); }
       dom.type.value = docType; dom.date.value = (editDoc && editDoc.date) || yyyyMmDd(new Date()); wireKnownAddressAutofill({ input: dom.address, customerInput: dom.customer, knownAddresses, extraAddresses: customers.map(c => c.address).filter(Boolean) }); if (editDoc && editDoc.tax_rate != null) setTaxRateValue(editDoc.tax_rate); else setTaxRateValue("");
+      if (dom.terms) dom.terms.value = (editDoc && editDoc.terms) || (pricing && pricing.default_terms) || "Due on Receipt";
       if (job) { dom.customer.value = (editDoc && editDoc.customer) || job.customer || ""; dom.address.value = (editDoc && editDoc.address) || job.address || ""; dom.ship.value = (editDoc && editDoc.ship_to) || job.address || job.customer || ""; dom.po.value = (editDoc && editDoc.po_number) || job.po_number || ""; dom.job.value = (editDoc && editDoc.job_number) || job.job_number || ""; const inferred = inferTaxCityFromAddress(dom.address.value); if (!editDoc && inferred) setTaxRateValue(inferred.rate, inferred.city); }
       if (editDoc) { dom.work.value = editDoc.work || ""; setTaxRateValue(editDoc.tax_rate ?? 7.75); dom.completedBy.value = editDoc.completed_by || ""; dom.number.value = editDoc.number || ""; }
       function applyDocTypeMeta(){ docType=dom.type.value; const defaultNumber=nextDocNumberFromStorage(docType); dom.numberLabel.textContent = docType === "estimate" ? "Estimate #" : "Invoice #"; if (editDoc) return; if (!String(dom.number.value||"").trim() || (docType==="estimate" && String(dom.number.value||"").startsWith("JS")) || (docType==="invoice" && String(dom.number.value||"").startsWith("RE"))) dom.number.value = docType === "estimate" ? (job?.estimate_number || defaultNumber) : (job?.invoice_number || defaultNumber); }
@@ -6539,21 +6591,13 @@ function serializeDocItems(items, laborOnly) {
           estimate_number: docType === "estimate" ? dom.number.value.trim() : "",
           job_number: dom.job.value.trim(),
           tax_rate: Number(getCurrentTaxRateValue() || 0),
+          terms: dom.terms ? dom.terms.value : "",
           completed_by: dom.completedBy.value || "",
           items: items,
           date: dom.date.value || "",
           ship_to: dom.ship.value.trim()
         };
       }
-
-      const qbExportBtn = card.querySelector("#doc_qb_export");
-      if (qbExportBtn) {
-        qbExportBtn.addEventListener("click", () => {
-          const payload = buildCurrentDocPayloadForExport();
-          exportEstimateInvoiceToQuickBooksCSV(payload, docType);
-        });
-      }
-
 card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent", quote_assigned_to: dom.completedBy.value || (job.quote_assigned_to || ""), sent_quote_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.sent_quote_number || "") }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
@@ -6614,8 +6658,8 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { 
           <div class="jobrow" style="align-items:stretch;">
             <div class="jobrow-top">
               <div>
-                <div class="jobrow-name">${typeLabel} Form${form.date ? ` — ${escapeHtml(helperFormDate(form.date))}` : ""}</div>
-                <div class="hint">${escapeHtml([form.door_location, form.door_type].filter(Boolean).join(" • ") || "No door/location entered")}</div>
+                <div class="jobrow-name">${typeLabel} Form${form.date ? ` â€” ${escapeHtml(helperFormDate(form.date))}` : ""}</div>
+                <div class="hint">${escapeHtml([form.door_location, form.door_type].filter(Boolean).join(" â€¢ ") || "No door/location entered")}</div>
               </div>
               ${form.ready_to_quote ? `<div class="badge">Ready to Quote</div>` : ""}
             </div>
@@ -6635,7 +6679,7 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { 
             <div class="jobrow-top">
               <div>
                 <div class="jobrow-name">${label} Forms</div>
-                <div class="hint">Reference only — this helps you see what the tech entered before building the ${initialType === "invoice" ? "invoice" : "estimate"}.</div>
+                <div class="hint">Reference only â€” this helps you see what the tech entered before building the ${initialType === "invoice" ? "invoice" : "estimate"}.</div>
               </div>
               <button class="btn" id="helper_reference_close">Hide</button>
             </div>
@@ -6672,7 +6716,7 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { 
             <div class="jobrow-top">
               <div>
                 <div class="jobrow-name">Job Reference</div>
-                <div class="hint">${escapeHtml(job ? `${job.customer || ""}${job.job_number ? ` • Job #${job.job_number}` : ""}` : "No job selected")}</div>
+                <div class="hint">${escapeHtml(job ? `${job.customer || ""}${job.job_number ? ` â€¢ Job #${job.job_number}` : ""}` : "No job selected")}</div>
               </div>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button class="btn" id="helper_view_completion">Completion Form</button>
@@ -6890,7 +6934,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
  
     function renderGeneratorTab() {
-      body.innerHTML = `<div class="card"><h3>Estimate / Invoice</h3><div class="hint">Open a blank document and choose estimate or invoice inside the builder.</div><div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="openDocBuilder">Open Builder</button><button class="btn" id="openPricingSettings">Pricing Settings</button></div></div>`;
+      body.innerHTML = `<div class="card"><h3>Estimate / Invoice</h3><div class="hint">Open a blank document and choose estimate or invoice inside the builder.</div><div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="openDocBuilder">Open Builder</button><button class="btn" id="openPricingSettings">Billing Settings</button></div></div>`;
       const btn = document.getElementById("openDocBuilder");
       if (btn) btn.addEventListener("click", () => openEstimateInvoiceDrawer(null, "estimate", null, { refreshDocs: renderActiveTab }));
       const ps = document.getElementById("openPricingSettings");
@@ -6923,23 +6967,35 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   function renderPricingSettingsView() {
     setNavActive(navPricingSettings);
     setActiveChip("Office Flow");
-    setWorkspace("Pricing Settings");
+    setWorkspace("Billing Settings");
     clearWorkspaceActions();
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <h3>Pricing Settings</h3>
-      <div class="hint">Update default charges used by the estimate/invoice builder.</div>
+      <h3>Billing Settings</h3>
+      <div class="hint">Update default charges, billing terms, and city sales tax rates used by the estimate/invoice builder.</div>
       <div class="grid2" style="margin-top:12px;">
         <div><div class="label">Trip Charge</div><input class="input" id="ps_trip" type="number" step="0.01" /></div>
         <div><div class="label">Fuel Surcharge</div><input class="input" id="ps_fuel" type="number" step="0.01" /></div>
         <div><div class="label">Single Tech Labor</div><input class="input" id="ps_labor" type="number" step="0.01" /></div>
         <div><div class="label">Crew Tech Labor</div><input class="input" id="ps_crew" type="number" step="0.01" /></div>
         <div><div class="label">Default Sales Tax %</div><input class="input" id="ps_tax" type="number" step="0.01" /></div>
+        <div><div class="label">Default Terms</div><select class="input" id="ps_default_terms"></select></div>
+      </div>
+      <div style="margin-top:12px;">
+        <div class="label">Sales Tax Cities / Rates</div>
+        <div class="hint">One per line: City | Rate. Example: Escondido | 8.75</div>
+        <textarea id="ps_tax_cities" style="min-height:180px;"></textarea>
+      </div>
+      <div style="margin-top:12px;">
+        <div class="label">Billing Terms</div>
+        <div class="hint">One term per line.</div>
+        <textarea id="ps_terms" style="min-height:120px;"></textarea>
       </div>
       <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn btn-orange" id="ps_save">Save Pricing</button>
+        <button class="btn btn-orange" id="ps_save">Save Billing Settings</button>
+        <button class="btn" id="ps_reset">Reset City/Terms Defaults</button>
       </div>
       <div class="hint" id="ps_status" style="margin-top:8px;"></div>
     `;
@@ -6949,21 +7005,45 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     currentView = { refresh: renderPricingSettingsView };
     (async () => {
       const pricing = await apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }));
+      applyPricingBillingSettings(pricing);
+      const termSel = card.querySelector("#ps_default_terms");
+      function renderTermsSelect() {
+        termSel.innerHTML = "";
+        BILLING_TERMS_OPTIONS.forEach(term => { const o=document.createElement("option"); o.value=term; o.textContent=term; termSel.appendChild(o); });
+      }
+      function fillTextareas() {
+        card.querySelector("#ps_tax_cities").value = SALES_TAX_OPTIONS.map(x => `${x.city} | ${Number(x.rate || 0).toFixed(2)}`).join("\n");
+        card.querySelector("#ps_terms").value = BILLING_TERMS_OPTIONS.join("\n");
+        renderTermsSelect();
+      }
       card.querySelector("#ps_trip").value = pricing.trip ?? 175;
       card.querySelector("#ps_fuel").value = pricing.fuel ?? 20;
       card.querySelector("#ps_labor").value = pricing.labor ?? 175;
       card.querySelector("#ps_crew").value = pricing.crew_labor ?? 235;
       card.querySelector("#ps_tax").value = pricing.tax ?? 7.75;
+      fillTextareas();
+      termSel.value = pricing.default_terms || "Due on Receipt";
+      card.querySelector("#ps_reset").addEventListener("click", () => { saveBillingTaxOptions(DEFAULT_SALES_TAX_OPTIONS); saveBillingTermsOptions(DEFAULT_BILLING_TERMS); fillTextareas(); termSel.value = "Due on Receipt"; });
       card.querySelector("#ps_save").addEventListener("click", async () => {
         try {
+          const taxCities = String(card.querySelector("#ps_tax_cities").value || "").split(/\n+/).map(line => {
+            const [city, rate] = line.split("|");
+            return { city: String(city || "").trim(), rate: Number(String(rate || "0").trim()) };
+          }).filter(x => x.city);
+          const terms = String(card.querySelector("#ps_terms").value || "").split(/\n+/).map(x => x.trim()).filter(Boolean);
+          saveBillingTaxOptions(taxCities);
+          saveBillingTermsOptions(terms);
           await apiSavePricing({
             trip: Number(card.querySelector("#ps_trip").value || 0),
             fuel: Number(card.querySelector("#ps_fuel").value || 0),
             labor: Number(card.querySelector("#ps_labor").value || 0),
             crew_labor: Number(card.querySelector("#ps_crew").value || 0),
             tax: Number(card.querySelector("#ps_tax").value || 0),
+            default_terms: termSel.value || "Due on Receipt",
+            tax_cities: taxCities,
+            billing_terms: terms,
           });
-          card.querySelector("#ps_status").textContent = "Pricing saved.";
+          card.querySelector("#ps_status").textContent = "Billing settings saved.";
         } catch (e) { card.querySelector("#ps_status").textContent = e.message || String(e); }
       });
     })();

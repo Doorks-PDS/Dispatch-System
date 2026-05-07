@@ -31,6 +31,7 @@ class DocCreate(BaseModel):
     invoice_number: str = ""
     job_number: str = ""
     tax_rate: float = 0.0
+    terms: str = ""
     completed_by: str = ""
     date: str = ""
     type: str = ""

@@ -186,6 +186,7 @@ class DocumentsStore:
             ("Number", number),
             ("Prepared By", str(payload.get("completed_by") or "")),
             ("PO #", str(payload.get("po_number") or "")),
+            ("Terms", str(payload.get("terms") or "")),
             ("Job #", str(payload.get("job_number") or "")),
         ]
         iy = top_box_y - 30
@@ -325,6 +326,7 @@ class DocumentsStore:
             "invoice_number": str(payload.get("invoice_number") or ""),
             "completed_by": str(payload.get("completed_by") or ""),
             "tax_rate": float(payload.get("tax_rate") or 0.0),
+            "terms": str(payload.get("terms") or ""),
             "items": payload.get("items") or [],
             "work": str(payload.get("work") or ""),
             "labor": str(payload.get("labor") or ""),
