@@ -80,6 +80,12 @@ class JobUpdate(BaseModel):
     office_notes: Optional[str] = None
     completion_forms: Optional[List[Dict[str, Any]]] = None
     parts_order: Optional[Dict[str, Any]] = None
+    quote_assigned_to: Optional[str] = None
+    sent_quote_number: Optional[str] = None
+    followup_job_id: Optional[str] = None
+    followup_job_number: Optional[str] = None
+    source_job_id: Optional[str] = None
+    source_job_number: Optional[str] = None
 
 
 class CompletionCreate(BaseModel):
@@ -98,6 +104,7 @@ class CompletionCreate(BaseModel):
     parts_required: Optional[str] = ""
     time_required: Optional[str] = ""
     ready_to_quote: Optional[bool] = False
+    rollup_includes_lunch: Optional[bool] = False
 
     status_update: Optional[str] = ""
 

@@ -1045,24 +1045,18 @@
   }
 
 
-  const PTO_BANK_KEY = "doorks_pto_bank_v1";
-
+  
   function getPtoBankMap() {
-    try {
-      const raw = localStorage.getItem(PTO_BANK_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
+    const map = SHARED_SETTINGS_CACHE && SHARED_SETTINGS_CACHE.pto_bank;
+    return map && typeof map === "object" ? map : {};
   }
 
   function setPtoBankHours(employee, hours) {
     const name = String(employee || "").trim();
     if (!name) return;
-    const map = getPtoBankMap();
-    map[name] = Number(hours || 0);
-    localStorage.setItem(PTO_BANK_KEY, JSON.stringify(map));
+    const map = { ...getPtoBankMap(), [name]: Number(hours || 0) };
+    SHARED_SETTINGS_CACHE.pto_bank = map;
+    apiUpdateSharedSettingsSection("pto_bank", map).catch(e => console.warn("PTO bank save failed", e));
   }
 
   function getPtoBankHours(employee) {
@@ -1070,24 +1064,17 @@
     return Number(map[String(employee || "").trim()] || 0);
   }
 
-  const OT_BANK_KEY = "doorks_ot_bank_v1";
-
   function getOtBankMap() {
-    try {
-      const raw = localStorage.getItem(OT_BANK_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
+    const map = SHARED_SETTINGS_CACHE && SHARED_SETTINGS_CACHE.ot_bank;
+    return map && typeof map === "object" ? map : {};
   }
 
   function setOtBankHours(employee, hours) {
     const name = String(employee || "").trim();
     if (!name) return;
-    const map = getOtBankMap();
-    map[name] = Number(hours || 0);
-    localStorage.setItem(OT_BANK_KEY, JSON.stringify(map));
+    const map = { ...getOtBankMap(), [name]: Number(hours || 0) };
+    SHARED_SETTINGS_CACHE.ot_bank = map;
+    apiUpdateSharedSettingsSection("ot_bank", map).catch(e => console.warn("OT bank save failed", e));
   }
 
   function getOtBankHours(employee) {
@@ -1095,16 +1082,9 @@
     return Number(map[String(employee || "").trim()] || 0);
   }
 
-  const ROLLUP_PROFILE_KEY = "doorks_rollup_profile_v1";
-
   function getRollupProfileMap() {
-    try {
-      const raw = localStorage.getItem(ROLLUP_PROFILE_KEY);
-      const parsed = raw ? JSON.parse(raw) : {};
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch {
-      return {};
-    }
+    const map = SHARED_SETTINGS_CACHE && SHARED_SETTINGS_CACHE.rollup_profiles;
+    return map && typeof map === "object" ? map : {};
   }
 
   function getRollupProfile(employee) {
@@ -1119,12 +1099,12 @@
   function setRollupProfile(employee, wage, multiplier) {
     const name = String(employee || "").trim();
     if (!name) return;
-    const map = getRollupProfileMap();
-    map[name] = { wage: Number(wage || 0), multiplier: Number(multiplier || 0) };
-    localStorage.setItem(ROLLUP_PROFILE_KEY, JSON.stringify(map));
+    const map = { ...getRollupProfileMap(), [name]: { wage: Number(wage || 0), multiplier: Number(multiplier || 0) } };
+    SHARED_SETTINGS_CACHE.rollup_profiles = map;
+    apiUpdateSharedSettingsSection("rollup_profiles", map).catch(e => console.warn("Roll up profile save failed", e));
   }
 
-  function ptoHoursFromItem(item) {
+function ptoHoursFromItem(item) {
     const explicit = Number(item.pto_hours || 0);
     if (!Number.isNaN(explicit) && explicit > 0) return explicit;
     const hrs = Number(item.hours || 0);
@@ -1140,7 +1120,34 @@
     return item.date || item.start_date || item.created_at || "";
   }
  
-  async function apiListForms() {
+  
+  let SHARED_SETTINGS_CACHE = {
+    rollup_profiles: {},
+    pto_bank: {},
+    ot_bank: {},
+  };
+
+  async function apiGetSharedSettings() {
+    const data = await fetchJSON("/shared-settings");
+    SHARED_SETTINGS_CACHE = data.settings || SHARED_SETTINGS_CACHE;
+    return SHARED_SETTINGS_CACHE;
+  }
+
+  async function apiUpdateSharedSettingsSection(section, payload) {
+    const data = await fetchJSON(`/shared-settings/${encodeURIComponent(section)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    SHARED_SETTINGS_CACHE = data.settings || SHARED_SETTINGS_CACHE;
+    return SHARED_SETTINGS_CACHE;
+  }
+
+  async function ensureSharedSettingsLoaded() {
+    try { await apiGetSharedSettings(); } catch (e) { console.warn("shared settings unavailable", e); }
+  }
+
+async function apiListForms() {
     const data = await fetchJSON("/forms");
     return data.forms || [];
   }
@@ -1269,7 +1276,7 @@
     if (logoutBtn) logoutBtn.style.display = loggedIn ? "inline-flex" : "none";
     if (loginStatus) {
       if (loggedIn) {
-        loginStatus.textContent = `${currentUser.name || currentUser.username} â€¢ ${String(currentUser.role || "").replace(/_/g, " ")}`;
+        loginStatus.textContent = `${currentUser.name || currentUser.username} • ${String(currentUser.role || "").replace(/_/g, " ")}`;
       } else if (awaitingPin) {
         loginStatus.textContent = message || "Enter your 4-digit PIN to continue.";
       } else {
@@ -1400,11 +1407,11 @@
     if (!fixed) return "";
     const normalized = fixed
       .replace(/\u00a0/g, " ")
-      .replace(/[â€“â€”]/g, "-")
-      .replace(/Ã¢â‚¬â€|Ã¢â‚¬â€œ/g, "-")
+      .replace(/[–—]/g, "-")
+      .replace(/Ã¢â‚¬â€|Ã¢â‚¬“/g, "-")
       .trim();
     if (!normalized) return "";
-    if (/^(?:-|â€”|â€“|Ã¢â‚¬â€|Ã¢â‚¬â€œ|n\/a|na|none|null|undefined)*$/i.test(normalized)) return "";
+    if (/^(?:-|—|–|Ã¢â‚¬â€|Ã¢â‚¬“|n\/a|na|none|null|undefined)*$/i.test(normalized)) return "";
     return normalized;
   }
 
@@ -1715,10 +1722,10 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
   function fixMojibake(v) {
     return String(v || "")
       .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â/g, "Ã¢â‚¬â€")
-      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“/g, "Ã¢â‚¬â€œ")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Å“/g, "Ã¢â‚¬“")
       .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã‹Å“/g, "Ã¢â‚¬Ëœ")
-      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢/g, "Ã¢â‚¬â„¢")
-      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ/g, "Ã¢â‚¬Å“")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢/g, "Ã¢â‚¬™")
+      .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã…“/g, "Ã¢â‚¬Å“")
       .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã‚Â/g, "Ã¢â‚¬Â")
       .replace(/Ãƒâ€š/g, "")
       .replace(/Ã‚ /g, " ");
@@ -1844,15 +1851,15 @@ function renderAttachmentSection(titleText, items, options = {}) {
     overlay.style.cssText = "position:fixed;inset:0;background:rgba(0,0,0,.9);z-index:99999;display:flex;align-items:center;justify-content:center;padding:22px;";
 
     const close = document.createElement("button");
-    close.textContent = "Ã—";
+    close.textContent = "×";
     close.style.cssText = "position:absolute;top:14px;right:18px;font-size:38px;line-height:1;color:#fff;background:transparent;border:0;cursor:pointer;font-weight:900;";
 
     const left = document.createElement("button");
-    left.textContent = "â€¹";
+    left.textContent = "‹";
     left.style.cssText = "position:absolute;left:18px;top:50%;transform:translateY(-50%);font-size:56px;color:#fff;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
 
     const right = document.createElement("button");
-    right.textContent = "â€º";
+    right.textContent = "›";
     right.style.cssText = "position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:56px;color:#fff;background:rgba(255,255,255,.13);border:1px solid rgba(255,255,255,.25);border-radius:999px;width:58px;height:58px;cursor:pointer;";
 
     const content = document.createElement("div");
@@ -1883,7 +1890,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         frame.style.cssText = "width:88vw;height:76vh;background:white;border:0;border-radius:12px;";
         mediaWrap.appendChild(frame);
       }
-      caption.textContent = `${index + 1} of ${attachments.length} â€” ${file.filename || "Attachment"}`;
+      caption.textContent = `${index + 1} of ${attachments.length} — ${file.filename || "Attachment"}`;
       actions.innerHTML = "";
       const openLink = document.createElement("a");
       openLink.className = "btn";
@@ -2005,6 +2012,18 @@ function renderAttachmentSection(titleText, items, options = {}) {
  
       card.appendChild(techRow);
       card.appendChild(locRow);
+
+      const updateRollupLunchVisibility = () => {
+        const wrap = card.querySelector("#cf_rollup_lunch_wrap");
+        if (!wrap) return;
+        const isRollup = String(doorSel.value || "").toLowerCase() === "roll up";
+        wrap.style.display = isRollup && !isSalesLead ? "flex" : "none";
+        if (!isRollup) {
+          const cb = card.querySelector("#cf_rollup_lunch");
+          if (cb) cb.checked = false;
+        }
+      };
+      doorSel.addEventListener("change", updateRollupLunchVisibility);
  
       let techNotes = null;
       let partsUsed = null;
@@ -2339,15 +2358,17 @@ function renderAttachmentSection(titleText, items, options = {}) {
   async function promptUpdateQuoteTracking(job, refreshFn) {
     const assigned = prompt("Who is working on this quote?", job.quote_assigned_to || "");
     if (assigned === null) return;
-    const sentQuote = prompt("Sent quote / estimate number:", job.sent_quote_number || "");
+    const sentQuote = prompt("Sent estimate number:", job.sent_quote_number || "");
     if (sentQuote === null) return;
     try {
-      await apiUpdateJob(job.id, {
+      const updated = await apiUpdateJob(job.id, {
         quote_assigned_to: String(assigned || "").trim(),
         sent_quote_number: String(sentQuote || "").trim(),
       });
-      showDoorksToast("Quote tracking saved âœ“");
+      showDoorksToast("Quote tracking saved ✓");
       if (refreshFn) await refreshFn();
+      if (!refreshFn && currentView && currentView.refresh) await currentView.refresh();
+      return updated;
     } catch (e) { alert(e.message || String(e)); }
   }
 
@@ -2390,7 +2411,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
             source_job_id: originalJob.id || "", source_job_number: originalJob.job_number || "",
           });
           await apiUpdateJob(originalJob.id, { status: "Done", followup_job_id: created.id || "", followup_job_number: created.job_number || jobNumber });
-          overlay.remove(); showDoorksToast("Follow-up job created âœ“");
+          overlay.remove(); showDoorksToast("Follow-up job created ✓");
           if (ctx && ctx.afterSave) await ctx.afterSave();
           if (container) renderJobDetails(container, created, ctx);
           refreshBadges();
@@ -2435,7 +2456,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       <div><div class="label">Email</div><div class="field">${job.email || ""}</div></div>
       <div><div class="label">PO #</div><div class="field">${job.po_number || ""}</div></div>
       <div><div class="label">Estimate #</div><div class="field">${job.estimate_number || ""}</div></div>
-      <div><div class="label">Sent Quote #</div><div class="field">${job.sent_quote_number || ""}</div></div>
+      <div><div class="label">Sent Estimate #</div><div class="field">${job.sent_quote_number || ""}</div></div>
       <div><div class="label">Quote Assigned To</div><div class="field">${job.quote_assigned_to || ""}</div></div>
       <div><div class="label">Invoice #</div><div class="field">${job.invoice_number || ""}</div></div>
     `;
@@ -2693,7 +2714,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       rowQuote.className = "grid2";
       rowQuote.innerHTML = `
         <div><div class="label">Quote Assigned To</div><input class="input" id="ej_quote_assigned" /></div>
-        <div><div class="label">Sent Quote #</div><input class="input" id="ej_sent_quote" /></div>
+        <div><div class="label">Sent Estimate #</div><input class="input" id="ej_sent_quote" /></div>
       `;
       rowQuote.querySelector("#ej_quote_assigned").value = job.quote_assigned_to || "";
       rowQuote.querySelector("#ej_sent_quote").value = job.sent_quote_number || "";
@@ -2995,6 +3016,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="label">Time Onsite (hours)</div>
           <input class="input" id="cf_time" type="number" step="0.5" min="0" placeholder="e.g., 1.5" />
           <div class="hint">Enter hours billed in 0.5 increments.</div>
+          <label id="cf_rollup_lunch_wrap" style="display:none; align-items:center; gap:8px; margin-top:10px; font-weight:1000;">
+            <input type="checkbox" id="cf_rollup_lunch" /> Includes Lunch (-0.5 hrs for roll-up report)
+          </label>
         `;
  
         const techNotes = document.createElement("div");
@@ -3064,6 +3088,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.tech_notes = card.querySelector("#cf_tech_notes").value.trim();
             payload.parts_used = card.querySelector("#cf_parts").value.trim();
             payload.additional_recommendations = card.querySelector("#cf_add_recs").value.trim();
+            payload.rollup_includes_lunch = !!card.querySelector("#cf_rollup_lunch")?.checked;
           }
  
           await apiAddCompletion(job.id, payload);
@@ -3814,7 +3839,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           quoteMeta.className = "hint";
           quoteMeta.style.marginTop = "6px";
           quoteMeta.style.fontWeight = "900";
-          quoteMeta.textContent = `Quote By: ${j.quote_assigned_to || "Not Assigned"} | Sent Quote #: ${j.sent_quote_number || ""}`;
+          quoteMeta.textContent = `Quote By: ${j.quote_assigned_to || "Not Assigned"} | Sent Estimate #: ${j.sent_quote_number || ""}`;
           row.appendChild(quoteMeta);
           const quoteBtn = document.createElement("button");
           quoteBtn.className = "btn";
@@ -4326,8 +4351,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             pto_hours: Number(card.querySelector("#et_pto_hours").value || 0),
             notes: card.querySelector("#et_notes").value.trim(),
           });
-          save.textContent = "Saved âœ“";
-          showDoorksToast("Time card updated âœ“");
+          save.textContent = "Saved ✓";
+          showDoorksToast("Time card updated ✓");
           await refreshFn();
           setTimeout(() => { if (overlay && overlay.remove) overlay.remove(); }, 550);
         } catch (e) {
@@ -4516,8 +4541,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           pto_hours: Number(form.querySelector("#tc_pto_hours").value || 0),
           notes: ta.value.trim(),
         });
-        btnSave.textContent = "Saved âœ“";
-        showDoorksToast("Time card saved âœ“");
+        btnSave.textContent = "Saved ✓";
+        showDoorksToast("Time card saved ✓");
         ta.value = "";
         form.querySelector("#tc_start").value = "";
         form.querySelector("#tc_end").value = "";
@@ -4857,6 +4882,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
 
     async function refresh() {
+      await ensureSharedSettingsLoaded();
       const items = await apiListTimecards({ limit: 5000 }).catch(() => []);
       const timeoff = await apiListTimeOff({ limit: 500 }).catch(() => []);
       const monthVal = controls.querySelector("#pay_month").value;
@@ -4939,7 +4965,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="hint">${breakdown.worked.toFixed(2)} hrs</div>
           </div>
           <div class="jobrow-addr">Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | OT Adj ${empOtBank.toFixed(2)} | OT Total ${empOtTotal.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)}</div>
-          <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "â€”")}</div>
+          <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "—")}</div>
         `;
         row.addEventListener("click", () => openTechBreakdown(emp, entries, monthVal, approvedPto));
         rows.appendChild(row);
@@ -5003,6 +5029,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const setTab = () => { [[btnDashboard,"dashboard"],[btnRollUp,"rollup"],[btnEstimator,"estimator"]].forEach(([b,k]) => { b.className = activeTab===k ? "btn btn-orange" : "btn"; }); };
  
     async function loadData() {
+      await ensureSharedSettingsLoaded();
       const month = monthKey(currentMonth);
       const [jobs, timecards, docs] = await Promise.all([apiListJobs({ limit: 5000 }).catch(() => []), apiListTimecards({ limit: 5000 }).catch(() => []), apiListDocuments().catch(() => [])]);
       return { month, monthJobs: jobs.filter(j => String(j.date || j.created_at || "").startsWith(month)), monthTimecards: timecards.filter(t => String(t.date || t.created_at || "").startsWith(month)), monthDocs: docs.filter(d => String(d.created_at || "").startsWith(month)) };
@@ -5146,8 +5173,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       monthText.textContent = monthPretty(currentMonth);
       nextBtn.disabled = month >= monthKey(new Date());
 
-      const formsForJob = (j) => formsOf(j).filter(f => String(f.door_type || "").toLowerCase() === "roll up");
-      const rollUps = monthJobs.filter(j => formsForJob(j).length > 0);
+      const formsForJob = (j) => formsOf(j).filter(f => {
+        const isRollup = String(f.door_type || "").toLowerCase() === "roll up";
+        const formDate = String(f.date || f.form_date || f.created_at || j.date || j.created_at || "");
+        return isRollup && formDate.startsWith(month);
+      });
+      const allJobsForRollups = await apiListJobs({ limit: 5000 }).catch(() => []);
+      const rollUps = allJobsForRollups.filter(j => formsForJob(j).length > 0);
 
       const timecardRollups = monthTimecards.filter(t => {
         const note = `${t.customer || ""} ${t.job_number || ""} ${t.notes || t.description || ""}`.toLowerCase();
@@ -5163,13 +5195,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const forms = formsForJob(j);
         forms.forEach(f => {
           const tech = String(f.technician_name || "Unassigned").trim() || "Unassigned";
-          const hrs = Number(f.time_onsite_hours || 0);
+          const hrs = Number(f.rollup_adjusted_hours ?? f.time_onsite_hours ?? 0);
           totalFormHours += hrs;
           techTotals[tech] = techTotals[tech] || { total: 0, jobs: 0 };
           techTotals[tech].total += hrs;
           techTotals[tech].jobs += 1;
           detailRows.push({
-            date: j.date || j.created_at || "",
+            date: f.date || f.form_date || j.date || j.created_at || "",
             customer: j.customer || j.customer_name || "",
             address: j.street_address || j.address || "",
             technician: tech,
@@ -5255,7 +5287,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         metricCard("Entries", String(detailRows.length), "Logged roll up entries"),
         metricCard("Total Hours", totalHours.toFixed(2), "All technicians"),
         metricCard("Technicians", String(uniqueTechs), "With roll up hours"),
-        metricCard("Total Cost", totalCost.toFixed(2), "Hours Ã— wage"),
+        metricCard("Total Cost", totalCost.toFixed(2), "Hours × wage"),
       ].forEach(c => summaryWrap.appendChild(c));
       body.appendChild(summaryWrap);
 
@@ -5471,7 +5503,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           row.innerHTML = `
             <div class="jobrow-top">
               <div class="jobrow-name">${escapeHtml(entry.name)}</div>
-              <div class="hint">${entry.sent} sent â€¢ ${entry.approved} approved</div>
+              <div class="hint">${entry.sent} sent • ${entry.approved} approved</div>
             </div>
             <div class="hint" style="margin-top:6px;">Click to view estimate numbers</div>
           `;
@@ -6241,7 +6273,7 @@ function renderEmployeesView() {
     if (email === null) return;
 
     const subject = `${typeLabel} ${number ? `#${number}` : ""} - ${customer}`.trim();
-    const estimateBody = `Hello,\n\nAttached is estimate ${number || ""} for the recommended work${address ? ` at ${address}` : ""}.\n\nPlease review and let us know if you would like us to proceed. Scheduling will be coordinated upon approval.\n\n***PLEASE NOTE: Invoices 10 days past due will automatically incur a Late Charge of $35 and after 15 days there will be a 22% APR interest charge applied***\n\nThank you,\nPriority Door Systems\n\n(760) 233-5037\nwww.prioritydoors.com`;
+    const estimateBody = `Hello,\n\nAttached is estimate ${number || ""} for the recommended work${address ? ` at ${address}` : ""}.\n\nPlease review and let us know if you would like us to proceed. Scheduling will be coordinated upon approval.\n\n***PLEASE NOTE: Invoices 10 days past due will automatically incur a Late Charge of $35 and after 15 days there will be a 22% APR interest charge applied. Estimates are valid for 30 days unless otherwise noted.***\n\nThank you,\nPriority Door Systems\n\n(760) 233-5037\nwww.prioritydoors.com`;
     const invoiceBody = `Hello,\n\nAttached is invoice ${number || ""} for the completed work${address ? ` at ${address}` : ""}.\n\nPlease remit payment at your earliest convenience. Thank you for your business.\n\nThank you,\nPriority Door Systems\n\nAccounting Department\n(760) 233-5037\nwww.prioritydoors.com`;
     const body = docType === "estimate" ? estimateBody : invoiceBody;
 
@@ -6407,7 +6439,7 @@ function serializeDocItems(items, laborOnly) {
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
       const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms") };
-      SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} â€” ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
+      SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
       BILLING_TERMS_OPTIONS.forEach(term => { const o=document.createElement("option"); o.value=term; o.textContent=term; dom.terms.appendChild(o); });
       if (!String(editDoc?.tax_rate || "").trim() && pricing && pricing.tax != null) {
@@ -6658,8 +6690,8 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { 
           <div class="jobrow" style="align-items:stretch;">
             <div class="jobrow-top">
               <div>
-                <div class="jobrow-name">${typeLabel} Form${form.date ? ` â€” ${escapeHtml(helperFormDate(form.date))}` : ""}</div>
-                <div class="hint">${escapeHtml([form.door_location, form.door_type].filter(Boolean).join(" â€¢ ") || "No door/location entered")}</div>
+                <div class="jobrow-name">${typeLabel} Form${form.date ? ` — ${escapeHtml(helperFormDate(form.date))}` : ""}</div>
+                <div class="hint">${escapeHtml([form.door_location, form.door_type].filter(Boolean).join(" • ") || "No door/location entered")}</div>
               </div>
               ${form.ready_to_quote ? `<div class="badge">Ready to Quote</div>` : ""}
             </div>
@@ -6679,7 +6711,7 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { 
             <div class="jobrow-top">
               <div>
                 <div class="jobrow-name">${label} Forms</div>
-                <div class="hint">Reference only â€” this helps you see what the tech entered before building the ${initialType === "invoice" ? "invoice" : "estimate"}.</div>
+                <div class="hint">Reference only — this helps you see what the tech entered before building the ${initialType === "invoice" ? "invoice" : "estimate"}.</div>
               </div>
               <button class="btn" id="helper_reference_close">Hide</button>
             </div>
@@ -6716,7 +6748,7 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { 
             <div class="jobrow-top">
               <div>
                 <div class="jobrow-name">Job Reference</div>
-                <div class="hint">${escapeHtml(job ? `${job.customer || ""}${job.job_number ? ` â€¢ Job #${job.job_number}` : ""}` : "No job selected")}</div>
+                <div class="hint">${escapeHtml(job ? `${job.customer || ""}${job.job_number ? ` • Job #${job.job_number}` : ""}` : "No job selected")}</div>
               </div>
               <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <button class="btn" id="helper_view_completion">Completion Form</button>

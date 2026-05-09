@@ -56,6 +56,8 @@ from app.routers.admin import router as admin_router
 from app.services.user_store import UsersStore
 from app.services.address_store import AddressStore
 from app.routers.addresses import router as addresses_router
+from app.services.shared_settings_store import SharedSettingsStore
+from app.routers.shared_settings import router as shared_settings_router
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -171,6 +173,7 @@ app.state.crm_store = CRMStore(PROJECT_ROOT)
 app.state.timeoff_store = TimeOffStore(PROJECT_ROOT)
 app.state.users_store = UsersStore(PROJECT_ROOT)
 app.state.address_store = AddressStore(PROJECT_ROOT)
+app.state.shared_settings_store = SharedSettingsStore(PROJECT_ROOT)
 app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -186,6 +189,7 @@ app.include_router(timeoff_router)
 app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(addresses_router)
+app.include_router(shared_settings_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):

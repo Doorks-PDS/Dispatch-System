@@ -721,6 +721,10 @@ class CalendarStore:
                 time_hours_f = max(0.0, round_half(time_hours_f))
             if str(j.get("kind") or "dispatch") != "sales_lead" and time_hours_f is None:
                 raise ValueError("Time onsite is required")
+            rollup_includes_lunch = bool(payload.get("rollup_includes_lunch", False))
+            rollup_adjusted_hours = time_hours_f
+            if str(door_type or "").strip().lower() == "roll up" and rollup_includes_lunch and rollup_adjusted_hours is not None:
+                rollup_adjusted_hours = max(0.0, round_half(float(rollup_adjusted_hours) - 0.5))
 
             ready_to_quote = bool(payload.get("ready_to_quote", False))
             old_status = str(j.get("status") or "")
@@ -753,6 +757,8 @@ class CalendarStore:
                 "time_required": str(payload.get("time_required") or "").strip(),
                 "ready_to_quote": ready_to_quote,
                 "time_onsite_hours": time_hours_f,
+                "rollup_includes_lunch": rollup_includes_lunch,
+                "rollup_adjusted_hours": rollup_adjusted_hours,
                 "status_update": j.get("status"),
                 "attachments": [],
             }
@@ -810,6 +816,14 @@ class CalendarStore:
                     try:
                         x = float(payload.get("time_onsite_hours"))
                         f["time_onsite_hours"] = max(0.0, round(x * 2) / 2.0)
+                    except Exception:
+                        pass
+                if "rollup_includes_lunch" in payload:
+                    f["rollup_includes_lunch"] = bool(payload.get("rollup_includes_lunch", False))
+                if str(f.get("door_type") or "").strip().lower() == "roll up":
+                    try:
+                        base_hours = float(f.get("time_onsite_hours") or 0)
+                        f["rollup_adjusted_hours"] = max(0.0, round((base_hours - (0.5 if bool(f.get("rollup_includes_lunch")) else 0.0)) * 2) / 2.0)
                     except Exception:
                         pass
 
