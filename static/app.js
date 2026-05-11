@@ -2994,6 +2994,20 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.appendChild(techRow);
       card.appendChild(locRow);
  
+      const updateRollupLunchVisibility = () => {
+        const wrap = card.querySelector("#cf_rollup_lunch_wrap");
+        if (!wrap) return;
+        const isRollup = String(doorSel.value || "").toLowerCase() === "roll up";
+        wrap.style.display = isRollup && !isSalesLead ? "flex" : "none";
+        if (!isRollup) {
+          const cb = card.querySelector("#cf_rollup_lunch");
+          if (cb) cb.checked = false;
+        }
+      };
+      doorSel.addEventListener("change", updateRollupLunchVisibility);
+      updateRollupLunchVisibility();
+
+
       if (isSalesLead) {
         const leadBlock = document.createElement("div");
         leadBlock.style.marginTop = "10px";
