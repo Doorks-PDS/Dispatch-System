@@ -2519,23 +2519,35 @@ function renderAttachmentSection(titleText, items, options = {}) {
     secondaryActions.appendChild(jobUploadLabel);
  
     if (job.kind === "sales_lead") {
-      const btnTurnToJob = document.createElement("button");
-      btnTurnToJob.className = "btn";
-      btnTurnToJob.textContent = "Turn to Job";
-      btnTurnToJob.addEventListener("click", async () => {
-        try {
-          const updated = await apiUpdateJob(job.id, {
-            kind: "dispatch",
-            status: "Dispatch"
-          });
-          renderJobDetails(container, updated, ctx);
-          if (ctx && ctx.afterSave) await ctx.afterSave();
-          refreshBadges();
-        } catch (e) {
-          alert(e.message || String(e));
-        }
-      });
-      primaryActions.appendChild(btnTurnToJob);
+      const canTurnToJob = !!(currentUser && ["office", "office_admin", "admin"].includes(String(currentUser.role || "")));
+      if (canTurnToJob) {
+        const btnTurnToJob = document.createElement("button");
+        btnTurnToJob.className = "btn";
+        btnTurnToJob.textContent = "Turn to Job";
+        btnTurnToJob.addEventListener("click", async () => {
+          try {
+            const manualJobNumber = prompt("Enter Job # for this dispatch:");
+            if (manualJobNumber === null) return;
+            const cleanJobNumber = String(manualJobNumber || "").trim();
+            if (!cleanJobNumber) {
+              alert("Job # is required to turn a sales lead into a dispatch.");
+              return;
+            }
+            if (!confirm(`Turn this Sales Lead into Dispatch Job #${cleanJobNumber}?`)) return;
+            const updated = await apiUpdateJob(job.id, {
+              kind: "dispatch",
+              status: "Dispatch",
+              job_number: cleanJobNumber
+            });
+            renderJobDetails(container, updated, ctx);
+            if (ctx && ctx.afterSave) await ctx.afterSave();
+            refreshBadges();
+          } catch (e) {
+            alert(e.message || String(e));
+          }
+        });
+        primaryActions.appendChild(btnTurnToJob);
+      }
 
       if (String(job.status || "") === "Quote Sent") {
         const btnPartsOnOrder = document.createElement("button");
@@ -3077,6 +3089,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         try {
           const selectedDate = (card.querySelector("#cf_form_date")?.value || "").trim();
           if (!selectedDate) { alert("Date is required."); card.querySelector("#cf_form_date")?.focus(); return; }
+          if (!techSel.value.trim()) { alert("Technician is required."); techSel.focus(); return; }
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
           if (!isSalesLead) {
             const timeValue = card.querySelector("#cf_time")?.value.trim();

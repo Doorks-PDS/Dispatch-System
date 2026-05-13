@@ -570,6 +570,12 @@ class CalendarStore:
         old_status = str(j.get("status") or "")
         old_kind = str(j.get("kind") or "dispatch")
 
+        if str(payload.get("kind") or "").strip() == "dispatch" and str(j.get("kind") or "") == "sales_lead":
+            incoming_job_number = str(payload.get("job_number") or "").strip()
+            if not incoming_job_number:
+                raise ValueError("Job # is required when converting a sales lead to dispatch")
+            payload["job_number"] = incoming_job_number
+
         for k in [
             "date", "status", "customer", "contact", "phone", "email", "address",
             "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
@@ -703,6 +709,9 @@ class CalendarStore:
             form_date = str(payload.get("date") or payload.get("form_date") or "").strip()
             if not form_date:
                 raise ValueError("Date is required")
+            technician_name = str(payload.get("technician_name") or "").strip()
+            if not technician_name:
+                raise ValueError("Technician is required")
             door_type = str(payload.get("door_type") or "").strip()
             if not door_type:
                 raise ValueError("Door type is required")
@@ -746,7 +755,7 @@ class CalendarStore:
                 "date": form_date,
                 "created_at": _now_iso(),
                 "updated_at": _now_iso(),
-                "technician_name": str(payload.get("technician_name") or "").strip(),
+                "technician_name": technician_name,
                 "door_type": door_type,
                 "door_location": str(payload.get("door_location") or "").strip(),
                 "tech_notes": str(payload.get("tech_notes") or "").strip(),
