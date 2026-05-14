@@ -4631,7 +4631,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     controls.style.marginTop = "12px";
     controls.innerHTML = `
       <div><div class="label">Month</div><input class="input" id="pay_month" type="month" /></div>
-      <div></div>
+      <div>
+        <div class="label">Custom Pay Period</div>
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+          <input class="input" id="pay_start" type="date" />
+          <input class="input" id="pay_end" type="date" />
+        </div>
+        <div class="hint">Optional: use start/end dates when pay period crosses months.</div>
+      </div>
     `;
     root.appendChild(controls);
 
@@ -4662,6 +4669,25 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       if (!monthVal) return true;
       if (!dateStr) return false;
       return String(dateStr).slice(0, 7) === monthVal;
+    };
+
+    const dateRangeIncludesDate = (startDate, endDate, dateStr) => {
+      const d = String(dateStr || "").slice(0, 10);
+      if (!d) return false;
+      if (startDate && d < startDate) return false;
+      if (endDate && d > endDate) return false;
+      return true;
+    };
+
+    const getPayrollPeriod = () => {
+      const monthVal = controls.querySelector("#pay_month")?.value || "";
+      const startDate = controls.querySelector("#pay_start")?.value || "";
+      const endDate = controls.querySelector("#pay_end")?.value || "";
+      const hasRange = !!(startDate || endDate);
+      const label = hasRange
+        ? `${startDate || "Start"} to ${endDate || "End"}`
+        : (monthVal || "Current");
+      return { monthVal, startDate, endDate, hasRange, label };
     };
 
     const calcHoursForCard = (t) => calcTimeHours(
@@ -4738,14 +4764,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       URL.revokeObjectURL(url);
     }
 
-    async function openTechBreakdown(emp, entries, monthVal, approvedPto) {
+    async function openTechBreakdown(emp, entries, period, approvedPto) {
       const timeoffItems = await apiListTimeOff({ employee_name: emp, limit: 500 }).catch(() => []);
-      const monthTimeoff = timeoffItems.filter(t => monthIncludesDate(monthVal, itemDateOf(t)));
+      const monthVal = period && period.monthVal ? period.monthVal : "";
+      const monthTimeoff = timeoffItems.filter(t => {
+        const d = itemDateOf(t);
+        return period && period.hasRange ? dateRangeIncludesDate(period.startDate, period.endDate, d) : monthIncludesDate(monthVal, d);
+      });
 
       openDrawer(`${emp} Payroll Breakdown`, (drawerBody, overlay) => {
         const wrap = document.createElement("div");
         wrap.className = "card";
-        wrap.innerHTML = `<h3>${escapeHtml(emp)}</h3><div class="hint">${escapeHtml(monthVal || "Current Month")}</div>`;
+        wrap.innerHTML = `<h3>${escapeHtml(emp)}</h3><div class="hint">${escapeHtml((period && period.label) || monthVal || "Current Month")}</div>`;
 
         const buttonRow = document.createElement("div");
         buttonRow.style.display = "flex";
@@ -4912,9 +4942,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       await ensureSharedSettingsLoaded();
       const items = await apiListTimecards({ limit: 5000 }).catch(() => []);
       const timeoff = await apiListTimeOff({ limit: 500 }).catch(() => []);
-      const monthVal = controls.querySelector("#pay_month").value;
+      const period = getPayrollPeriod();
+      const monthVal = period.monthVal;
 
-      const filtered = monthVal ? items.filter(t => monthIncludesDate(monthVal, itemDateOf(t))) : items.slice();
+      const filtered = period.hasRange
+        ? items.filter(t => dateRangeIncludesDate(period.startDate, period.endDate, itemDateOf(t)))
+        : (monthVal ? items.filter(t => monthIncludesDate(monthVal, itemDateOf(t))) : items.slice());
       const employees = {};
       filtered.forEach(t => {
         const emp = employeeNameOfItem(t);
@@ -4923,7 +4956,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         employees[emp].push(t);
       });
 
-      const monthPto = monthVal ? timeoff.filter(t => monthIncludesDate(monthVal, itemDateOf(t))) : timeoff.slice();
+      const monthPto = period.hasRange
+        ? timeoff.filter(t => dateRangeIncludesDate(period.startDate, period.endDate, itemDateOf(t)))
+        : (monthVal ? timeoff.filter(t => monthIncludesDate(monthVal, itemDateOf(t))) : timeoff.slice());
       const approvedPto = monthPto.filter(t => String(t.status || "").toLowerCase() === "approved");
 
       const allBreakdowns = Object.values(employees).map(entriesBreakdown);
@@ -4942,14 +4977,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const approvalRate = filtered.length ? Math.round((approvedCards / filtered.length) * 100) : 0;
 
       exportBtn.onclick = () => {
-        const csv = buildCrewCsv(monthVal, filtered, approvedPto);
+        const csv = buildCrewCsv(period.label, filtered, approvedPto);
         downloadCsv("payroll_report.csv", csv);
       };
 
       summaryWrap.innerHTML = "";
       [
         metricCard("Employees", String(uniqueEmployees.length), "With timecards"),
-        metricCard("Hours Worked", totalHours.toFixed(2), monthVal || "Current"),
+        metricCard("Hours Worked", totalHours.toFixed(2), period.label),
         metricCard("Regular Hours", totalRegular.toFixed(2), "Up to 8 per day"),
         metricCard("OT Hours", totalOT.toFixed(2), `Worked ${totalOTWorked.toFixed(2)} + Adj ${totalOTBank.toFixed(2)}`),
         metricCard("PTO Bank", totalPtoBank.toFixed(2), "Entered in payroll"),
@@ -4994,7 +5029,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="jobrow-addr">Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | OT Adj ${empOtBank.toFixed(2)} | OT Total ${empOtTotal.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)}</div>
           <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "—")}</div>
         `;
-        row.addEventListener("click", () => openTechBreakdown(emp, entries, monthVal, approvedPto));
+        row.addEventListener("click", () => openTechBreakdown(emp, entries, period, approvedPto));
         rows.appendChild(row);
       });
 
@@ -5002,11 +5037,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
 
     const monthInput = controls.querySelector("#pay_month");
+    const startInput = controls.querySelector("#pay_start");
+    const endInput = controls.querySelector("#pay_end");
     if (monthInput) {
       const now = new Date();
       monthInput.value = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2, "0")}`;
       monthInput.addEventListener("change", refresh);
     }
+    if (startInput) startInput.addEventListener("change", refresh);
+    if (endInput) endInput.addEventListener("change", refresh);
 
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
