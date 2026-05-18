@@ -26,6 +26,7 @@
   let navFormsSignOff = el("navFormsSignOff");
  
   const navJobFlow = el("navJobFlow");
+  let navToDoList = el("navToDoList");
   const navEstimatePage = el("navEstimatePage");
   const navInvoicePage = el("navInvoicePage");
   const navEstimateInvoice = el("navEstimateInvoice");
@@ -63,6 +64,26 @@
     }
   }
  
+  if (!navToDoList) {
+    const jobsNavCol = navJobFlow && navJobFlow.parentElement;
+    if (jobsNavCol) {
+      const btn = document.createElement("button");
+      btn.className = "navbtn";
+      btn.id = "navToDoList";
+      btn.innerHTML = `<span>To-Do List</span><small>Assigned Quotes</small><span class="badge" id="badgeToDoList" style="display:none;">0</span>`;
+      if (navJobFlow && navJobFlow.nextSibling) jobsNavCol.insertBefore(btn, navJobFlow.nextSibling);
+      else jobsNavCol.appendChild(btn);
+      navToDoList = btn;
+    }
+  } else if (!navToDoList.querySelector(".badge")) {
+    const badge = document.createElement("span");
+    badge.className = "badge";
+    badge.id = "badgeToDoList";
+    badge.style.display = "none";
+    badge.textContent = "0";
+    navToDoList.appendChild(badge);
+  }
+
   if (!navAllJobs) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
     if (jobsNavCol) {
@@ -158,7 +179,7 @@
   const jobsNavCol = (navJobFlow && navJobFlow.parentElement) || (navEstimateInvoice && navEstimateInvoice.parentElement) || (navEstimatePage && navEstimatePage.parentElement);
   if (jobsNavCol) {
     const estimateBtn = navEstimateInvoice || navEstimatePage;
-    [navJobFlow, navAllJobs, navDoorLogs, navCustomers, navContacts, estimateBtn, navPartsList].forEach((node) => {
+    [navJobFlow, navToDoList, navAllJobs, navDoorLogs, navCustomers, navContacts, estimateBtn, navPartsList].forEach((node) => {
       if (node && node.parentElement === jobsNavCol) jobsNavCol.appendChild(node);
     });
   }
@@ -221,7 +242,7 @@
   function setNavActive(btn) {
     [
       navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff,
-      navJobFlow, navAllJobs, navPartsList, navDoorLogs, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
+      navJobFlow, navToDoList, navAllJobs, navPartsList, navDoorLogs, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
       navDataCenter, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
       navNotifications, navAtlas, navMoses
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
@@ -1258,6 +1279,7 @@ async function apiListForms() {
     setVisible(navEstimateInvoice, !!role && perms.estimates);
     setVisible(navPartsList, !!role && perms.parts);
     setVisible(navDoorLogs, !!role && perms.parts);
+    setVisible(navToDoList, !!role && ["office", "office_admin", "admin"].includes(String(role || "")));
     setVisible(navPricingSettings, !!role && perms.estimates);
   }
 
@@ -1367,6 +1389,16 @@ async function apiListForms() {
       for (const s of statuses) total += (await apiListJobs({ status: s, limit: 5000 })).length;
       badgeJobFlow.style.display = total ? "inline-flex" : "none";
       badgeJobFlow.textContent = String(total);
+
+      const badgeToDoList = document.getElementById("badgeToDoList");
+      if (badgeToDoList && isOfficeUser()) {
+        const jobs = await apiListJobs({ limit: 5000 }).catch(() => []);
+        const assignedCount = assignedQuoteJobs(jobs).length;
+        badgeToDoList.style.display = assignedCount ? "inline-flex" : "none";
+        badgeToDoList.textContent = String(assignedCount);
+      } else if (badgeToDoList) {
+        badgeToDoList.style.display = "none";
+      }
     } catch {}
   }
  
@@ -1398,6 +1430,22 @@ async function apiListForms() {
   function shouldShowInvoice(job) {
     if (job.kind !== "dispatch") return false;
     return ["Complete/Quote", "Complete", "Done"].includes(String(job.status || ""));
+  }
+
+  function isOfficeUser() {
+    return !!(currentUser && ["office", "office_admin", "admin"].includes(String(currentUser.role || "")));
+  }
+
+  function isActiveAssignedQuoteJob(job) {
+    const assigned = String(job && job.quote_assigned_to || "").trim();
+    if (!assigned) return false;
+    const status = String(job && job.status || "").trim();
+    if (["Done", "Complete"].includes(status)) return false;
+    return ["Quote", "Quote Sent", "Complete/Quote", "Parts on Order"].includes(status);
+  }
+
+  function assignedQuoteJobs(jobs) {
+    return (Array.isArray(jobs) ? jobs : []).filter(isActiveAssignedQuoteJob);
   }
 
   function cleanDocRef(value) {
@@ -3652,6 +3700,116 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
  
+  function renderToDoListView() {
+    if (!isOfficeUser()) {
+      showLoggedOutSplash("You do not have access to the To-Do List.");
+      return;
+    }
+    setNavActive(navToDoList);
+    setActiveChip("Work Flow");
+    setWorkspace("To-Do List");
+    clearWorkspaceActions();
+
+    const root = document.createElement("div");
+    const header = document.createElement("div");
+    header.className = "card";
+    header.innerHTML = `
+      <h3 style="margin:0;">Assigned Quote To-Do List</h3>
+      <div class="hint" style="margin-top:6px;">Quote, Quote Sent, Complete/Quote, and Parts on Order items grouped by assigned office user.</div>
+    `;
+    root.appendChild(header);
+
+    const list = document.createElement("div");
+    list.style.marginTop = "12px";
+    root.appendChild(list);
+
+    async function refresh() {
+      try {
+        const jobs = await apiListJobs({ limit: 5000 });
+        const assigned = assignedQuoteJobs(jobs);
+        const groups = new Map();
+        assigned.forEach(j => {
+          const name = String(j.quote_assigned_to || "Unassigned").trim() || "Unassigned";
+          if (!groups.has(name)) groups.set(name, []);
+          groups.get(name).push(j);
+        });
+
+        list.innerHTML = "";
+        if (!assigned.length) {
+          list.innerHTML = `<div class="card"><div class="hint">No assigned quote tasks found.</div></div>`;
+          refreshBadges();
+          return;
+        }
+
+        Array.from(groups.entries()).sort((a, b) => a[0].localeCompare(b[0])).forEach(([assignedTo, items]) => {
+          const section = document.createElement("div");
+          section.className = "card";
+          section.style.marginBottom = "12px";
+          section.innerHTML = `
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap;">
+              <h3 style="margin:0;">${escapeHtml(assignedTo)}</h3>
+              <span class="badge" style="display:inline-flex;">${items.length}</span>
+            </div>
+            <div class="hint" style="margin-top:4px;">Assigned quote tasks</div>
+          `;
+
+          const rows = document.createElement("div");
+          rows.style.marginTop = "12px";
+          rows.style.display = "grid";
+          rows.style.gap = "10px";
+
+          items
+            .slice()
+            .sort((a, b) => String(b.updated_at || b.created_at || b.date || "").localeCompare(String(a.updated_at || a.created_at || a.date || "")))
+            .forEach(j => {
+              const row = document.createElement("div");
+              row.className = "jobrow";
+              row.style.cursor = "pointer";
+              const status = String(j.status || "");
+              row.innerHTML = `
+                <div class="jobrow-top">
+                  <div class="jobrow-name">${escapeHtml(j.customer || "No Customer")}</div>
+                  ${statusPill(status)}
+                </div>
+                <div class="jobrow-addr">${escapeHtml(j.address || "")}</div>
+                <div class="hint" style="margin-top:6px;">
+                  ${j.kind === "sales_lead" ? "Sales Lead" : "Job"} #${escapeHtml(j.job_number || "")}
+                  ${j.sent_quote_number ? ` | Sent Estimate #${escapeHtml(j.sent_quote_number)}` : ""}
+                  ${j.estimate_number ? ` | Estimate #${escapeHtml(j.estimate_number)}` : ""}
+                  ${j.updated_at ? ` | Updated ${escapeHtml(formatDisplayDate(String(j.updated_at).slice(0,10)))}` : ""}
+                </div>
+              `;
+              row.addEventListener("click", async () => {
+                try {
+                  const full = await apiGetJob(j.id);
+                  openDrawer("Job Details", (drawerBody) => {
+                    const local = document.createElement("div");
+                    drawerBody.appendChild(local);
+                    renderJobDetails(local, full, { afterSave: refresh, afterDelete: refresh });
+                  });
+                } catch (e) {
+                  alert(e.message || String(e));
+                }
+              });
+              rows.appendChild(row);
+            });
+
+          section.appendChild(rows);
+          list.appendChild(section);
+        });
+
+        refreshBadges();
+      } catch (e) {
+        list.innerHTML = `<div class="card"><div class="hint">${escapeHtml(e.message || String(e))}</div></div>`;
+      }
+    }
+
+    workspaceBody.innerHTML = "";
+    workspaceBody.appendChild(root);
+    currentView = { refresh };
+    refresh();
+  }
+
   function renderJobFlowView(initialStatus = "Dispatch", standalone = false) {
     setNavActive(initialStatus === "__ALL__" ? navAllJobs : navJobFlow);
     setActiveChip("Work Flow");
@@ -8050,6 +8208,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   }
  
   if (navJobFlow) navJobFlow.addEventListener("click", () => renderJobFlowView("Dispatch"));
+  if (navToDoList) navToDoList.addEventListener("click", renderToDoListView);
   if (navAllJobs) navAllJobs.addEventListener("click", renderAllJobsView);
   if (navEstimateInvoice) navEstimateInvoice.addEventListener("click", renderEstimatePage);
   if (navEstimatePage && !navEstimateInvoice) navEstimatePage.addEventListener("click", renderEstimatePage);
