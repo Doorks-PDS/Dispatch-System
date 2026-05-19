@@ -1440,12 +1440,34 @@ async function apiListForms() {
     const assigned = String(job && job.quote_assigned_to || "").trim();
     if (!assigned) return false;
     const status = String(job && job.status || "").trim();
-    if (["Done", "Complete"].includes(status)) return false;
-    return ["Quote", "Quote Sent", "Complete/Quote", "Parts on Order"].includes(status);
+    return status === "Quote";
   }
 
   function assignedQuoteJobs(jobs) {
     return (Array.isArray(jobs) ? jobs : []).filter(isActiveAssignedQuoteJob);
+  }
+
+  function initialsForName(name) {
+    return String(name || "")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+      .map(part => part[0])
+      .join("")
+      .toUpperCase();
+  }
+
+  function normalizeQuoteAssigneeName(raw, people = []) {
+    const value = String(raw || "").trim();
+    if (!value) return "Unassigned";
+    const upper = value.toUpperCase();
+    const source = Array.isArray(people) ? people : [];
+    const match = source.find(p => {
+      const name = String(p.name || p.full_name || p.username || "").trim();
+      if (!name) return false;
+      return name.toUpperCase() === upper || initialsForName(name) === upper;
+    });
+    return match ? String(match.name || match.full_name || match.username || value).trim() : value;
   }
 
   function cleanDocRef(value) {
@@ -3715,7 +3737,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     header.className = "card";
     header.innerHTML = `
       <h3 style="margin:0;">Assigned Quote To-Do List</h3>
-      <div class="hint" style="margin-top:6px;">Quote, Quote Sent, Complete/Quote, and Parts on Order items grouped by assigned office user.</div>
+      <div class="hint" style="margin-top:6px;">Assigned jobs and sales leads currently in Quote status.</div>
     `;
     root.appendChild(header);
 
@@ -3726,10 +3748,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     async function refresh() {
       try {
         const jobs = await apiListJobs({ limit: 5000 });
+        const employees = await apiListEmployees().catch(() => []);
         const assigned = assignedQuoteJobs(jobs);
         const groups = new Map();
         assigned.forEach(j => {
-          const name = String(j.quote_assigned_to || "Unassigned").trim() || "Unassigned";
+          const rawAssigned = String(j.quote_assigned_to || "Unassigned").trim() || "Unassigned";
+          const name = normalizeQuoteAssigneeName(rawAssigned, employees);
           if (!groups.has(name)) groups.set(name, []);
           groups.get(name).push(j);
         });
@@ -3766,19 +3790,34 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               row.className = "jobrow";
               row.style.cursor = "pointer";
               const status = String(j.status || "");
-              row.innerHTML = `
-                <div class="jobrow-top">
-                  <div class="jobrow-name">${escapeHtml(j.customer || "No Customer")}</div>
-                  ${statusPill(status)}
-                </div>
-                <div class="jobrow-addr">${escapeHtml(j.address || "")}</div>
-                <div class="hint" style="margin-top:6px;">
-                  ${j.kind === "sales_lead" ? "Sales Lead" : "Job"} #${escapeHtml(j.job_number || "")}
-                  ${j.sent_quote_number ? ` | Sent Estimate #${escapeHtml(j.sent_quote_number)}` : ""}
-                  ${j.estimate_number ? ` | Estimate #${escapeHtml(j.estimate_number)}` : ""}
-                  ${j.updated_at ? ` | Updated ${escapeHtml(formatDisplayDate(String(j.updated_at).slice(0,10)))}` : ""}
-                </div>
-              `;
+
+              const top = document.createElement("div");
+              top.className = "jobrow-top";
+
+              const nameEl = document.createElement("div");
+              nameEl.className = "jobrow-name";
+              nameEl.textContent = j.customer || "No Customer";
+              top.appendChild(nameEl);
+              top.appendChild(statusPill(status));
+              row.appendChild(top);
+
+              const addr = document.createElement("div");
+              addr.className = "jobrow-addr";
+              addr.textContent = j.address || "";
+              row.appendChild(addr);
+
+              const meta = document.createElement("div");
+              meta.className = "hint";
+              meta.style.marginTop = "6px";
+              const parts = [
+                `${j.kind === "sales_lead" ? "Sales Lead" : "Job"} #${j.job_number || ""}`,
+                j.sent_quote_number ? `Sent Estimate #${j.sent_quote_number}` : "",
+                j.estimate_number ? `Estimate #${j.estimate_number}` : "",
+                j.updated_at ? `Updated ${formatDisplayDate(String(j.updated_at).slice(0,10))}` : "",
+              ].filter(Boolean);
+              meta.textContent = parts.join(" | ");
+              row.appendChild(meta);
+
               row.addEventListener("click", async () => {
                 try {
                   const full = await apiGetJob(j.id);
