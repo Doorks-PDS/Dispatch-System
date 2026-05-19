@@ -1440,7 +1440,7 @@ async function apiListForms() {
     const assigned = String(job && job.quote_assigned_to || "").trim();
     if (!assigned) return false;
     const status = String(job && job.status || "").trim();
-    return status === "Quote";
+    return ["Quote", "Complete/Quote"].includes(status);
   }
 
   function assignedQuoteJobs(jobs) {
@@ -1461,13 +1461,28 @@ async function apiListForms() {
     const value = String(raw || "").trim();
     if (!value) return "Unassigned";
     const upper = value.toUpperCase();
+    const lower = value.toLowerCase();
     const source = Array.isArray(people) ? people : [];
-    const match = source.find(p => {
+
+    const exactOrInitials = source.find(p => {
       const name = String(p.name || p.full_name || p.username || "").trim();
       if (!name) return false;
       return name.toUpperCase() === upper || initialsForName(name) === upper;
     });
-    return match ? String(match.name || match.full_name || match.username || value).trim() : value;
+    if (exactOrInitials) return String(exactOrInitials.name || exactOrInitials.full_name || exactOrInitials.username || value).trim();
+
+    const partialMatches = source.filter(p => {
+      const name = String(p.name || p.full_name || p.username || "").trim();
+      if (!name) return false;
+      const parts = name.toLowerCase().split(/\s+/).filter(Boolean);
+      return parts.includes(lower) || name.toLowerCase().startsWith(lower + " ");
+    });
+    if (partialMatches.length === 1) {
+      const p = partialMatches[0];
+      return String(p.name || p.full_name || p.username || value).trim();
+    }
+
+    return value;
   }
 
   function cleanDocRef(value) {
@@ -3737,7 +3752,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     header.className = "card";
     header.innerHTML = `
       <h3 style="margin:0;">Assigned Quote To-Do List</h3>
-      <div class="hint" style="margin-top:6px;">Assigned jobs and sales leads currently in Quote status.</div>
+      <div class="hint" style="margin-top:6px;">Assigned jobs and sales leads currently in Quote or Complete/Quote status.</div>
     `;
     root.appendChild(header);
 
