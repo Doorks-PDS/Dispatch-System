@@ -603,6 +603,10 @@ class CalendarStore:
                         if candidate and self._job_number_exists(data, candidate, exclude_id=job_id):
                             raise ValueError(f"Job number already exists: {candidate}")
                         j[k] = candidate
+                    elif k == "approved":
+                        j[k] = bool(payload.get(k))
+                    elif k == "approved_at":
+                        j[k] = str(payload.get(k) or "").strip()
                     else:
                         j[k] = str(payload.get(k) or "").strip()
 

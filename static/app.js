@@ -1148,7 +1148,22 @@ function ptoHoursFromItem(item) {
     ot_bank: {},
   };
 
-  async function apiGetSharedSettings() {
+  
+  async function apiGetSaddlebackData() {
+    const data = await fetchJSON("/saddleback");
+    return data.data || { orders: [], expenses: [], purchases: [] };
+  }
+
+  async function apiSaveSaddlebackData(payload) {
+    const data = await fetchJSON("/saddleback", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || { orders: [], expenses: [], purchases: [] }),
+    });
+    return data.data || payload;
+  }
+
+async function apiGetSharedSettings() {
     const data = await fetchJSON("/shared-settings");
     SHARED_SETTINGS_CACHE = data.settings || SHARED_SETTINGS_CACHE;
     return SHARED_SETTINGS_CACHE;
@@ -1508,10 +1523,11 @@ async function apiListForms() {
 function isApprovedEstimateJob(job, monthPrefix = "") {
     const estimateNumber = String(job?.estimate_number || job?.sent_quote_number || "").trim();
     if (!estimateNumber) return false;
-    if (job?.approved === false) return false;
+    const explicit = String(job?.approved ?? "").toLowerCase();
+    if (job?.approved === false || explicit === "false" || explicit === "0" || explicit === "no") return false;
     const approvedStatuses = new Set(["Dispatch", "Parts on Order", "Complete/Quote", "Complete", "Done"]);
     const approvedAt = String(job?.approved_at || "");
-    if (job?.approved === true) {
+    if (job?.approved === true || explicit === "true" || explicit === "1" || explicit === "yes") {
       if (!monthPrefix) return true;
       return approvedAt.startsWith(monthPrefix)
         || String(job?.updated_at || "").startsWith(monthPrefix)
@@ -5835,10 +5851,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                   ev.stopPropagation();
                   try {
                     const nextApproved = !d.__approved;
-                    await apiUpdateJob(linkedJob.id, {
+                    const savedJob = await apiUpdateJob(linkedJob.id, {
                       approved: nextApproved,
                       approved_at: nextApproved ? new Date().toISOString() : ""
                     });
+                    d.__approved = nextApproved;
+                    d.__linkedJob = savedJob || linkedJob;
                     await renderEstimatorTab();
                   } catch (e) {
                     alert(e.message || String(e));
@@ -8414,25 +8432,27 @@ function renderSaddlebackView() {
     setWorkspace("Saddleback Design Co.");
     clearWorkspaceActions();
 
-    const STORE_KEY = "doorks_saddleback_design_co_v3";
-    const loadStore = () => {
-      try {
-        const raw = localStorage.getItem(STORE_KEY);
-        const parsed = raw ? JSON.parse(raw) : null;
-        return parsed && typeof parsed === "object" ? parsed : { orders: [], expenses: [], purchases: [] };
-      } catch {
-        return { orders: [], expenses: [], purchases: [] };
-      }
-    };
-    const saveStore = (data) => localStorage.setItem(STORE_KEY, JSON.stringify(data));
-    let state = loadStore();
+    let state = { orders: [], expenses: [], purchases: [] };
+    let sdcLoaded = false;
+
+    const normalizeSdcState = (data) => ({
+      orders: Array.isArray(data && data.orders) ? data.orders : [],
+      expenses: Array.isArray(data && data.expenses) ? data.expenses : [],
+      purchases: Array.isArray(data && data.purchases) ? data.purchases : [],
+    });
 
     const money = (n) => `$${(Number(n || 0)).toFixed(2)}`;
     const monthKey = (iso) => String(iso || "").slice(0, 7);
     const makeId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
-    function persist() {
-      saveStore(state);
+    async function persist() {
+      try {
+        state = normalizeSdcState(await apiSaveSaddlebackData(state));
+        sdcLoaded = true;
+      } catch (e) {
+        console.warn("Saddleback save failed", e);
+        alert(e.message || "Unable to save Saddleback data.");
+      }
     }
 
     function upsert(bucket, row) {
@@ -8441,14 +8461,12 @@ function renderSaddlebackView() {
       if (idx >= 0) items[idx] = row;
       else items.unshift(row);
       state[bucket] = items;
-      persist();
-      renderCurrent();
+      persist().then(renderCurrent);
     }
 
     function removeItem(bucket, id) {
       state[bucket] = (state[bucket] || []).filter(x => String(x.id || "") !== String(id || ""));
-      persist();
-      renderCurrent();
+      persist().then(renderCurrent);
     }
 
     function summaryCard(title, value, hint = "") {
@@ -9045,7 +9063,16 @@ function renderSaddlebackView() {
 
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
-    renderOrders();
+    host.innerHTML = `<div class="card"><div class="hint">Loading Saddleback data...</div></div>`;
+    apiGetSaddlebackData()
+      .then(data => {
+        state = normalizeSdcState(data);
+        sdcLoaded = true;
+        renderOrders();
+      })
+      .catch(e => {
+        host.innerHTML = `<div class="card"><div class="hint">${escapeHtml(e.message || "Unable to load Saddleback data.")}</div></div>`;
+      });
   }
 
 
