@@ -579,7 +579,7 @@ class CalendarStore:
         for k in [
             "date", "status", "customer", "contact", "phone", "email", "address",
             "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
-            "followup_job_id", "followup_job_number", "source_job_id", "source_job_number",
+            "followup_job_id", "followup_job_number", "source_job_id", "source_job_number", "approved", "approved_at",
             "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
         ]:
             if k in payload:

@@ -86,6 +86,8 @@ class JobUpdate(BaseModel):
     followup_job_number: Optional[str] = None
     source_job_id: Optional[str] = None
     source_job_number: Optional[str] = None
+    approved: Optional[bool] = None
+    approved_at: Optional[str] = None
 
 
 class CompletionCreate(BaseModel):

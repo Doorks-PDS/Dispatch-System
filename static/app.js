@@ -1506,8 +1506,9 @@ async function apiListForms() {
 
   
 function isApprovedEstimateJob(job, monthPrefix = "") {
-    const estimateNumber = String(job?.estimate_number || "").trim();
+    const estimateNumber = String(job?.estimate_number || job?.sent_quote_number || "").trim();
     if (!estimateNumber) return false;
+    if (job?.approved === false) return false;
     const approvedStatuses = new Set(["Dispatch", "Parts on Order", "Complete/Quote", "Complete", "Done"]);
     const approvedAt = String(job?.approved_at || "");
     if (job?.approved === true) {
@@ -5815,7 +5816,40 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 <div class="jobrow-addr">${escapeHtml(customer || "")}${jobNo ? ` - Job #${escapeHtml(jobNo)}` : ""}</div>
                 <div class="hint" style="margin-top:6px;">${escapeHtml(docDate || "")}</div>
               `;
-              if (linkedJob) item.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
+              if (linkedJob) {
+                const actions = document.createElement("div");
+                actions.style.display = "flex";
+                actions.style.gap = "8px";
+                actions.style.flexWrap = "wrap";
+                actions.style.marginTop = "8px";
+
+                const openBtn = document.createElement("button");
+                openBtn.className = "btn";
+                openBtn.textContent = "Open Job";
+                openBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
+
+                const approvalBtn = document.createElement("button");
+                approvalBtn.className = d.__approved ? "btn" : "btn btn-orange";
+                approvalBtn.textContent = d.__approved ? "Mark Not Approved" : "Mark Approved";
+                approvalBtn.addEventListener("click", async (ev) => {
+                  ev.stopPropagation();
+                  try {
+                    const nextApproved = !d.__approved;
+                    await apiUpdateJob(linkedJob.id, {
+                      approved: nextApproved,
+                      approved_at: nextApproved ? new Date().toISOString() : ""
+                    });
+                    await renderEstimatorTab();
+                  } catch (e) {
+                    alert(e.message || String(e));
+                  }
+                });
+
+                actions.appendChild(openBtn);
+                actions.appendChild(approvalBtn);
+                item.appendChild(actions);
+                item.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
+              }
               inline.appendChild(item);
             });
           };
@@ -6644,13 +6678,13 @@ function serializeDocItems(items, laborOnly) {
             <select class="input" id="doc_type"><option value="estimate">Estimate</option><option value="invoice">Invoice</option></select>
             <div class="label" style="margin-top:8px;">Date</div>
             <input class="input" id="doc_date" type="date" />
-            <div class="label" style="margin-top:8px;">Sales Tax %</div>
+            <div class="label" style="margin-top:8px;">Sales Tax % <span style="color:#b91c1c;">*</span></div>
             <select class="input" id="doc_tax_rate_select">
               <option value="">-- Select city / rate --</option>
             </select>
             <input class="input" id="doc_tax_rate_custom" type="number" min="0" step="0.01" placeholder="Enter custom tax %" style="margin-top:8px; display:none;" />
-            <div class="hint" id="doc_tax_rate_hint" style="margin-top:6px;">Choose a city tax rate or select Custom.</div>
-            <div class="label" style="margin-top:8px;">Terms</div>
+            <div class="hint" id="doc_tax_rate_hint" style="margin-top:6px;">Required: choose a city tax rate, No Sales Tax, or Custom.</div>
+            <div class="label" style="margin-top:8px;">Terms <span style="color:#b91c1c;">*</span></div>
             <select class="input" id="doc_terms"></select>
             <div class="label" style="margin-top:8px;">Prepared By</div>
             <select class="input" id="doc_completed_by"><option value="">-- Select employee --</option></select>
@@ -6719,6 +6753,12 @@ function serializeDocItems(items, laborOnly) {
       const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms") };
       SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
+      if (dom.terms) {
+        const blankTerm = document.createElement("option");
+        blankTerm.value = "";
+        blankTerm.textContent = "-- Select terms --";
+        dom.terms.appendChild(blankTerm);
+      }
       BILLING_TERMS_OPTIONS.forEach(term => { const o=document.createElement("option"); o.value=term; o.textContent=term; dom.terms.appendChild(o); });
       if (!String(editDoc?.tax_rate || "").trim() && pricing && pricing.tax != null) {
         const taxDefault = Number(pricing.tax || 0);
@@ -6735,10 +6775,10 @@ function serializeDocItems(items, laborOnly) {
         dom.taxRateSelect.value = ""; dom.taxRateCustom.value = ""; dom.taxRateCustom.style.display = "none"; dom.taxRateHint.textContent = "Choose a city tax rate or select Custom."; }
       function getCurrentTaxRateValue() { return dom.taxRateSelect.value === "__custom__" ? String(dom.taxRateCustom.value || "").trim() : String(dom.taxRateSelect.value || "").trim(); }
       dom.type.value = docType; dom.date.value = (editDoc && editDoc.date) || yyyyMmDd(new Date()); wireKnownAddressAutofill({ input: dom.address, customerInput: dom.customer, knownAddresses, extraAddresses: customers.map(c => c.address).filter(Boolean) }); if (editDoc && editDoc.tax_rate != null) setTaxRateValue(editDoc.tax_rate); else setTaxRateValue("");
-      if (dom.terms) dom.terms.value = (editDoc && editDoc.terms) || (pricing && pricing.default_terms) || "Due on Receipt";
-      if (job) { dom.customer.value = (editDoc && editDoc.customer) || job.customer || ""; dom.address.value = (editDoc && editDoc.address) || job.address || ""; dom.ship.value = (editDoc && editDoc.ship_to) || job.address || job.customer || ""; dom.po.value = (editDoc && editDoc.po_number) || job.po_number || ""; dom.job.value = (editDoc && editDoc.job_number) || job.job_number || ""; const inferred = inferTaxCityFromAddress(dom.address.value); if (!editDoc && inferred) setTaxRateValue(inferred.rate, inferred.city); }
+      if (dom.terms) dom.terms.value = (editDoc && editDoc.terms) || "";
+      if (job) { dom.customer.value = (editDoc && editDoc.customer) || job.customer || ""; dom.address.value = (editDoc && editDoc.address) || job.address || ""; dom.ship.value = (editDoc && editDoc.ship_to) || job.address || job.customer || ""; dom.po.value = (editDoc && editDoc.po_number) || job.po_number || ""; dom.job.value = (editDoc && editDoc.job_number) || job.job_number || ""; }
       if (editDoc) { dom.work.value = editDoc.work || ""; setTaxRateValue(editDoc.tax_rate ?? 7.75); dom.completedBy.value = editDoc.completed_by || ""; dom.number.value = editDoc.number || ""; }
-      function applyDocTypeMeta(){ docType=dom.type.value; const defaultNumber=nextDocNumberFromStorage(docType); dom.numberLabel.textContent = docType === "estimate" ? "Estimate #" : "Invoice #"; if (editDoc) return; if (!String(dom.number.value||"").trim() || (docType==="estimate" && String(dom.number.value||"").startsWith("JS")) || (docType==="invoice" && String(dom.number.value||"").startsWith("RE"))) dom.number.value = docType === "estimate" ? (job?.estimate_number || defaultNumber) : (job?.invoice_number || defaultNumber); }
+      function applyDocTypeMeta(){ docType=dom.type.value; const defaultNumber=nextDocNumberFromStorage(docType); dom.numberLabel.textContent = docType === "estimate" ? "Estimate #" : "Invoice #"; if (editDoc) return; if (!String(dom.number.value||"").trim() || (docType==="estimate" && String(dom.number.value||"").startsWith("JS")) || (docType==="invoice" && String(dom.number.value||"").startsWith("RE"))) dom.number.value = docType === "estimate" ? defaultNumber : (job?.invoice_number || defaultNumber); }
       function categoryTotals(){ const sums={trip:0,fuel:0,labor:0,parts:0,other:0}; items.forEach(it=>{ const total=Number(it.qty||0)*Number(it.rate||0); const kind=String(it.kind||"other").toLowerCase(); if (kind==="trip") sums.trip+=total; else if (kind==="fuel") sums.fuel+=total; else if (kind==="labor") sums.labor+=total; else if (kind==="part") sums.parts+=total; else sums.other+=total;}); return sums; }
       function updateTotals(){ const subtotal=items.reduce((s,it)=>s+(Number(it.qty||0)*Number(it.rate||0)),0); const taxableSubtotal=getTaxableSubtotal(items); const taxRate=Number(getCurrentTaxRateValue()||0)/100; const tax=taxableSubtotal*taxRate; const sums=categoryTotals(); dom.subtotal.textContent=`$${money(subtotal)}`; dom.taxable.textContent=`$${money(taxableSubtotal)}`; dom.tax.textContent=`$${money(tax)}`; dom.total.textContent=`$${money(subtotal+tax)}`; dom.tripTotal.textContent=`$${money(sums.trip)}`; dom.fuelTotal.textContent=`$${money(sums.fuel)}`; dom.laborTotal.textContent=`$${money(sums.labor)}`; dom.partsTotal.textContent=`$${money(sums.parts)}`; dom.otherTotal.textContent=`$${money(sums.other)}`; }
       function renderPartLookupResults(results){ currentPartResults=Array.isArray(results)?results:[]; dom.partResults.innerHTML=""; dom.partLookupHint.textContent=currentPartResults.length?`${currentPartResults.length} matching part${currentPartResults.length===1?"":"s"}`:"No matching parts found yet."; currentPartResults.slice(0,10).forEach(p=>{ const row=document.createElement("button"); row.className="btn"; row.style.textAlign="left"; row.innerHTML=`<strong>${escapeHtml(p.Item||"")}</strong><br><span class="hint">${escapeHtml(p.Description||"")}${p.Price?` - $${money(p.Price)}`:""}</span>`; row.addEventListener("click",()=>addPartToItems(p)); dom.partResults.appendChild(row); }); }
@@ -6770,7 +6810,13 @@ function serializeDocItems(items, laborOnly) {
         updateTotals();
       });
       dom.taxRateCustom.addEventListener("input", updateTotals);
-      dom.address.addEventListener("blur", ()=>{ if (dom.taxRateSelect.value === "__custom__") return; const inferred = inferTaxCityFromAddress(dom.address.value); if (inferred) setTaxRateValue(inferred.rate, inferred.city); else setTaxRateValue(7.75, "San Diego"); });
+      dom.address.addEventListener("blur", ()=>{
+        if (getCurrentTaxRateValue()) return;
+        const inferred = inferTaxCityFromAddress(dom.address.value);
+        dom.taxRateHint.textContent = inferred
+          ? `${inferred.city} may apply. Please select the sales tax rate before saving.`
+          : "Please select the correct sales tax rate before saving.";
+      });
       const _docOpenPricingBtn = card.querySelector("#doc_open_pricing"); if (_docOpenPricingBtn) _docOpenPricingBtn.addEventListener("click", ()=> renderPricingSettingsView());
       const _docPromptBtn = card.querySelector("#doc_prompt_builder"); if (_docPromptBtn) _docPromptBtn.addEventListener("click", ()=> {
         const extra = prompt("Add extra wording or scope to the document description:", "");
@@ -6883,7 +6929,7 @@ function serializeDocItems(items, laborOnly) {
       }
 
       await applyHelperPrefill();
-      if (!editDoc) setTaxRateValue(7.75, "San Diego");
+      if (!editDoc) setTaxRateValue("");
       renderItems();
       
       function buildCurrentDocPayloadForExport() {
@@ -6908,7 +6954,15 @@ function serializeDocItems(items, laborOnly) {
           ship_to: dom.ship.value.trim()
         };
       }
-card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Sales tax must be selected."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const updated = await apiUpdateJob(job.id, { po_number:dom.po.value.trim(), estimate_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.estimate_number || ""), invoice_number: docType === "invoice" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.invoice_number || ""), status: docType === "invoice" ? "Done" : "Quote Sent", quote_assigned_to: dom.completedBy.value || (job.quote_assigned_to || ""), sent_quote_number: docType === "estimate" ? ((resp.doc && resp.doc.number) || dom.number.value.trim()) : (job.sent_quote_number || "") }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
+card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const newDocNumber = (resp.doc && resp.doc.number) || dom.number.value.trim();
+const updated = await apiUpdateJob(job.id, {
+  po_number: dom.po.value.trim(),
+  estimate_number: docType === "estimate" ? (job.estimate_number || newDocNumber) : (job.estimate_number || ""),
+  invoice_number: docType === "invoice" ? newDocNumber : (job.invoice_number || ""),
+  status: docType === "invoice" ? "Done" : "Quote Sent",
+  quote_assigned_to: dom.completedBy.value || (job.quote_assigned_to || ""),
+  sent_quote_number: docType === "estimate" ? newDocNumber : (job.sent_quote_number || "")
+}); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
  
