@@ -103,6 +103,9 @@ class DocumentsStore:
             self.repo_data_dir / "documents",
             self.project_root / "data" / "documents",
             self.project_root.parent / "data" / "documents",
+            Path("/var/data") / "documents",
+            Path("/var/data") / "data" / "documents",
+            Path("/opt/render/project/src/data") / "documents",
         ]
         out: List[Path] = []
         seen = set()
@@ -126,6 +129,9 @@ class DocumentsStore:
             self.repo_data_dir / "documents_index.json",
             self.project_root / "data" / "documents_index.json",
             self.project_root.parent / "data" / "documents_index.json",
+            Path("/var/data") / "documents_index.json",
+            Path("/var/data") / "data" / "documents_index.json",
+            Path("/opt/render/project/src/data") / "documents_index.json",
         ]
         out: List[Path] = []
         seen = set()
@@ -203,14 +209,52 @@ class DocumentsStore:
             "_recovered_from_pdf": True,
         }
 
+    def _item_richness(self, item: Dict[str, Any]) -> int:
+        if not isinstance(item, dict):
+            return 0
+        score = 0
+        important = [
+            "completed_by", "tax_rate", "terms", "items", "work", "labor", "parts",
+            "customer", "address", "ship_to", "po_number", "job_number", "job_id",
+            "date", "created_at", "updated_at"
+        ]
+        for k in important:
+            v = item.get(k)
+            if v not in (None, "", [], {}):
+                score += 3 if k in {"completed_by", "tax_rate", "terms", "items", "work"} else 1
+        if item.get("_recovered_from_pdf"):
+            score -= 25
+        return score
+
     def _merge_item(self, existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
-        merged = dict(existing or {})
-        for k, v in (incoming or {}).items():
-            if k not in merged or merged.get(k) in (None, "", [], {}):
-                merged[k] = v
-        if incoming.get("path") and Path(str(incoming.get("path"))).exists():
-            merged["path"] = str(incoming.get("path"))
-        return merged
+        existing = dict(existing or {})
+        incoming = dict(incoming or {})
+
+        # Critical: PDF-only recovery rows are placeholders. They must NEVER wipe out
+        # rich metadata from documents_index.json such as completed_by, tax_rate, terms,
+        # line items, work scope, customer, or job linkage.
+        existing_rich = self._item_richness(existing)
+        incoming_rich = self._item_richness(incoming)
+
+        base = dict(incoming if incoming_rich > existing_rich else existing)
+        filler = existing if incoming_rich > existing_rich else incoming
+
+        for k, v in filler.items():
+            if base.get(k) in (None, "", [], {}) and v not in (None, "", [], {}):
+                base[k] = v
+
+        # Prefer whichever path actually exists, but do not change business metadata.
+        for source in (incoming, existing):
+            p = source.get("path")
+            if p and Path(str(p)).exists():
+                base["path"] = str(p)
+                break
+
+        # If either side is rich, remove the recovered flag.
+        if self._item_richness(base) > 0 and not (base.get("completed_by") in (None, "") and base.get("terms") in (None, "") and not base.get("items")):
+            base.pop("_recovered_from_pdf", None)
+
+        return base
 
     def _sync_missing_pdfs_to_primary_dir(self) -> None:
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -309,6 +353,14 @@ class DocumentsStore:
         return reconciled
 
     def _save(self, data: Dict[str, Any]) -> None:
+        current = _read_json(self.index_path, {})
+        if isinstance(current, dict) and current.get("items"):
+            backup = self.index_path.with_suffix(".backup.json")
+            if not backup.exists():
+                try:
+                    _write_json(backup, current)
+                except Exception:
+                    pass
         _write_json(self.index_path, self._normalize_index(data))
 
     def debug_info(self) -> Dict[str, Any]:
