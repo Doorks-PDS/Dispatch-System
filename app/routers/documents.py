@@ -29,6 +29,7 @@ class DocCreate(BaseModel):
     number: str = ""
     po_number: str = ""
     invoice_number: str = ""
+    estimate_number: str = ""
     job_number: str = ""
     tax_rate: float = 0.0
     terms: str = ""
@@ -319,7 +320,6 @@ def _invoice_summary(tech_notes: str, parts_used: str = "") -> List[str]:
         if not any(part_text.lower() in line.lower() for line in selected):
             selected.insert(0, f"{'Technicians' if False else 'Technician'} installed {part_text}.")
 
-    # Always keep invoice concise.
     if not any("clean" in line.lower() for line in selected):
         selected.append("Tested operation and cleaned up work area.")
 
@@ -351,7 +351,6 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
         lines.append("********JOB COMPLETE*********")
         return " ".join(line for line in lines if line).strip()
 
-    # Estimates: recommendation/quote forms first; dispatch/job notes only as last fallback.
     preferred_source = form_recs or form_tech_notes or payload_notes or office_notes or job_notes
 
     title = _proposal_title(data, form)
@@ -424,6 +423,15 @@ def list_documents(
     return {"ok": True, "items": items}
 
 
+@router.get("/debug")
+def debug_documents(request: Request, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    store = _store(request)
+    if not hasattr(store, "debug_info"):
+        return {"ok": False, "detail": "debug_info unavailable"}
+    return {"ok": True, "debug": store.debug_info()}
+
+
 @router.post("/estimate")
 def create_estimate(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
@@ -465,11 +473,12 @@ def delete_document(request: Request, filename: str, x_api_key: Optional[str] = 
 @router.get("/download/{filename}")
 def download_document(request: Request, filename: str, x_api_key: Optional[str] = Header(default=None), inline: bool = Query(default=False)):
     _require(request, x_api_key)
-    path = request.app.state.documents_store.dir / filename
-    if not path.exists():
+    try:
+        path = request.app.state.documents_store.resolve_path(filename)
+    except Exception:
         raise HTTPException(status_code=404, detail="Document not found")
-    headers = {"Content-Disposition": f"inline; filename=\"{filename}\""} if inline else None
-    return FileResponse(path=str(path), media_type="application/pdf", filename=None if inline else filename, headers=headers)
+    headers = {"Content-Disposition": f"inline; filename=\"{Path(filename).name}\""} if inline else None
+    return FileResponse(path=str(path), media_type="application/pdf", filename=None if inline else Path(filename).name, headers=headers)
 
 
 @router.post("/signoff")
@@ -479,7 +488,7 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
     from datetime import datetime
-    import io, base64, json
+    import io, base64
 
     store = _store(request)
     number = (payload.job_number or datetime.now().strftime("SIGNOFF-%Y%m%d-%H%M%S")).strip()

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from app.services.storage import bootstrap_data_dir, bootstrap_data_file
+from app.services.storage import bootstrap_data_dir, bootstrap_data_file, get_repo_data_dir, get_writable_data_dir
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase.pdfmetrics import stringWidth
@@ -25,9 +28,25 @@ def _read_json(path: Path, default: Any) -> Any:
         return default
 
 
-def _write_json(path: Path, obj: Any) -> None:
+def _atomic_write_text(path: Path, text: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(obj, indent=2, ensure_ascii=False), encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(text)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    finally:
+        try:
+            if os.path.exists(tmp_name):
+                os.remove(tmp_name)
+        except Exception:
+            pass
+
+
+def _write_json(path: Path, obj: Any) -> None:
+    _atomic_write_text(path, json.dumps(obj, indent=2, ensure_ascii=False))
 
 
 def _safe_float(value: Any) -> float:
@@ -62,41 +81,257 @@ def _wrap_text(text: str, font_name: str, font_size: int, max_width: float) -> L
 class DocumentsStore:
     def __init__(self, project_root: Path | str):
         self.project_root = Path(project_root)
+        self.repo_data_dir = get_repo_data_dir(self.project_root)
+        self.data_dir = get_writable_data_dir(self.project_root)
         self.dir = bootstrap_data_dir(self.project_root, "documents")
         self.index_path = bootstrap_data_file(self.project_root, "documents_index.json")
         self.dir.mkdir(parents=True, exist_ok=True)
         self._ensure()
 
-    def _ensure(self):
-        base = {
-            "version": 4,
+    def _base(self) -> Dict[str, Any]:
+        return {
+            "version": 5,
             "estimate_next": 1,
             "invoice_next": 1,
             "items": [],
         }
-        cur = _read_json(self.index_path, base)
-        if not isinstance(cur, dict):
-            cur = base
+
+    def _candidate_document_dirs(self) -> List[Path]:
+        candidates = [
+            self.dir,
+            self.data_dir / "documents",
+            self.repo_data_dir / "documents",
+            self.project_root / "data" / "documents",
+            self.project_root.parent / "data" / "documents",
+        ]
+        out: List[Path] = []
+        seen = set()
+        for p in candidates:
+            try:
+                rp = p.resolve()
+            except Exception:
+                rp = p
+            key = str(rp)
+            if key in seen:
+                continue
+            seen.add(key)
+            if p.exists() and p.is_dir():
+                out.append(p)
+        return out
+
+    def _candidate_index_paths(self) -> List[Path]:
+        candidates = [
+            self.index_path,
+            self.data_dir / "documents_index.json",
+            self.repo_data_dir / "documents_index.json",
+            self.project_root / "data" / "documents_index.json",
+            self.project_root.parent / "data" / "documents_index.json",
+        ]
+        out: List[Path] = []
+        seen = set()
+        for p in candidates:
+            try:
+                rp = p.resolve()
+            except Exception:
+                rp = p
+            key = str(rp)
+            if key in seen:
+                continue
+            seen.add(key)
+            if p.exists():
+                out.append(p)
+        return out
+
+    def _normalize_index(self, data: Any) -> Dict[str, Any]:
+        base = self._base()
+        if not isinstance(data, dict):
+            data = dict(base)
         for k, v in base.items():
-            cur.setdefault(k, v)
-        if not isinstance(cur.get("items"), list):
-            cur["items"] = []
+            data.setdefault(k, v)
+        if not isinstance(data.get("items"), list):
+            data["items"] = []
+        try:
+            data["estimate_next"] = max(1, int(data.get("estimate_next") or 1))
+        except Exception:
+            data["estimate_next"] = 1
+        try:
+            data["invoice_next"] = max(1, int(data.get("invoice_next") or 1))
+        except Exception:
+            data["invoice_next"] = 1
+        return data
+
+    def _number_type_from_filename(self, filename: str) -> tuple[str, str]:
+        stem = Path(filename).stem
+        upper = stem.upper()
+        if upper.startswith("JS"):
+            return "invoice", stem
+        if upper.startswith("RE"):
+            return "estimate", stem
+        if upper.startswith("SIGNOFF"):
+            return "signoff", stem
+        return "estimate", stem
+
+    def _minimal_item_for_pdf(self, pdf: Path) -> Dict[str, Any]:
+        doc_type, number = self._number_type_from_filename(pdf.name)
+        try:
+            created = datetime.fromtimestamp(pdf.stat().st_mtime, timezone.utc).isoformat()
+        except Exception:
+            created = _now_iso()
+        return {
+            "type": doc_type,
+            "number": number,
+            "filename": pdf.name,
+            "path": str(pdf),
+            "job_id": "",
+            "customer": "",
+            "address": "",
+            "ship_to": "",
+            "po_number": "",
+            "job_number": "",
+            "invoice_number": number if doc_type == "invoice" else "",
+            "estimate_number": number if doc_type == "estimate" else "",
+            "completed_by": "",
+            "tax_rate": 0.0,
+            "terms": "",
+            "items": [],
+            "work": "",
+            "labor": "",
+            "parts": "",
+            "date": "",
+            "created_at": created,
+            "updated_at": created,
+            "_recovered_from_pdf": True,
+        }
+
+    def _merge_item(self, existing: Dict[str, Any], incoming: Dict[str, Any]) -> Dict[str, Any]:
+        merged = dict(existing or {})
+        for k, v in (incoming or {}).items():
+            if k not in merged or merged.get(k) in (None, "", [], {}):
+                merged[k] = v
+        if incoming.get("path") and Path(str(incoming.get("path"))).exists():
+            merged["path"] = str(incoming.get("path"))
+        return merged
+
+    def _sync_missing_pdfs_to_primary_dir(self) -> None:
+        self.dir.mkdir(parents=True, exist_ok=True)
+        for d in self._candidate_document_dirs():
+            if d == self.dir:
+                continue
+            for pdf in d.glob("*.pdf"):
+                dest = self.dir / pdf.name
+                if dest.exists():
+                    continue
+                try:
+                    shutil.copy2(pdf, dest)
+                except Exception:
+                    pass
+
+    def _reconcile(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        data = self._normalize_index(data)
+
+        # Merge items from any discovered index file so an older index/path does not make the UI look empty.
+        by_filename: Dict[str, Dict[str, Any]] = {}
+        for item in data.get("items", []):
+            if isinstance(item, dict) and str(item.get("filename") or "").strip():
+                by_filename[str(item.get("filename")).strip()] = dict(item)
+
+        for idx_path in self._candidate_index_paths():
+            if idx_path == self.index_path:
+                continue
+            other = self._normalize_index(_read_json(idx_path, {}))
+            for item in other.get("items", []):
+                if not isinstance(item, dict):
+                    continue
+                filename = str(item.get("filename") or "").strip()
+                if not filename:
+                    continue
+                by_filename[filename] = self._merge_item(by_filename.get(filename, {}), item)
+            try:
+                data["estimate_next"] = max(int(data.get("estimate_next", 1)), int(other.get("estimate_next", 1)))
+                data["invoice_next"] = max(int(data.get("invoice_next", 1)), int(other.get("invoice_next", 1)))
+            except Exception:
+                pass
+
+        # Copy PDFs from old/current candidate folders into the primary Render-backed documents dir.
+        self._sync_missing_pdfs_to_primary_dir()
+
+        # Add PDFs that exist on disk but are missing from index.
+        for d in self._candidate_document_dirs():
+            for pdf in d.glob("*.pdf"):
+                item = self._minimal_item_for_pdf(pdf)
+                by_filename[pdf.name] = self._merge_item(by_filename.get(pdf.name, {}), item)
+
+        # Make paths point to the primary dir whenever that PDF exists there.
+        for filename, item in list(by_filename.items()):
+            primary = self.dir / filename
+            if primary.exists():
+                item["path"] = str(primary)
+            elif item.get("path") and not Path(str(item.get("path"))).exists():
+                # Last resort: find by filename in candidate dirs.
+                for d in self._candidate_document_dirs():
+                    p = d / filename
+                    if p.exists():
+                        item["path"] = str(p)
+                        break
+
+        data["items"] = list(by_filename.values())
+
+        # Bump next counters above existing saved numbers so newly generated docs don't collide.
+        max_re = 0
+        max_js = 0
+        for item in data["items"]:
+            number = str(item.get("number") or Path(str(item.get("filename") or "")).stem).upper()
+            if number.startswith("RE"):
+                try:
+                    max_re = max(max_re, int(number[2:]))
+                except Exception:
+                    pass
+            if number.startswith("JS"):
+                try:
+                    max_js = max(max_js, int(number[2:]))
+                except Exception:
+                    pass
+        data["estimate_next"] = max(int(data.get("estimate_next") or 1), max_re + 1)
+        data["invoice_next"] = max(int(data.get("invoice_next") or 1), max_js + 1)
+        data["version"] = max(int(data.get("version") or 0), 5)
+        return data
+
+    def _ensure(self):
+        cur = self._normalize_index(_read_json(self.index_path, self._base()))
+        cur = self._reconcile(cur)
         _write_json(self.index_path, cur)
 
     def _load(self) -> Dict[str, Any]:
-        self._ensure()
-        data = _read_json(self.index_path, {})
-        if not isinstance(data, dict):
-            data = {}
-        data.setdefault("estimate_next", 1)
-        data.setdefault("invoice_next", 1)
-        data.setdefault("items", [])
-        if not isinstance(data["items"], list):
-            data["items"] = []
-        return data
+        data = self._normalize_index(_read_json(self.index_path, self._base()))
+        reconciled = self._reconcile(data)
+        # Save after reconcile so recovered PDFs/index rows stay visible.
+        _write_json(self.index_path, reconciled)
+        return reconciled
 
     def _save(self, data: Dict[str, Any]) -> None:
-        _write_json(self.index_path, data)
+        _write_json(self.index_path, self._normalize_index(data))
+
+    def debug_info(self) -> Dict[str, Any]:
+        data = self._load()
+        dirs = []
+        for d in self._candidate_document_dirs():
+            try:
+                pdfs = sorted(p.name for p in d.glob("*.pdf"))
+            except Exception:
+                pdfs = []
+            dirs.append({"path": str(d), "exists": d.exists(), "pdf_count": len(pdfs), "sample": pdfs[:20]})
+        indexes = []
+        for p in self._candidate_index_paths():
+            indexes.append({"path": str(p), "exists": p.exists(), "size": p.stat().st_size if p.exists() else 0})
+        return {
+            "primary_dir": str(self.dir),
+            "index_path": str(self.index_path),
+            "indexed_count": len(data.get("items", [])),
+            "estimate_next": data.get("estimate_next"),
+            "invoice_next": data.get("invoice_next"),
+            "candidate_dirs": dirs,
+            "candidate_indexes": indexes,
+        }
 
     def _next_number(self, doc_type: str) -> str:
         data = self._load()
@@ -132,6 +367,22 @@ class DocumentsStore:
             if str(item.get("filename") or "") == str(filename):
                 return item
         return None
+
+    def resolve_path(self, filename: str) -> Path:
+        safe = Path(str(filename or "")).name
+        item = self.get_document(safe)
+        if item and item.get("path"):
+            p = Path(str(item.get("path")))
+            if p.exists():
+                return p
+        p = self.dir / safe
+        if p.exists():
+            return p
+        for d in self._candidate_document_dirs():
+            candidate = d / safe
+            if candidate.exists():
+                return candidate
+        raise FileNotFoundError(safe)
 
     def _write_box(self, c: canvas.Canvas, x: float, y_top: float, w: float, h: float, title: str) -> None:
         c.setStrokeColor(colors.HexColor("#d1d5db"))
@@ -324,6 +575,7 @@ class DocumentsStore:
             "po_number": str(payload.get("po_number") or ""),
             "job_number": str(payload.get("job_number") or ""),
             "invoice_number": str(payload.get("invoice_number") or ""),
+            "estimate_number": number if doc_type == "estimate" else str(payload.get("estimate_number") or ""),
             "completed_by": str(payload.get("completed_by") or ""),
             "tax_rate": float(payload.get("tax_rate") or 0.0),
             "terms": str(payload.get("terms") or ""),
