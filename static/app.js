@@ -947,24 +947,6 @@
     await fetchJSON(`/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
   }
 
-  async function apiListDocumentApprovals() {
-    const data = await fetchJSON("/document-approvals");
-    return (data.approvals && data.approvals.items) || {};
-  }
-
-  async function apiSetDocumentApproval(key, payload) {
-    const data = await fetchJSON(`/document-approvals/${encodeURIComponent(key)}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload || {}),
-    });
-    return data.approval || {};
-  }
-
-  function documentApprovalKey(doc) {
-    return cleanDocRef(doc && (doc.number || doc.estimate_number || doc.estimate_no || doc.filename || "")) || String(doc && doc.filename || "").trim();
-  }
-
 
   async function apiGetPricing() {
     return await fetchJSON("/pricing");
@@ -5746,7 +5728,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     async function renderEstimatorTab() {
       body.innerHTML = "";
       const { month, monthJobs, monthDocs } = await loadData();
-      const docApprovals = await apiListDocumentApprovals().catch(() => ({}));
       monthText.textContent = monthPretty(currentMonth);
       nextBtn.disabled = month >= monthKey(new Date());
 
@@ -5771,10 +5752,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             || (docJobNumber && String(j.job_number || "").trim() === docJobNumber);
         }) || null;
 
-        const approvalKey = documentApprovalKey(d);
-        const docApproval = approvalKey ? docApprovals[approvalKey] : null;
-        const hasDocApproval = !!docApproval && Object.prototype.hasOwnProperty.call(docApproval, "approved");
-        const isApproved = hasDocApproval ? !!docApproval.approved : !!(
+        const isApproved = !!(
           (estimateNo && approvedEstimateNumbers.has(estimateNo)) ||
           (docJobId && approvedJobIds.has(docJobId)) ||
           (docJobNumber && approvedJobNumbers.has(docJobNumber)) ||
@@ -5784,8 +5762,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         estimateDetailsByEmployee[who].push({
           ...d,
           __estimateNo: estimateNo,
-          __approvalKey: approvalKey,
-          __docApproval: docApproval,
           __approved: isApproved,
           __linkedJob: linkedJob
         });
@@ -5856,53 +5832,42 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 <div class="jobrow-addr">${escapeHtml(customer || "")}${jobNo ? ` - Job #${escapeHtml(jobNo)}` : ""}</div>
                 <div class="hint" style="margin-top:6px;">${escapeHtml(docDate || "")}</div>
               `;
-              const actions = document.createElement("div");
-              actions.style.display = "flex";
-              actions.style.gap = "8px";
-              actions.style.flexWrap = "wrap";
-              actions.style.marginTop = "8px";
-
               if (linkedJob) {
+                const actions = document.createElement("div");
+                actions.style.display = "flex";
+                actions.style.gap = "8px";
+                actions.style.flexWrap = "wrap";
+                actions.style.marginTop = "8px";
+
                 const openBtn = document.createElement("button");
                 openBtn.className = "btn";
                 openBtn.textContent = "Open Job";
                 openBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
-                actions.appendChild(openBtn);
-                item.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
-              }
 
-              const approvalBtn = document.createElement("button");
-              approvalBtn.className = d.__approved ? "btn" : "btn btn-orange";
-              approvalBtn.textContent = d.__approved ? "Mark Not Approved" : "Mark Approved";
-              approvalBtn.addEventListener("click", async (ev) => {
-                ev.stopPropagation();
-                try {
-                  const nextApproved = !d.__approved;
-                  if (linkedJob) {
+                const approvalBtn = document.createElement("button");
+                approvalBtn.className = d.__approved ? "btn" : "btn btn-orange";
+                approvalBtn.textContent = d.__approved ? "Mark Not Approved" : "Mark Approved";
+                approvalBtn.addEventListener("click", async (ev) => {
+                  ev.stopPropagation();
+                  try {
+                    const nextApproved = !d.__approved;
                     const savedJob = await apiUpdateJob(linkedJob.id, {
                       approved: nextApproved,
                       approved_at: nextApproved ? new Date().toISOString() : ""
                     });
+                    d.__approved = nextApproved;
                     d.__linkedJob = savedJob || linkedJob;
+                    await renderEstimatorTab();
+                  } catch (e) {
+                    alert(e.message || String(e));
                   }
-                  const approvalKey = d.__approvalKey || documentApprovalKey(d);
-                  if (approvalKey) {
-                    await apiSetDocumentApproval(approvalKey, {
-                      approved: nextApproved,
-                      approved_at: nextApproved ? new Date().toISOString() : "",
-                      estimate_number: d.__estimateNo || d.number || d.estimate_number || "",
-                      filename: d.filename || "",
-                      customer: customer || ""
-                    });
-                  }
-                  d.__approved = nextApproved;
-                  await renderEstimatorTab();
-                } catch (e) {
-                  alert(e.message || String(e));
-                }
-              });
-              actions.appendChild(approvalBtn);
-              item.appendChild(actions);
+                });
+
+                actions.appendChild(openBtn);
+                actions.appendChild(approvalBtn);
+                item.appendChild(actions);
+                item.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
+              }
               inline.appendChild(item);
             });
           };
