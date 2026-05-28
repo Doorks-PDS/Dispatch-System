@@ -11,11 +11,6 @@ from reportlab.lib.pagesizes import letter
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
 
-try:
-    from pypdf import PdfReader
-except Exception:  # pragma: no cover
-    PdfReader = None
-
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -117,45 +112,6 @@ class DocumentsStore:
             return f"JS{n:05d}"
         raise ValueError("Unknown doc_type")
 
-
-    def _pdf_text_for_item(self, item: Dict[str, Any]) -> str:
-        if PdfReader is None:
-            return ""
-        candidates = []
-        raw_path = str(item.get("path") or "").strip()
-        if raw_path:
-            candidates.append(Path(raw_path))
-        filename = str(item.get("filename") or "").strip()
-        if filename:
-            candidates.append(self.dir / filename)
-        for path in candidates:
-            try:
-                if path.exists() and path.is_file():
-                    reader = PdfReader(str(path))
-                    return "\n".join((page.extract_text() or "") for page in reader.pages[:2])
-            except Exception:
-                continue
-        return ""
-
-    def _enrich_item_metadata(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        """Recover missing older document metadata from the saved PDF when possible."""
-        if not isinstance(item, dict):
-            return item
-        needs = not str(item.get("completed_by") or "").strip()
-        if not needs:
-            return item
-        text = self._pdf_text_for_item(item)
-        if not text:
-            return item
-        m = re.search(r"Prepared\s+By:\s*([^\n\r]+)", text, re.IGNORECASE)
-        if m:
-            value = m.group(1).strip()
-            value = re.split(r"\s{2,}|PO\s*#|Customer|Work\s+Scope", value)[0].strip(" :-")
-            if value:
-                item = dict(item)
-                item["completed_by"] = value
-        return item
-
     def list_documents(self, job_id: str = "") -> List[Dict[str, Any]]:
         data = self._load()
         items = data.get("items", [])
@@ -167,14 +123,14 @@ class DocumentsStore:
                 continue
             if job_id and str(item.get("job_id") or "") != str(job_id):
                 continue
-            out.append(self._enrich_item_metadata(item))
+            out.append(item)
         out.sort(key=lambda x: str(x.get("created_at") or ""), reverse=True)
         return out
 
     def get_document(self, filename: str) -> Optional[Dict[str, Any]]:
         for item in self._load().get("items", []):
             if str(item.get("filename") or "") == str(filename):
-                return self._enrich_item_metadata(item)
+                return item
         return None
 
     def _write_box(self, c: canvas.Canvas, x: float, y_top: float, w: float, h: float, title: str) -> None:
