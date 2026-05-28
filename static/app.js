@@ -8530,6 +8530,7 @@ function renderSaddlebackView() {
       "Software / Subscriptions",
       "Tools / Equipment",
       "Utilities",
+      "Vehicle",
       "Other Expense"
     ];
     const sdcPurchaseCategories = [
@@ -8586,8 +8587,31 @@ function renderSaddlebackView() {
 
     function exportSdcRows(filename, headers, rows) {
       const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-      const csv = [headers, ...(Array.isArray(rows) ? rows : [])].map(row => row.map(esc).join(",")).join("\n");
-      downloadCsv(filename, csv);
+      const csv = [headers, ...(Array.isArray(rows) ? rows : [])].map(row => row.map(esc).join(",")).join("\r\n");
+      const safeName = filename || "saddleback_export.csv";
+      try {
+        const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = safeName;
+        a.style.display = "none";
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          try { document.body.removeChild(a); } catch (e) {}
+          try { URL.revokeObjectURL(url); } catch (e) {}
+        }, 1000);
+      } catch (err) {
+        console.warn("Saddleback CSV export fallback", err);
+        const encoded = encodeURIComponent("\ufeff" + csv);
+        const a = document.createElement("a");
+        a.href = "data:text/csv;charset=utf-8," + encoded;
+        a.download = safeName;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
     }
 
     function recordCard(title, subtitle, meta = "", onOpen = null, onDelete = null, badgeText = "") {
@@ -8906,6 +8930,7 @@ function renderSaddlebackView() {
       addBtn.textContent = "Add Order";
       addBtn.addEventListener("click", () => openOrderEditor());
       const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
       exportBtn.className = "btn";
       exportBtn.textContent = "Export Orders CSV";
       exportBtn.addEventListener("click", () => {
@@ -8999,6 +9024,7 @@ function renderSaddlebackView() {
       addBtn.textContent = "Add Expense";
       addBtn.addEventListener("click", () => openExpenseEditor());
       const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
       exportBtn.className = "btn";
       exportBtn.textContent = "Export Expenses CSV";
       exportBtn.addEventListener("click", () => {
@@ -9051,6 +9077,7 @@ function renderSaddlebackView() {
       addBtn.textContent = "Add Purchase";
       addBtn.addEventListener("click", () => openPurchaseEditor());
       const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
       exportBtn.className = "btn";
       exportBtn.textContent = "Export Purchases CSV";
       exportBtn.addEventListener("click", () => {
@@ -9095,6 +9122,7 @@ function renderSaddlebackView() {
       exportRow.style.gap = "8px";
       exportRow.style.marginBottom = "12px";
       const exportBtn = document.createElement("button");
+      exportBtn.type = "button";
       exportBtn.className = "btn";
       exportBtn.textContent = "Export Tax Snapshot CSV";
       exportRow.appendChild(exportBtn);
