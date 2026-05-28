@@ -26,6 +26,10 @@ except Exception:
 try:
     from app.services.forms_library import get_form_path as _get_form_path  # type: ignore
 except Exception:
+    try:
+        from app.services.forms_library import resolve_form_path as _resolve_form_path  # type: ignore
+    except Exception:
+        _resolve_form_path = None  # type: ignore
     _get_form_path = None  # type: ignore
 
 from app.services.calendar_store import CalendarStore
@@ -60,6 +64,8 @@ from app.services.saddleback_store import SaddlebackStore
 from app.routers.saddleback import router as saddleback_router
 from app.services.shared_settings_store import SharedSettingsStore
 from app.routers.shared_settings import router as shared_settings_router
+from app.services.document_approvals_store import DocumentApprovalsStore
+from app.routers.document_approvals import router as document_approvals_router
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -139,6 +145,7 @@ def list_forms(project_root: Path) -> List[Dict[str, Any]]:
                 "description": "",
                 "tags": [],
                 "download_url": f"/forms/download/{fid}",
+                    "open_url": f"/forms/download/{fid}?inline=1",
             }
         )
     return out
@@ -148,13 +155,23 @@ def resolve_form_file(form_id: str) -> Tuple[Path, str]:
     if _get_form_path is not None:
         fp = _get_form_path(form_id, str(PROJECT_ROOT))
         p = Path(fp)
-        if not p.exists():
-            raise HTTPException(status_code=404, detail="Form not found")
-        return p, p.name
+        if p.exists():
+            return p, p.name
 
+    resolver = globals().get("_resolve_form_path")
+    if resolver is not None:
+        try:
+            p = resolver(str(PROJECT_ROOT), form_id)
+            if p and Path(p).exists():
+                p = Path(p)
+                return p, p.name
+        except Exception:
+            pass
+
+    wanted = str(form_id or "").lower().replace(" ", "_").replace("-", "_")
     for c in FORMS_DIR.glob("*.pdf"):
         fid = c.stem.lower().replace(" ", "_").replace("-", "_")
-        if fid == form_id.lower():
+        if fid == wanted:
             return c, c.name
     raise HTTPException(status_code=404, detail="Form not found")
 
@@ -177,6 +194,7 @@ app.state.users_store = UsersStore(PROJECT_ROOT)
 app.state.address_store = AddressStore(PROJECT_ROOT)
 app.state.saddleback_store = SaddlebackStore(PROJECT_ROOT)
 app.state.shared_settings_store = SharedSettingsStore(PROJECT_ROOT)
+app.state.document_approvals_store = DocumentApprovalsStore(PROJECT_ROOT)
 app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -194,6 +212,7 @@ app.include_router(admin_router)
 app.include_router(addresses_router)
 app.include_router(saddleback_router)
 app.include_router(shared_settings_router)
+app.include_router(document_approvals_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
@@ -266,10 +285,11 @@ def forms(_: Request, x_api_key: Optional[str] = Header(default=None)):
 
 
 @app.get("/forms/download/{form_id}")
-def forms_download(_: Request, form_id: str, x_api_key: Optional[str] = Header(default=None)):
+def forms_download(_: Request, form_id: str, x_api_key: Optional[str] = Header(default=None), inline: bool = Query(default=False)):
     require_key(x_api_key, request=_)
     fp, filename = resolve_form_file(form_id)
-    return FileResponse(path=str(fp), media_type="application/pdf", filename=filename)
+    headers = {"Content-Disposition": f"inline; filename=\"{filename}\""} if inline else None
+    return FileResponse(path=str(fp), media_type="application/pdf", filename=None if inline else filename, headers=headers)
 
 
 @app.post("/media/upload")

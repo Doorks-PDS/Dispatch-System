@@ -12,16 +12,12 @@ def _store(request: Request):
     return request.app.state.document_approvals_store
 
 
-def _require(request: Request, x_api_key: Optional[str]):
-    return request.app.state.require_key(x_api_key, request)
+def _require(request: Request, x_api_key: Optional[str]) -> str:
+    return str(request.app.state.require_key(x_api_key, request) or "")
 
 
-def _auth_role(request: Request) -> str:
-    return str(getattr(request.state, "auth_role", "") or "")
-
-
-def _can_write(request: Request) -> bool:
-    return _auth_role(request) in {"admin", "office_admin", "office", "lead"}
+def _can_write(role: str) -> bool:
+    return str(role or "") in {"admin", "office_admin", "office", "lead"}
 
 
 class ApprovalPayload(BaseModel):
@@ -40,8 +36,8 @@ def get_document_approvals(request: Request, x_api_key: Optional[str] = Header(d
 
 @router.put("/{key}")
 def set_document_approval(key: str, request: Request, payload: ApprovalPayload, x_api_key: Optional[str] = Header(default=None)):
-    _require(request, x_api_key)
-    if not _can_write(request):
+    role = _require(request, x_api_key)
+    if not _can_write(role):
         raise HTTPException(status_code=403, detail="Only office/admin/lead users can update estimate approval status")
     try:
         return {"ok": True, "approval": _store(request).set_approval(key, payload.dict())}

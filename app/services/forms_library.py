@@ -67,6 +67,7 @@ def list_forms(project_root: str) -> List[Dict]:
             "description": f.description,
             "tags": f.tags,
             "download_url": f"/forms/download/{f.id}",
+            "open_url": f"/forms/download/{f.id}?inline=1",
         }
         for f in FORMS
     ]

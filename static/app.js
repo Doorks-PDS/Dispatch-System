@@ -948,6 +948,30 @@
   }
 
 
+  async function apiListDocumentApprovals() {
+    const data = await fetchJSON("/document-approvals");
+    const approvals = data.approvals || {};
+    return approvals.items || {};
+  }
+
+  async function apiSetDocumentApproval(key, payload) {
+    const data = await fetchJSON(`/document-approvals/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload || {}),
+    });
+    return data.approval || data;
+  }
+
+  function documentApprovalKey(doc) {
+    const number = cleanDocRef(doc?.number || doc?.estimate_number || doc?.estimate_no || "");
+    if (number) return `estimate:${number}`;
+    const filename = String(doc?.filename || "").trim();
+    if (filename) return `file:${filename}`;
+    return `doc:${String(doc?.id || doc?.created_at || Math.random()).trim()}`;
+  }
+
+
   async function apiGetPricing() {
     return await fetchJSON("/pricing");
   }
@@ -1189,6 +1213,7 @@ async function apiListForms() {
   }
  
   async function downloadFile(url, filename) {
+    if (!url) throw new Error("Missing download URL");
     const r = await fetch(url, { credentials: "same-origin" });
     if (!r.ok) throw new Error(`Download failed (${r.status})`);
     const blob = await r.blob();
@@ -1199,7 +1224,19 @@ async function apiListForms() {
     document.body.appendChild(a);
     a.click();
     a.remove();
-    URL.revokeObjectURL(u);
+    setTimeout(() => URL.revokeObjectURL(u), 1500);
+  }
+
+  function openFileUrl(url) {
+    if (!url) {
+      alert("File link is missing.");
+      return;
+    }
+    try {
+      window.open(url, "_blank", "noopener,noreferrer");
+    } catch (e) {
+      window.location.href = url;
+    }
   }
  
   async function apiAuthMe() {
@@ -4522,8 +4559,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const btn = document.createElement("button");
         btn.className = "btn";
         btn.textContent = "Open / Download";
-        btn.addEventListener("click", async () => {
-          await downloadFile(f.download_url, `${(f.title || f.id || "form")}.pdf`);
+        btn.addEventListener("click", () => {
+          const url = f.open_url || `${f.download_url || ""}${String(f.download_url || "").includes("?") ? "&" : "?"}inline=1`;
+          openFileUrl(url);
         });
  
         top.appendChild(name);
@@ -5326,8 +5364,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     async function loadData() {
       await ensureSharedSettingsLoaded();
       const month = monthKey(currentMonth);
-      const [jobs, timecards, docs] = await Promise.all([apiListJobs({ limit: 5000 }).catch(() => []), apiListTimecards({ limit: 5000 }).catch(() => []), apiListDocuments().catch(() => [])]);
-      return { month, monthJobs: jobs.filter(j => String(j.date || j.created_at || "").startsWith(month)), monthTimecards: timecards.filter(t => String(t.date || t.created_at || "").startsWith(month)), monthDocs: docs.filter(d => String(d.created_at || "").startsWith(month)) };
+      const [jobs, timecards, docs, documentApprovals] = await Promise.all([
+        apiListJobs({ limit: 5000 }).catch(() => []),
+        apiListTimecards({ limit: 5000 }).catch(() => []),
+        apiListDocuments().catch(() => []),
+        apiListDocumentApprovals().catch(() => ({})),
+      ]);
+      return {
+        month,
+        monthJobs: jobs.filter(j => String(j.date || j.created_at || "").startsWith(month)),
+        monthTimecards: timecards.filter(t => String(t.date || t.created_at || "").startsWith(month)),
+        monthDocs: docs.filter(d => String(d.created_at || "").startsWith(month)),
+        documentApprovals: documentApprovals || {},
+      };
     }
 
     async function resolveDataCenterJob(ref) {
@@ -5727,7 +5776,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
     async function renderEstimatorTab() {
       body.innerHTML = "";
-      const { month, monthJobs, monthDocs } = await loadData();
+      const { month, monthJobs, monthDocs, documentApprovals } = await loadData();
       monthText.textContent = monthPretty(currentMonth);
       nextBtn.disabled = month >= monthKey(new Date());
 
@@ -5752,17 +5801,23 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             || (docJobNumber && String(j.job_number || "").trim() === docJobNumber);
         }) || null;
 
-        const isApproved = !!(
+        const approvalKey = documentApprovalKey(d);
+        const approvalOverride = (documentApprovals && documentApprovals[approvalKey]) || null;
+        const isApprovedFromJob = !!(
           (estimateNo && approvedEstimateNumbers.has(estimateNo)) ||
           (docJobId && approvedJobIds.has(docJobId)) ||
           (docJobNumber && approvedJobNumbers.has(docJobNumber)) ||
           (linkedJob && isApprovedEstimateJob(linkedJob, month))
         );
+        const hasStandaloneOverride = approvalOverride && Object.prototype.hasOwnProperty.call(approvalOverride, "approved");
+        const isApproved = hasStandaloneOverride ? !!approvalOverride.approved : isApprovedFromJob;
 
         estimateDetailsByEmployee[who].push({
           ...d,
           __estimateNo: estimateNo,
           __approved: isApproved,
+          __approvalKey: approvalKey,
+          __approvalOverride: approvalOverride,
           __linkedJob: linkedJob
         });
       });
@@ -5832,42 +5887,52 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 <div class="jobrow-addr">${escapeHtml(customer || "")}${jobNo ? ` - Job #${escapeHtml(jobNo)}` : ""}</div>
                 <div class="hint" style="margin-top:6px;">${escapeHtml(docDate || "")}</div>
               `;
-              if (linkedJob) {
-                const actions = document.createElement("div");
-                actions.style.display = "flex";
-                actions.style.gap = "8px";
-                actions.style.flexWrap = "wrap";
-                actions.style.marginTop = "8px";
+              const actions = document.createElement("div");
+              actions.style.display = "flex";
+              actions.style.gap = "8px";
+              actions.style.flexWrap = "wrap";
+              actions.style.marginTop = "8px";
 
+              if (linkedJob) {
                 const openBtn = document.createElement("button");
                 openBtn.className = "btn";
                 openBtn.textContent = "Open Job";
                 openBtn.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
-
-                const approvalBtn = document.createElement("button");
-                approvalBtn.className = d.__approved ? "btn" : "btn btn-orange";
-                approvalBtn.textContent = d.__approved ? "Mark Not Approved" : "Mark Approved";
-                approvalBtn.addEventListener("click", async (ev) => {
-                  ev.stopPropagation();
-                  try {
-                    const nextApproved = !d.__approved;
-                    const savedJob = await apiUpdateJob(linkedJob.id, {
-                      approved: nextApproved,
-                      approved_at: nextApproved ? new Date().toISOString() : ""
-                    });
-                    d.__approved = nextApproved;
-                    d.__linkedJob = savedJob || linkedJob;
-                    await renderEstimatorTab();
-                  } catch (e) {
-                    alert(e.message || String(e));
-                  }
-                });
-
                 actions.appendChild(openBtn);
-                actions.appendChild(approvalBtn);
-                item.appendChild(actions);
                 item.addEventListener("click", (ev) => { ev.stopPropagation(); openDataCenterJob(linkedJob); });
               }
+
+              const approvalBtn = document.createElement("button");
+              approvalBtn.className = d.__approved ? "btn" : "btn btn-orange";
+              approvalBtn.textContent = d.__approved ? "Mark Not Approved" : "Mark Approved";
+              approvalBtn.addEventListener("click", async (ev) => {
+                ev.stopPropagation();
+                try {
+                  const nextApproved = !d.__approved;
+                  const approvedAt = nextApproved ? new Date().toISOString() : "";
+                  if (linkedJob && linkedJob.id) {
+                    const savedJob = await apiUpdateJob(linkedJob.id, {
+                      approved: nextApproved,
+                      approved_at: approvedAt
+                    });
+                    d.__linkedJob = savedJob || linkedJob;
+                  }
+                  await apiSetDocumentApproval(d.__approvalKey || documentApprovalKey(d), {
+                    approved: nextApproved,
+                    approved_at: approvedAt,
+                    estimate_number: d.__estimateNo || cleanDocRef(d.number || d.estimate_number || d.estimate_no || ""),
+                    filename: d.filename || "",
+                    customer: customer || "",
+                  });
+                  d.__approved = nextApproved;
+                  await renderEstimatorTab();
+                } catch (e) {
+                  alert(e.message || String(e));
+                }
+              });
+
+              actions.appendChild(approvalBtn);
+              item.appendChild(actions);
               inline.appendChild(item);
             });
           };
@@ -8444,6 +8509,42 @@ function renderSaddlebackView() {
     const money = (n) => `$${(Number(n || 0)).toFixed(2)}`;
     const monthKey = (iso) => String(iso || "").slice(0, 7);
     const makeId = () => `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    const sdcExpenseCategories = [
+      "Advertising / Marketing",
+      "Bank / Processing Fees",
+      "Etsy / Marketplace Fees",
+      "Fuel / Mileage",
+      "Insurance",
+      "Meals",
+      "Office Supplies",
+      "Postage / Shipping",
+      "Rent / Workspace",
+      "Repairs / Maintenance",
+      "Software / Subscriptions",
+      "Tools / Equipment",
+      "Utilities",
+      "Other Expense"
+    ];
+    const sdcPurchaseCategories = [
+      "Wood / Lumber",
+      "Rattan / Cane Webbing",
+      "Hardware",
+      "Finish / Stain / Paint",
+      "Glue / Adhesives",
+      "Sanding / Abrasives",
+      "Packaging Materials",
+      "Shipping Materials",
+      "Outsourced Labor",
+      "Tools / Equipment",
+      "Other Material"
+    ];
+    function sdcOptions(options, selected) {
+      return options.map(opt => `<option value="${escapeHtml(opt)}" ${String(selected || "") === opt ? "selected" : ""}>${escapeHtml(opt)}</option>`).join("");
+    }
+    function addToBucketTotals(target, key, amount) {
+      const label = String(key || "Uncategorized").trim() || "Uncategorized";
+      target[label] = (target[label] || 0) + Number(amount || 0);
+    }
 
     async function persist() {
       try {
@@ -8477,7 +8578,9 @@ function renderSaddlebackView() {
     }
 
     function exportSdcRows(filename, headers, rows) {
-      downloadCsv(filename, headers, rows);
+      const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+      const csv = [headers, ...(Array.isArray(rows) ? rows : [])].map(row => row.map(esc).join(",")).join("\n");
+      downloadCsv(filename, csv);
     }
 
     function recordCard(title, subtitle, meta = "", onOpen = null, onDelete = null, badgeText = "") {
@@ -8614,6 +8717,8 @@ function renderSaddlebackView() {
         category: "",
         vendor: "",
         amount: 0,
+        payment_method: "",
+        reference: "",
         notes: "",
       };
       openDrawer(item ? "Edit Expense" : "Add Expense", (drawerBody, overlay) => {
@@ -8622,9 +8727,11 @@ function renderSaddlebackView() {
         wrap.innerHTML = `
           <div class="grid2">
             <div><div class="label">Date</div><input class="input" id="sdc_exp_date" type="date" value="${escapeHtml(row.date || "")}" /></div>
-            <div><div class="label">Category</div><input class="input" id="sdc_exp_cat" value="${escapeHtml(row.category || "")}" placeholder="Fees / Fuel / Tools / Marketing" /></div>
+            <div><div class="label">Category</div><select class="input" id="sdc_exp_cat">${sdcOptions(sdcExpenseCategories, row.category)}</select></div>
             <div><div class="label">Vendor</div><input class="input" id="sdc_exp_vendor" value="${escapeHtml(row.vendor || "")}" placeholder="Vendor" /></div>
             <div><div class="label">Amount</div><input class="input" id="sdc_exp_amt" type="number" step="0.01" value="${escapeHtml(String(row.amount || 0))}" /></div>
+            <div><div class="label">Payment Method</div><input class="input" id="sdc_exp_method" value="${escapeHtml(row.payment_method || "")}" placeholder="Business card / cash / bank" /></div>
+            <div><div class="label">Receipt / Reference #</div><input class="input" id="sdc_exp_ref" value="${escapeHtml(row.reference || "")}" placeholder="Receipt, order, or transaction #" /></div>
             <div style="grid-column:1 / -1;"><div class="label">Notes</div><textarea id="sdc_exp_notes">${escapeHtml(row.notes || "")}</textarea></div>
           </div>
         `;
@@ -8660,6 +8767,8 @@ function renderSaddlebackView() {
             category: wrap.querySelector("#sdc_exp_cat").value.trim(),
             vendor: wrap.querySelector("#sdc_exp_vendor").value.trim(),
             amount: Number(wrap.querySelector("#sdc_exp_amt").value || 0),
+            payment_method: wrap.querySelector("#sdc_exp_method").value.trim(),
+            reference: wrap.querySelector("#sdc_exp_ref").value.trim(),
             notes: wrap.querySelector("#sdc_exp_notes").value.trim(),
           };
           if (!next.date || !next.category) return alert("Date and category are required.");
@@ -8675,10 +8784,14 @@ function renderSaddlebackView() {
         bucket: "purchases",
         date: "",
         vendor: "",
+        category: "",
         item: "",
         order_ref: "",
         amount: 0,
         tax_paid: 0,
+        payment_method: "",
+        reference: "",
+        notes: "",
       };
       openDrawer(item ? "Edit Purchase" : "Add Purchase", (drawerBody, overlay) => {
         const wrap = document.createElement("div");
@@ -8687,10 +8800,14 @@ function renderSaddlebackView() {
           <div class="grid2">
             <div><div class="label">Date</div><input class="input" id="sdc_pur_date" type="date" value="${escapeHtml(row.date || "")}" /></div>
             <div><div class="label">Vendor</div><input class="input" id="sdc_pur_vendor" value="${escapeHtml(row.vendor || "")}" placeholder="Vendor" /></div>
+            <div><div class="label">Category</div><select class="input" id="sdc_pur_cat">${sdcOptions(sdcPurchaseCategories, row.category)}</select></div>
             <div><div class="label">Material / Item</div><input class="input" id="sdc_pur_item" value="${escapeHtml(row.item || "")}" placeholder="Oak slab / rails / hinges / stain" /></div>
             <div><div class="label">Linked Order</div><input class="input" id="sdc_pur_order" value="${escapeHtml(row.order_ref || "")}" placeholder="Customer / order #" /></div>
             <div><div class="label">Amount</div><input class="input" id="sdc_pur_amt" type="number" step="0.01" value="${escapeHtml(String(row.amount || 0))}" /></div>
             <div><div class="label">Tax Paid</div><input class="input" id="sdc_pur_tax" type="number" step="0.01" value="${escapeHtml(String(row.tax_paid || 0))}" /></div>
+            <div><div class="label">Payment Method</div><input class="input" id="sdc_pur_method" value="${escapeHtml(row.payment_method || "")}" placeholder="Business card / cash / bank" /></div>
+            <div><div class="label">Receipt / Reference #</div><input class="input" id="sdc_pur_ref" value="${escapeHtml(row.reference || "")}" placeholder="Receipt, order, or transaction #" /></div>
+            <div style="grid-column:1 / -1;"><div class="label">Notes</div><textarea id="sdc_pur_notes">${escapeHtml(row.notes || "")}</textarea></div>
           </div>
         `;
         const actions = document.createElement("div");
@@ -8723,10 +8840,14 @@ function renderSaddlebackView() {
             bucket: "purchases",
             date: wrap.querySelector("#sdc_pur_date").value,
             vendor: wrap.querySelector("#sdc_pur_vendor").value.trim(),
+            category: wrap.querySelector("#sdc_pur_cat").value.trim(),
             item: wrap.querySelector("#sdc_pur_item").value.trim(),
             order_ref: wrap.querySelector("#sdc_pur_order").value.trim(),
             amount: Number(wrap.querySelector("#sdc_pur_amt").value || 0),
             tax_paid: Number(wrap.querySelector("#sdc_pur_tax").value || 0),
+            payment_method: wrap.querySelector("#sdc_pur_method").value.trim(),
+            reference: wrap.querySelector("#sdc_pur_ref").value.trim(),
+            notes: wrap.querySelector("#sdc_pur_notes").value.trim(),
           };
           if (!next.date || !next.item) return alert("Date and item are required.");
           upsert("purchases", next);
@@ -8874,8 +8995,8 @@ function renderSaddlebackView() {
       exportBtn.className = "btn";
       exportBtn.textContent = "Export Expenses CSV";
       exportBtn.addEventListener("click", () => {
-        const rows = state.expenses.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.category, x.vendor, x.amount, x.notes]);
-        exportSdcRows("saddleback_expenses.csv", ["Date","Category","Vendor","Amount","Notes"], rows);
+        const rows = state.expenses.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.category, x.vendor, x.amount, x.payment_method, x.reference, x.notes]);
+        exportSdcRows("saddleback_expenses.csv", ["Date","Category","Vendor","Amount","Payment Method","Receipt / Reference #","Notes"], rows);
       });
       toolbarActions.append(addBtn, exportBtn);
       toolbar.appendChild(toolbarActions);
@@ -8897,7 +9018,7 @@ function renderSaddlebackView() {
       } else {
         rows.forEach(item => {
           const subtitle = [item.date || "", item.category || "", item.vendor || ""].filter(Boolean).join(" - ");
-          const meta = `${item.notes || ""}${item.notes ? " | " : ""}Amount: ${money(item.amount)}`;
+          const meta = `${item.notes || ""}${item.notes ? " | " : ""}Amount: ${money(item.amount)}${item.reference ? " | Ref: " + item.reference : ""}`;
           list.appendChild(recordCard(item.category || "Expense", subtitle, meta, () => openExpenseEditor(item), () => removeItem("expenses", item.id)));
         });
       }
@@ -8926,8 +9047,8 @@ function renderSaddlebackView() {
       exportBtn.className = "btn";
       exportBtn.textContent = "Export Purchases CSV";
       exportBtn.addEventListener("click", () => {
-        const rows = state.purchases.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.vendor, x.item, x.order_ref, x.amount, x.tax_paid]);
-        exportSdcRows("saddleback_purchases.csv", ["Date","Vendor","Material / Item","Linked Order","Amount","Tax Paid"], rows);
+        const rows = state.purchases.slice().sort((a,b) => String(b.date||"").localeCompare(String(a.date||""))).map(x => [x.date, x.vendor, x.category, x.item, x.order_ref, x.amount, x.tax_paid, x.payment_method, x.reference, x.notes]);
+        exportSdcRows("saddleback_purchases.csv", ["Date","Vendor","Category","Material / Item","Linked Order","Amount","Tax Paid","Payment Method","Receipt / Reference #","Notes"], rows);
       });
       toolbarActions.append(addBtn, exportBtn);
       toolbar.appendChild(toolbarActions);
@@ -8948,8 +9069,8 @@ function renderSaddlebackView() {
         list.appendChild(empty);
       } else {
         rows.forEach(item => {
-          const subtitle = [item.date || "", item.vendor || "", item.order_ref || ""].filter(Boolean).join(" - ");
-          const meta = `${item.item || ""} | Amount: ${money(item.amount)} | Tax Paid: ${money(item.tax_paid)}`;
+          const subtitle = [item.date || "", item.vendor || "", item.category || "", item.order_ref || ""].filter(Boolean).join(" - ");
+          const meta = `${item.item || ""} | Amount: ${money(item.amount)} | Tax Paid: ${money(item.tax_paid)}${item.reference ? " | Ref: " + item.reference : ""}`;
           list.appendChild(recordCard(item.item || "Purchase", subtitle, meta, () => openPurchaseEditor(item), () => removeItem("purchases", item.id)));
         });
       }
@@ -8998,17 +9119,34 @@ function renderSaddlebackView() {
       ].forEach(card => wrap.appendChild(card));
       host.appendChild(wrap);
 
+      const expenseCategoryTotals = {};
+      const purchaseCategoryTotals = {};
+      state.expenses.forEach(x => addToBucketTotals(expenseCategoryTotals, x.category, x.amount));
+      state.purchases.forEach(x => addToBucketTotals(purchaseCategoryTotals, x.category, x.amount));
+      const catCard = document.createElement("div");
+      catCard.className = "card";
+      catCard.style.marginTop = "12px";
+      const renderCatLines = (obj) => Object.keys(obj).sort().map(k => `<div class="hint"><strong>${escapeHtml(k)}:</strong> ${money(obj[k])}</div>`).join("") || `<div class="hint">No category totals yet.</div>`;
+      catCard.innerHTML = `<h3>Itemized Tax Categories</h3><div class="grid2"><div><h4>Expenses</h4>${renderCatLines(expenseCategoryTotals)}</div><div><h4>Purchases</h4>${renderCatLines(purchaseCategoryTotals)}</div></div>`;
+      host.appendChild(catCard);
+
       const months = {};
       [...state.orders, ...state.expenses, ...state.purchases].forEach(item => {
         const key = monthKey(item.date) || "No Date";
-        months[key] = months[key] || { gross_revenue: 0, sales_tax: 0, net_revenue: 0, expenses: 0, purchases: 0 };
+        months[key] = months[key] || { gross_revenue: 0, sales_tax: 0, net_revenue: 0, expenses: 0, purchases: 0, expense_categories: {}, purchase_categories: {} };
         if (item.bucket === "orders") {
           months[key].gross_revenue += Number(item.total || 0);
           months[key].sales_tax += Number(item.tax || 0);
           months[key].net_revenue += (Number(item.total || 0) - Number(item.tax || 0));
         }
-        if (item.bucket === "expenses") months[key].expenses += Number(item.amount || 0);
-        if (item.bucket === "purchases") months[key].purchases += Number(item.amount || 0);
+        if (item.bucket === "expenses") {
+          months[key].expenses += Number(item.amount || 0);
+          addToBucketTotals(months[key].expense_categories, item.category, item.amount);
+        }
+        if (item.bucket === "purchases") {
+          months[key].purchases += Number(item.amount || 0);
+          addToBucketTotals(months[key].purchase_categories, item.category, item.amount);
+        }
       });
 
       const monthly = Object.keys(months).sort().reverse().map(key => ({
@@ -9019,11 +9157,23 @@ function renderSaddlebackView() {
         expenses: months[key].expenses,
         purchases: months[key].purchases,
         net: months[key].net_revenue - months[key].expenses - months[key].purchases,
+        expense_categories: months[key].expense_categories,
+        purchase_categories: months[key].purchase_categories,
       }));
 
       exportBtn.addEventListener("click", () => {
-        const rows = monthly.map(x => [x.month, x.gross_revenue, x.sales_tax, x.net_revenue, x.expenses, x.purchases, x.net]);
-        exportSdcRows("saddleback_tax_snapshot.csv", ["Month","Gross Revenue","Sales Tax Collected","Net Revenue","Expenses","Purchases","Net"], rows);
+        const rows = monthly.map(x => [
+          x.month,
+          x.gross_revenue,
+          x.sales_tax,
+          x.net_revenue,
+          x.expenses,
+          Object.entries(x.expense_categories || {}).map(([k,v]) => `${k}: ${money(v)}`).join("; "),
+          x.purchases,
+          Object.entries(x.purchase_categories || {}).map(([k,v]) => `${k}: ${money(v)}`).join("; "),
+          x.net
+        ]);
+        exportSdcRows("saddleback_tax_snapshot.csv", ["Month","Gross Revenue","Sales Tax Collected","Net Revenue","Expenses","Expense Category Breakdown","Purchases","Purchase Category Breakdown","Net"], rows);
       });
 
       const card = document.createElement("div");
@@ -9041,7 +9191,9 @@ function renderSaddlebackView() {
       } else {
         monthly.forEach(item => {
           const subtitle = `${item.month} - Gross: ${money(item.gross_revenue)} - Tax: ${money(item.sales_tax)} - Net Revenue: ${money(item.net_revenue)}`;
-          const meta = `Expenses: ${money(item.expenses)} | Purchases: ${money(item.purchases)} | Net: ${money(item.net)}`;
+          const expenseBreakdown = Object.entries(item.expense_categories || {}).map(([k,v]) => `${k}: ${money(v)}`).join("; ");
+          const purchaseBreakdown = Object.entries(item.purchase_categories || {}).map(([k,v]) => `${k}: ${money(v)}`).join("; ");
+          const meta = `Expenses: ${money(item.expenses)}${expenseBreakdown ? " (" + expenseBreakdown + ")" : ""} | Purchases: ${money(item.purchases)}${purchaseBreakdown ? " (" + purchaseBreakdown + ")" : ""} | Net: ${money(item.net)}`;
           list.appendChild(recordCard(item.month, subtitle, meta));
         });
       }

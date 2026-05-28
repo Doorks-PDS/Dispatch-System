@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Optional, Any, List, Dict
+from pathlib import Path
 import re
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -29,7 +30,6 @@ class DocCreate(BaseModel):
     number: str = ""
     po_number: str = ""
     invoice_number: str = ""
-    estimate_number: str = ""
     job_number: str = ""
     tax_rate: float = 0.0
     terms: str = ""
@@ -320,6 +320,7 @@ def _invoice_summary(tech_notes: str, parts_used: str = "") -> List[str]:
         if not any(part_text.lower() in line.lower() for line in selected):
             selected.insert(0, f"{'Technicians' if False else 'Technician'} installed {part_text}.")
 
+    # Always keep invoice concise.
     if not any("clean" in line.lower() for line in selected):
         selected.append("Tested operation and cleaned up work area.")
 
@@ -351,6 +352,7 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
         lines.append("********JOB COMPLETE*********")
         return " ".join(line for line in lines if line).strip()
 
+    # Estimates: recommendation/quote forms first; dispatch/job notes only as last fallback.
     preferred_source = form_recs or form_tech_notes or payload_notes or office_notes or job_notes
 
     title = _proposal_title(data, form)
@@ -423,15 +425,6 @@ def list_documents(
     return {"ok": True, "items": items}
 
 
-@router.get("/debug")
-def debug_documents(request: Request, x_api_key: Optional[str] = Header(default=None)):
-    _require(request, x_api_key)
-    store = _store(request)
-    if not hasattr(store, "debug_info"):
-        return {"ok": False, "detail": "debug_info unavailable"}
-    return {"ok": True, "debug": store.debug_info()}
-
-
 @router.post("/estimate")
 def create_estimate(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
@@ -470,15 +463,99 @@ def delete_document(request: Request, filename: str, x_api_key: Optional[str] = 
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _safe_doc_filename(value: str) -> str:
+    # Do not allow browser-supplied paths to escape the document folder.
+    return str(value or "").replace("\\", "/").split("/")[-1].strip()
+
+
+def _resolve_document_path(request: Request, filename: str):
+    store = request.app.state.documents_store
+    safe = _safe_doc_filename(filename)
+    candidates = []
+    if safe:
+        candidates.append(store.dir / safe)
+
+    item = None
+    try:
+        item = store.get_document(safe) or store.get_document(filename)
+    except Exception:
+        item = None
+
+    if item:
+        raw_path = str(item.get("path") or "").strip()
+        if raw_path:
+            p = Path(raw_path)
+            candidates.append(p)
+            candidates.append(store.dir / p.name)
+        raw_filename = _safe_doc_filename(str(item.get("filename") or safe))
+        if raw_filename:
+            candidates.append(store.dir / raw_filename)
+
+    for path in candidates:
+        try:
+            if path and path.exists() and path.is_file():
+                return path, (path.name or safe)
+        except Exception:
+            continue
+
+    # Last-resort repair: old indexes may survive while the PDF file was not copied.
+    # For estimates/invoices, regenerate the PDF from the saved payload instead of failing.
+    if item and str(item.get("type") or "").lower() in {"estimate", "invoice"}:
+        try:
+            doc_type = str(item.get("type") or "estimate").lower()
+            number = str(item.get("number") or safe.replace(".pdf", "") or "DOCUMENT")
+            repaired_name = _safe_doc_filename(str(item.get("filename") or f"{number}.pdf")) or f"{number}.pdf"
+            repaired_path = store.dir / repaired_name
+            repaired_path.parent.mkdir(parents=True, exist_ok=True)
+            store._write_pdf(repaired_path, doc_type, dict(item), number)
+            return repaired_path, repaired_name
+        except Exception:
+            pass
+
+    # Signoffs can at least be rebuilt as a readable summary PDF if the original signed file is missing.
+    if item and str(item.get("type") or "").lower() == "signoff":
+        try:
+            from reportlab.lib.pagesizes import letter
+            from reportlab.pdfgen import canvas
+            repaired_name = _safe_doc_filename(str(item.get("filename") or safe or "SIGNOFF_REPAIRED.pdf")) or "SIGNOFF_REPAIRED.pdf"
+            repaired_path = store.dir / repaired_name
+            repaired_path.parent.mkdir(parents=True, exist_ok=True)
+            c = canvas.Canvas(str(repaired_path), pagesize=letter)
+            w, h = letter
+            y = h - 50
+            c.setFont("Helvetica-Bold", 18)
+            c.drawString(40, y, "Job Sign Off")
+            y -= 28
+            c.setFont("Helvetica", 11)
+            fields = [
+                ("Job #", item.get("job_number") or item.get("number") or ""),
+                ("Customer", item.get("customer") or ""),
+                ("Date", item.get("date") or ""),
+                ("Technician", item.get("completed_by") or item.get("techs") or ""),
+                ("Contact", item.get("contact_name") or ""),
+                ("Arrival", item.get("arrival_time") or ""),
+                ("Departure", item.get("departure_time") or ""),
+                ("Additional Techs Onsite", "Yes" if item.get("additional_techs_onsite") else "No"),
+            ]
+            for label, value in fields:
+                c.drawString(40, y, f"{label}: {value or ''}")
+                y -= 18
+            c.drawString(40, y - 20, "Signature: original signature image was not available when this PDF was rebuilt.")
+            c.showPage()
+            c.save()
+            return repaired_path, repaired_name
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=404, detail="Document file not found on disk")
+
+
 @router.get("/download/{filename}")
 def download_document(request: Request, filename: str, x_api_key: Optional[str] = Header(default=None), inline: bool = Query(default=False)):
     _require(request, x_api_key)
-    try:
-        path = request.app.state.documents_store.resolve_path(filename)
-    except Exception:
-        raise HTTPException(status_code=404, detail="Document not found")
-    headers = {"Content-Disposition": f"inline; filename=\"{Path(filename).name}\""} if inline else None
-    return FileResponse(path=str(path), media_type="application/pdf", filename=None if inline else Path(filename).name, headers=headers)
+    path, served_name = _resolve_document_path(request, filename)
+    headers = {"Content-Disposition": f"inline; filename=\"{served_name}\""} if inline else None
+    return FileResponse(path=str(path), media_type="application/pdf", filename=None if inline else served_name, headers=headers)
 
 
 @router.post("/signoff")
@@ -488,7 +565,7 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
     from reportlab.pdfgen import canvas
     from reportlab.lib.utils import ImageReader
     from datetime import datetime
-    import io, base64
+    import io, base64, json
 
     store = _store(request)
     number = (payload.job_number or datetime.now().strftime("SIGNOFF-%Y%m%d-%H%M%S")).strip()
