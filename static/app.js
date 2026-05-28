@@ -4514,7 +4514,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       if (!items.length) { list.innerHTML = `<div class="hint">No saved sign offs yet.</div>`; return; }
       items.sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).forEach(doc => {
         const row = document.createElement('div'); row.className = 'jobrow'; row.style.cursor = 'pointer';
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(doc.job_number || doc.number || '')}</div><div class="hint">${escapeHtml(formatDisplayDate(doc.date || ''))}</div></div><div class="jobrow-addr">${escapeHtml(doc.customer || '')}</div>`;
+        const cleanJob = String(doc.job_number || doc.number || '').replace(/^SIGNOFF[_-]?/i, '').replace(/_?\d{8}_\d{6}$/, '');
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">Job #${escapeHtml(cleanJob || '')}</div><div class="hint">${escapeHtml(formatDisplayDate(doc.date || doc.created_at || ''))}</div></div><div class="jobrow-addr">${escapeHtml(doc.customer || '')}</div><div class="hint">${escapeHtml(doc.completed_by ? 'Tech: ' + doc.completed_by : '')}</div>`;
         row.addEventListener('click', () => window.open(doc.open_url || doc.download_url, '_blank'));
         list.appendChild(row);
       });
@@ -5022,13 +5023,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
 
     function downloadCsv(filename, csv) {
-      const blob = new Blob([csv], { type: "text/csv" });
+      const blob = new Blob(["\ufeff" + String(csv || "")], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = filename;
+      a.download = filename || "export.csv";
+      a.style.display = "none";
+      document.body.appendChild(a);
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => {
+        try { document.body.removeChild(a); } catch (e) {}
+        try { URL.revokeObjectURL(url); } catch (e) {}
+      }, 500);
     }
 
     async function openTechBreakdown(emp, entries, period, approvedPto) {
@@ -8512,6 +8518,7 @@ function renderSaddlebackView() {
     const sdcExpenseCategories = [
       "Advertising / Marketing",
       "Bank / Processing Fees",
+      "Business / Licensing Fees",
       "Etsy / Marketplace Fees",
       "Fuel / Mileage",
       "Insurance",

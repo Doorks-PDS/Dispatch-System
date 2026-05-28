@@ -402,6 +402,72 @@ class SignoffCreate(BaseModel):
     signature_data: str = ""
 
 
+
+def _calendar_jobs(request: Request) -> List[dict[str, Any]]:
+    store = getattr(request.app.state, "calendar_store", None)
+    if not store:
+        return []
+    try:
+        jobs = store.list_jobs()
+        return [j for j in jobs if isinstance(j, dict)]
+    except Exception:
+        return []
+
+
+def _clean_doc_ref(value: Any) -> str:
+    return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
+
+
+def _find_related_job(request: Request, item: dict[str, Any]) -> dict[str, Any]:
+    jobs = _calendar_jobs(request)
+    if not jobs:
+        return {}
+    doc_job_id = str(item.get("job_id") or "").strip()
+    doc_job_number = str(item.get("job_number") or item.get("number") or "").strip()
+    doc_number = _clean_doc_ref(item.get("number") or item.get("estimate_number") or item.get("invoice_number") or "")
+    filename_ref = _clean_doc_ref(str(item.get("filename") or "").replace(".pdf", ""))
+    for job in jobs:
+        if doc_job_id and str(job.get("id") or "").strip() == doc_job_id:
+            return job
+    for job in jobs:
+        est = _clean_doc_ref(job.get("estimate_number") or job.get("estimate_no") or "")
+        inv = _clean_doc_ref(job.get("invoice_number") or job.get("invoice_no") or "")
+        if doc_number and (doc_number == est or doc_number == inv):
+            return job
+        if filename_ref and (filename_ref == est or filename_ref == inv):
+            return job
+    for job in jobs:
+        if doc_job_number and str(job.get("job_number") or "").strip() == doc_job_number:
+            return job
+    return {}
+
+
+def _enrich_document_item(request: Request, item: dict[str, Any]) -> dict[str, Any]:
+    row = dict(item or {})
+    related = _find_related_job(request, row)
+    if related:
+        row.setdefault("job_id", related.get("id") or "")
+        for key in ["customer", "address", "job_number", "po_number"]:
+            if not _clean_text(row.get(key)) and _clean_text(related.get(key)):
+                row[key] = related.get(key)
+        if not _clean_text(row.get("email")) and _clean_text(related.get("email")):
+            row["email"] = related.get("email")
+        if not _clean_text(row.get("contact")) and _clean_text(related.get("contact")):
+            row["contact"] = related.get("contact")
+        if str(row.get("type") or "").lower() == "estimate" and not _clean_text(row.get("number")):
+            row["number"] = related.get("estimate_number") or row.get("number") or ""
+        if str(row.get("type") or "").lower() == "invoice" and not _clean_text(row.get("number")):
+            row["number"] = related.get("invoice_number") or row.get("number") or ""
+    if str(row.get("type") or "").lower() == "signoff":
+        raw = str(row.get("number") or row.get("job_number") or row.get("filename") or "").strip()
+        raw = re.sub(r"^SIGNOFF[_-]?", "", raw, flags=re.I)
+        raw = re.sub(r"_?\d{8}_\d{6}(?:\.pdf)?$", "", raw)
+        if not _clean_text(row.get("job_number")):
+            row["job_number"] = raw.replace(".pdf", "")
+        if not _clean_text(row.get("number")):
+            row["number"] = row.get("job_number") or raw.replace(".pdf", "")
+    return row
+
 def _doc_response(item: dict) -> dict:
     row = dict(item)
     row.pop("signature_data", None)
@@ -419,6 +485,7 @@ def list_documents(
 ):
     _require(request, x_api_key)
     items = _store(request).list_documents(job_id=job_id)
+    items = [_enrich_document_item(request, item) for item in items]
     if type:
         items = [item for item in items if str(item.get("type") or "") == str(type)]
     items = [_doc_response(item) for item in items]
@@ -428,14 +495,16 @@ def list_documents(
 @router.post("/estimate")
 def create_estimate(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    item = _store(request).create_pdf("estimate", payload.dict())
+    data = _merge_payload_with_job(payload.dict(), _job_from_store(request, payload.job_id))
+    item = _store(request).create_pdf("estimate", data)
     return {"ok": True, "doc": _doc_response(item)}
 
 
 @router.post("/invoice")
 def create_invoice(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    item = _store(request).create_pdf("invoice", payload.dict())
+    data = _merge_payload_with_job(payload.dict(), _job_from_store(request, payload.job_id))
+    item = _store(request).create_pdf("invoice", data)
     return {"ok": True, "doc": _doc_response(item)}
 
 
@@ -443,7 +512,8 @@ def create_invoice(request: Request, payload: DocCreate, x_api_key: Optional[str
 def update_document(request: Request, filename: str, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
     try:
-        item = _store(request).update_document(filename, payload.dict())
+        data = _merge_payload_with_job(payload.dict(), _job_from_store(request, payload.job_id))
+        item = _store(request).update_document(filename, data)
         return {"ok": True, "doc": _doc_response(item)}
     except KeyError:
         raise HTTPException(status_code=404, detail="Document not found")

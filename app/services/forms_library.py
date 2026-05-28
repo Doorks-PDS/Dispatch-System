@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from app.services.storage import repo_data_path
+from app.services.storage import bootstrap_data_dir, first_existing_data_path, repo_data_path
 
 
 @dataclass
@@ -56,7 +56,9 @@ FORMS: List[FormDoc] = [
 
 
 def forms_dir(project_root: str) -> Path:
-    return repo_data_path(project_root, "forms")
+    # Copy repo-bundled blank takeoff PDFs onto Render disk if a persistent disk is active.
+    # This keeps Open/Download working even when /var/data is empty after deploy.
+    return bootstrap_data_dir(project_root, "forms")
 
 
 def list_forms(project_root: str) -> List[Dict]:
@@ -85,4 +87,7 @@ def resolve_form_path(project_root: str, form_id: str) -> Optional[Path]:
     if not f:
         return None
     p = forms_dir(project_root) / f.filename
-    return p if p.exists() else None
+    if p.exists():
+        return p
+    repo_p = repo_data_path(project_root, "forms", f.filename)
+    return repo_p if repo_p.exists() else None
