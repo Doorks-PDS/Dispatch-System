@@ -308,6 +308,22 @@ class DocumentsStore:
             c.drawString(right - summary_w + 10, ty, label)
             c.drawRightString(right - 10, ty, f"${value:,.2f}")
             ty -= 16 if idx == 1 else 14
+
+        terms_text = str(payload.get("terms") or "").strip()
+        if terms_text:
+            terms_y = y - summary_h - 18
+            if terms_y < 48:
+                c.showPage()
+                terms_y = page_h - 60
+            c.setFillColor(colors.HexColor("#111827"))
+            c.setFont("Helvetica-Bold", 9)
+            c.drawString(left, terms_y, "Terms:")
+            c.setFont("Helvetica", 9)
+            term_lines = _wrap_text(terms_text, "Helvetica", 9, content_w - 48)
+            line_y = terms_y
+            for line in term_lines[:3]:
+                c.drawString(left + 42, line_y, line[:140])
+                line_y -= 11
         c.showPage()
         c.save()
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from typing import Optional, Any, List, Dict
-from pathlib import Path
 import re
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
@@ -402,72 +401,6 @@ class SignoffCreate(BaseModel):
     signature_data: str = ""
 
 
-
-def _calendar_jobs(request: Request) -> List[dict[str, Any]]:
-    store = getattr(request.app.state, "calendar_store", None)
-    if not store:
-        return []
-    try:
-        jobs = store.list_jobs()
-        return [j for j in jobs if isinstance(j, dict)]
-    except Exception:
-        return []
-
-
-def _clean_doc_ref(value: Any) -> str:
-    return re.sub(r"[^A-Za-z0-9]", "", str(value or "")).upper()
-
-
-def _find_related_job(request: Request, item: dict[str, Any]) -> dict[str, Any]:
-    jobs = _calendar_jobs(request)
-    if not jobs:
-        return {}
-    doc_job_id = str(item.get("job_id") or "").strip()
-    doc_job_number = str(item.get("job_number") or item.get("number") or "").strip()
-    doc_number = _clean_doc_ref(item.get("number") or item.get("estimate_number") or item.get("invoice_number") or "")
-    filename_ref = _clean_doc_ref(str(item.get("filename") or "").replace(".pdf", ""))
-    for job in jobs:
-        if doc_job_id and str(job.get("id") or "").strip() == doc_job_id:
-            return job
-    for job in jobs:
-        est = _clean_doc_ref(job.get("estimate_number") or job.get("estimate_no") or "")
-        inv = _clean_doc_ref(job.get("invoice_number") or job.get("invoice_no") or "")
-        if doc_number and (doc_number == est or doc_number == inv):
-            return job
-        if filename_ref and (filename_ref == est or filename_ref == inv):
-            return job
-    for job in jobs:
-        if doc_job_number and str(job.get("job_number") or "").strip() == doc_job_number:
-            return job
-    return {}
-
-
-def _enrich_document_item(request: Request, item: dict[str, Any]) -> dict[str, Any]:
-    row = dict(item or {})
-    related = _find_related_job(request, row)
-    if related:
-        row.setdefault("job_id", related.get("id") or "")
-        for key in ["customer", "address", "job_number", "po_number"]:
-            if not _clean_text(row.get(key)) and _clean_text(related.get(key)):
-                row[key] = related.get(key)
-        if not _clean_text(row.get("email")) and _clean_text(related.get("email")):
-            row["email"] = related.get("email")
-        if not _clean_text(row.get("contact")) and _clean_text(related.get("contact")):
-            row["contact"] = related.get("contact")
-        if str(row.get("type") or "").lower() == "estimate" and not _clean_text(row.get("number")):
-            row["number"] = related.get("estimate_number") or row.get("number") or ""
-        if str(row.get("type") or "").lower() == "invoice" and not _clean_text(row.get("number")):
-            row["number"] = related.get("invoice_number") or row.get("number") or ""
-    if str(row.get("type") or "").lower() == "signoff":
-        raw = str(row.get("number") or row.get("job_number") or row.get("filename") or "").strip()
-        raw = re.sub(r"^SIGNOFF[_-]?", "", raw, flags=re.I)
-        raw = re.sub(r"_?\d{8}_\d{6}(?:\.pdf)?$", "", raw)
-        if not _clean_text(row.get("job_number")):
-            row["job_number"] = raw.replace(".pdf", "")
-        if not _clean_text(row.get("number")):
-            row["number"] = row.get("job_number") or raw.replace(".pdf", "")
-    return row
-
 def _doc_response(item: dict) -> dict:
     row = dict(item)
     row.pop("signature_data", None)
@@ -485,7 +418,6 @@ def list_documents(
 ):
     _require(request, x_api_key)
     items = _store(request).list_documents(job_id=job_id)
-    items = [_enrich_document_item(request, item) for item in items]
     if type:
         items = [item for item in items if str(item.get("type") or "") == str(type)]
     items = [_doc_response(item) for item in items]
@@ -495,16 +427,14 @@ def list_documents(
 @router.post("/estimate")
 def create_estimate(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    data = _merge_payload_with_job(payload.dict(), _job_from_store(request, payload.job_id))
-    item = _store(request).create_pdf("estimate", data)
+    item = _store(request).create_pdf("estimate", payload.dict())
     return {"ok": True, "doc": _doc_response(item)}
 
 
 @router.post("/invoice")
 def create_invoice(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
-    data = _merge_payload_with_job(payload.dict(), _job_from_store(request, payload.job_id))
-    item = _store(request).create_pdf("invoice", data)
+    item = _store(request).create_pdf("invoice", payload.dict())
     return {"ok": True, "doc": _doc_response(item)}
 
 
@@ -512,8 +442,7 @@ def create_invoice(request: Request, payload: DocCreate, x_api_key: Optional[str
 def update_document(request: Request, filename: str, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
     try:
-        data = _merge_payload_with_job(payload.dict(), _job_from_store(request, payload.job_id))
-        item = _store(request).update_document(filename, data)
+        item = _store(request).update_document(filename, payload.dict())
         return {"ok": True, "doc": _doc_response(item)}
     except KeyError:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -533,99 +462,14 @@ def delete_document(request: Request, filename: str, x_api_key: Optional[str] = 
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _safe_doc_filename(value: str) -> str:
-    # Do not allow browser-supplied paths to escape the document folder.
-    return str(value or "").replace("\\", "/").split("/")[-1].strip()
-
-
-def _resolve_document_path(request: Request, filename: str):
-    store = request.app.state.documents_store
-    safe = _safe_doc_filename(filename)
-    candidates = []
-    if safe:
-        candidates.append(store.dir / safe)
-
-    item = None
-    try:
-        item = store.get_document(safe) or store.get_document(filename)
-    except Exception:
-        item = None
-
-    if item:
-        raw_path = str(item.get("path") or "").strip()
-        if raw_path:
-            p = Path(raw_path)
-            candidates.append(p)
-            candidates.append(store.dir / p.name)
-        raw_filename = _safe_doc_filename(str(item.get("filename") or safe))
-        if raw_filename:
-            candidates.append(store.dir / raw_filename)
-
-    for path in candidates:
-        try:
-            if path and path.exists() and path.is_file():
-                return path, (path.name or safe)
-        except Exception:
-            continue
-
-    # Last-resort repair: old indexes may survive while the PDF file was not copied.
-    # For estimates/invoices, regenerate the PDF from the saved payload instead of failing.
-    if item and str(item.get("type") or "").lower() in {"estimate", "invoice"}:
-        try:
-            doc_type = str(item.get("type") or "estimate").lower()
-            number = str(item.get("number") or safe.replace(".pdf", "") or "DOCUMENT")
-            repaired_name = _safe_doc_filename(str(item.get("filename") or f"{number}.pdf")) or f"{number}.pdf"
-            repaired_path = store.dir / repaired_name
-            repaired_path.parent.mkdir(parents=True, exist_ok=True)
-            store._write_pdf(repaired_path, doc_type, dict(item), number)
-            return repaired_path, repaired_name
-        except Exception:
-            pass
-
-    # Signoffs can at least be rebuilt as a readable summary PDF if the original signed file is missing.
-    if item and str(item.get("type") or "").lower() == "signoff":
-        try:
-            from reportlab.lib.pagesizes import letter
-            from reportlab.pdfgen import canvas
-            repaired_name = _safe_doc_filename(str(item.get("filename") or safe or "SIGNOFF_REPAIRED.pdf")) or "SIGNOFF_REPAIRED.pdf"
-            repaired_path = store.dir / repaired_name
-            repaired_path.parent.mkdir(parents=True, exist_ok=True)
-            c = canvas.Canvas(str(repaired_path), pagesize=letter)
-            w, h = letter
-            y = h - 50
-            c.setFont("Helvetica-Bold", 18)
-            c.drawString(40, y, "Job Sign Off")
-            y -= 28
-            c.setFont("Helvetica", 11)
-            fields = [
-                ("Job #", item.get("job_number") or item.get("number") or ""),
-                ("Customer", item.get("customer") or ""),
-                ("Date", item.get("date") or ""),
-                ("Technician", item.get("completed_by") or item.get("techs") or ""),
-                ("Contact", item.get("contact_name") or ""),
-                ("Arrival", item.get("arrival_time") or ""),
-                ("Departure", item.get("departure_time") or ""),
-                ("Additional Techs Onsite", "Yes" if item.get("additional_techs_onsite") else "No"),
-            ]
-            for label, value in fields:
-                c.drawString(40, y, f"{label}: {value or ''}")
-                y -= 18
-            c.drawString(40, y - 20, "Signature: original signature image was not available when this PDF was rebuilt.")
-            c.showPage()
-            c.save()
-            return repaired_path, repaired_name
-        except Exception:
-            pass
-
-    raise HTTPException(status_code=404, detail="Document file not found on disk")
-
-
 @router.get("/download/{filename}")
 def download_document(request: Request, filename: str, x_api_key: Optional[str] = Header(default=None), inline: bool = Query(default=False)):
     _require(request, x_api_key)
-    path, served_name = _resolve_document_path(request, filename)
-    headers = {"Content-Disposition": f"inline; filename=\"{served_name}\""} if inline else None
-    return FileResponse(path=str(path), media_type="application/pdf", filename=None if inline else served_name, headers=headers)
+    path = request.app.state.documents_store.dir / filename
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="Document not found")
+    headers = {"Content-Disposition": f"inline; filename=\"{filename}\""} if inline else None
+    return FileResponse(path=str(path), media_type="application/pdf", filename=None if inline else filename, headers=headers)
 
 
 @router.post("/signoff")

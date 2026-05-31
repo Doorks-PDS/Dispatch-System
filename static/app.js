@@ -5528,7 +5528,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const formDate = String(f.date || f.form_date || f.created_at || j.date || j.created_at || "");
         return isRollup && formDate.startsWith(month);
       });
-      const allJobsForRollups = await apiListJobs({ limit: 5000 }).catch(() => []);
+      const allJobsForRollups = await apiListJobs({ limit: 5000, _ts: Date.now() }).catch(() => []);
       const rollUps = allJobsForRollups.filter(j => formsForJob(j).length > 0);
 
       const timecardRollups = monthTimecards.filter(t => {
@@ -7046,6 +7046,8 @@ function serializeDocItems(items, laborOnly) {
 card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const newDocNumber = (resp.doc && resp.doc.number) || dom.number.value.trim();
 const updated = await apiUpdateJob(job.id, {
   po_number: dom.po.value.trim(),
+  // Keep the actual job Estimate # protected. A newly generated estimate can fill it only when blank,
+  // but Sent Estimate # is allowed to track the latest sent/generated quote separately.
   estimate_number: docType === "estimate" ? (job.estimate_number || newDocNumber) : (job.estimate_number || ""),
   invoice_number: docType === "invoice" ? newDocNumber : (job.invoice_number || ""),
   status: docType === "invoice" ? "Done" : "Quote Sent",
