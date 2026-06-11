@@ -529,6 +529,7 @@ class CalendarStore:
             "source_job_number": str(payload.get("source_job_number") or "").strip(),
             "job_notes": str(payload.get("job_notes") or "").strip(),
             "office_notes": str(payload.get("office_notes") or "").strip(),
+            "created_by": str(payload.get("created_by") or "").strip(),
             "attachments": [],
             "completion_forms": [],
             "parts_order": {
@@ -580,7 +581,7 @@ class CalendarStore:
             "date", "status", "customer", "contact", "phone", "email", "address",
             "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
             "followup_job_id", "followup_job_number", "source_job_id", "source_job_number", "approved", "approved_at",
-            "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
+            "created_by", "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
         ]:
             if k in payload:
                 if k == "completion_forms":
