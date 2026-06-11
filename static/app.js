@@ -293,19 +293,6 @@
     return `${m}-${d}-${y}`;
   }
 
-
-  function formatCreatedDateTime(v) {
-    const raw = String(v || "").trim();
-    if (!raw) return "";
-    const d = new Date(raw);
-    if (Number.isNaN(d.getTime())) return raw;
-    return d.toLocaleString([], { month: "2-digit", day: "2-digit", year: "2-digit", hour: "numeric", minute: "2-digit" });
-  }
-
-  function currentUserDisplayName() {
-    return currentUser ? String(currentUser.name || currentUser.full_name || currentUser.username || "").trim() : "";
-  }
-
   function formatDisplayDate(value) {
     if (!value) return "";
     const s = String(value).trim();
@@ -1825,13 +1812,17 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
 
     const listId = uid("addrlist");
     input.setAttribute("list", listId);
-    let dl = buildAddressDatalist(listId, combinedAddressStrings(extraAddresses || [], knownAddresses || []));
+    let dl = buildAddressDatalist(listId, []);
     if (input.parentElement) input.parentElement.appendChild(dl);
 
+    const getCustomer = () => customerInput ? String(customerInput.value || "").trim() : "";
     const renderOptions = () => {
-      // Doorks 1.5 safety revert: show the full address list again.
-      // The customer-only filter hid older / legacy locations that are not yet in the Addresses store.
-      const values = combinedAddressStrings(extraAddresses || [], knownAddresses || []);
+      const customerName = getCustomer();
+      const filteredKnown = filteredAddressObjectsForCustomer(knownAddresses, customerName);
+      // When a customer is selected, only show saved address records tied to that customer.
+      // Generic customer-list addresses do not carry enough owner metadata, so hide them to avoid every address appearing.
+      const filteredExtra = customerName ? [] : (extraAddresses || []);
+      const values = combinedAddressStrings(filteredExtra, filteredKnown);
       const next = buildAddressDatalist(listId, values);
       if (dl && dl.parentElement) dl.parentElement.replaceChild(next, dl);
       dl = next;
@@ -1841,7 +1832,8 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     if (customerInput) ["input", "change", "blur"].forEach(evt => customerInput.addEventListener(evt, renderOptions));
 
     const apply = () => {
-      const match = findMatchingAddress(knownAddresses, input.value);
+      const matchSource = getCustomer() ? filteredAddressObjectsForCustomer(knownAddresses, getCustomer()) : knownAddresses;
+      const match = findMatchingAddress(matchSource, input.value);
       if (!match) return;
       const addr = addressDisplayValue(match);
       if (addr) input.value = addr;
@@ -2667,8 +2659,6 @@ function renderAttachmentSection(titleText, items, options = {}) {
       <div><div class="label">Estimate #</div><div class="field">${job.estimate_number || ""}</div></div>
       <div><div class="label">Sent Estimate #</div><div class="field">${job.sent_quote_number || ""}</div></div>
       <div><div class="label">Quote Assigned To</div><div class="field">${job.quote_assigned_to || ""}</div></div>
-      <div><div class="label">Created By</div><div class="field">${job.created_by || ""}</div></div>
-      <div><div class="label">Created At</div><div class="field">${formatCreatedDateTime(job.created_at) || ""}</div></div>
       <div><div class="label">Invoice #</div><div class="field">${job.invoice_number || ""}</div></div>
     `;
  
@@ -3027,12 +3017,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         editContactTimer = setTimeout(() => refreshEditContacts(false), 150);
       });
       refreshEditContacts(false);
-      wireKnownAddressAutofill({
-        input: row1.querySelector("#ej_address"),
-        customerInput: editCustomerInput,
-        knownAddresses,
-        extraAddresses: customers.map(c => c.address || c.site_address || c.job_address || "").filter(Boolean),
-      });
       card.appendChild(row0);
       card.appendChild(rowJob);
       card.appendChild(row1);
@@ -3838,7 +3822,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               phone: row2.querySelector("#nj_phone").value.trim(),
               email: row3.querySelector("#nj_email").value.trim(),
               office_notes: row3.querySelector("#nj_office_notes").value.trim(),
-              created_by: currentUserDisplayName(),
               job_number: (typeof manualJobNumber !== "undefined" ? manualJobNumber : row4.querySelector("#nj_job_number").value.trim()),
               po_number: row4.querySelector("#nj_po").value.trim(),
               estimate_number: row4.querySelector("#nj_est").value.trim(),
