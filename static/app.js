@@ -1817,12 +1817,9 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
 
     const getCustomer = () => customerInput ? String(customerInput.value || "").trim() : "";
     const renderOptions = () => {
-      const customerName = getCustomer();
-      const filteredKnown = filteredAddressObjectsForCustomer(knownAddresses, customerName);
-      // When a customer is selected, only show saved address records tied to that customer.
-      // Generic customer-list addresses do not carry enough owner metadata, so hide them to avoid every address appearing.
-      const filteredExtra = customerName ? [] : (extraAddresses || []);
-      const values = combinedAddressStrings(filteredExtra, filteredKnown);
+      // Restore full address search: show all known/saved/customer-list addresses.
+      // Manual typing still works, and exact matches still autofill city/state/zip.
+      const values = combinedAddressStrings((extraAddresses || []), (knownAddresses || []));
       const next = buildAddressDatalist(listId, values);
       if (dl && dl.parentElement) dl.parentElement.replaceChild(next, dl);
       dl = next;
@@ -1832,7 +1829,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     if (customerInput) ["input", "change", "blur"].forEach(evt => customerInput.addEventListener(evt, renderOptions));
 
     const apply = () => {
-      const matchSource = getCustomer() ? filteredAddressObjectsForCustomer(knownAddresses, getCustomer()) : knownAddresses;
+      const matchSource = knownAddresses || [];
       const match = findMatchingAddress(matchSource, input.value);
       if (!match) return;
       const addr = addressDisplayValue(match);
