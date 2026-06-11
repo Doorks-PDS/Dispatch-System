@@ -1788,17 +1788,31 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     return Array.from(new Set([...fromCustomers, ...fromKnown]));
   }
 
+  function companyAddressKey(v) {
+    return normalizeText(v)
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9]+/g, " ")
+      .replace(/\b(the|inc|incorporated|llc|l l c|corp|corporation|co|company|ltd|limited)\b/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
   function addressBelongsToCustomer(addr, customerName) {
-    const selected = normalizeText(customerName || "");
+    const selected = companyAddressKey(customerName || "");
     if (!selected) return true;
-    const owner = normalizeText(addressCustomerValue(addr));
-    return !!owner && owner === selected;
+    const owner = companyAddressKey(addressCustomerValue(addr));
+    if (!owner) return false;
+    return owner === selected || owner.includes(selected) || selected.includes(owner);
   }
 
   function filteredAddressObjectsForCustomer(knownAddresses = [], customerName = "") {
-    const selected = normalizeText(customerName || "");
-    if (!selected) return Array.isArray(knownAddresses) ? knownAddresses : [];
-    return (Array.isArray(knownAddresses) ? knownAddresses : []).filter(a => addressBelongsToCustomer(a, selected));
+    const all = Array.isArray(knownAddresses) ? knownAddresses : [];
+    const selected = companyAddressKey(customerName || "");
+    if (!selected) return all;
+    const filtered = all.filter(a => addressBelongsToCustomer(a, selected));
+    // Safety fallback: if no saved/legacy address carries this customer name, show all
+    // choices instead of hiding historical billable_time / tech_notes addresses.
+    return filtered.length ? filtered : all;
   }
 
   function customerSpecificAddressStrings(customerAddresses = [], knownAddresses = [], customerName = "") {
@@ -2852,7 +2866,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     openDrawer("Edit Job", async (drawerBody, overlay) => {
       const customers = await apiListCustomers().catch(() => []);
       const contacts = await apiListContacts().catch(() => []);
-      const knownAddresses = await apiListAddresses({ limit: 1500 }).catch(() => []);
+      const knownAddresses = await apiListAddresses({ limit: 1500, include_legacy: true }).catch(() => []);
  
       const customerListId = `cust-${Math.random().toString(36).slice(2)}`;
       const contactListId = `cont-${Math.random().toString(36).slice(2)}`;
@@ -6819,7 +6833,7 @@ function serializeDocItems(items, laborOnly) {
   function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
-      const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
+      const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 })), apiListAddresses({ limit: 1500, include_legacy: true }).catch(() => [])]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
       let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems().map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
       let currentPartResults = [];
@@ -7820,7 +7834,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const data = await apiListDoorLogs().catch(() => []);
       allLogs = Array.isArray(data) ? data : [];
       customers = await apiListCustomers().catch(() => []);
-      knownAddresses = await apiListAddresses({ limit: 1500 }).catch(() => []);
+      knownAddresses = await apiListAddresses({ limit: 1500, include_legacy: true }).catch(() => []);
       wireKnownAddressAutofill({ input: card.querySelector("#dl_address"), customerInput: card.querySelector("#dl_customer"), knownAddresses, extraAddresses: customers.map(c => c.address || c.site_address || c.job_address || "").filter(Boolean) });
       renderCustomerDatalist();
       renderList();
