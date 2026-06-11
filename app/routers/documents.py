@@ -454,7 +454,38 @@ def update_document(request: Request, filename: str, payload: DocCreate, x_api_k
 def delete_document(request: Request, filename: str, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
     try:
-        _store(request).delete_document(filename)
+        store = _store(request)
+        doc = store.get_document(filename) or {}
+        doc_number = _clean_text(doc.get("number") or doc.get("estimate_number") or doc.get("invoice_number") or "")
+        doc_type = _clean_text(doc.get("type") or "")
+        store.delete_document(filename)
+
+        # Clear stale job references only when the deleted document number matches the saved job reference.
+        job_store = getattr(request.app.state, "calendar_store", None)
+        if job_store and doc_number:
+            try:
+                data = job_store._load()
+                changed = False
+                for job in data.get("jobs", []):
+                    if not isinstance(job, dict):
+                        continue
+                    patch: dict[str, Any] = {}
+                    if doc_type == "estimate":
+                        if _clean_text(job.get("estimate_number")) == doc_number:
+                            patch["estimate_number"] = ""
+                        if _clean_text(job.get("sent_quote_number")) == doc_number:
+                            patch["sent_quote_number"] = ""
+                    elif doc_type == "invoice":
+                        if _clean_text(job.get("invoice_number")) == doc_number:
+                            patch["invoice_number"] = ""
+                    if patch:
+                        job.update(patch)
+                        changed = True
+                if changed:
+                    job_store._save(data)
+            except Exception:
+                pass
+
         return {"ok": True}
     except KeyError:
         raise HTTPException(status_code=404, detail="Document not found")

@@ -37,6 +37,20 @@ def _safe_float(value: Any) -> float:
         return 0.0
 
 
+DOC_NUMBER_FLOORS = {"estimate": 75, "invoice": 20}
+DOC_NUMBER_PREFIXES = {"estimate": "RE", "invoice": "JS"}
+
+
+def _parse_doc_number(value: Any, prefix: str) -> int:
+    text = str(value or "").strip().upper()
+    if not text.startswith(prefix):
+        return 0
+    try:
+        return int(text[len(prefix):])
+    except Exception:
+        return 0
+
+
 def _wrap_text(text: str, font_name: str, font_size: int, max_width: float) -> List[str]:
     text = str(text or "").replace("\r", "")
     if not text:
@@ -69,9 +83,9 @@ class DocumentsStore:
 
     def _ensure(self):
         base = {
-            "version": 4,
-            "estimate_next": 1,
-            "invoice_next": 1,
+            "version": 5,
+            "estimate_next": DOC_NUMBER_FLOORS["estimate"],
+            "invoice_next": DOC_NUMBER_FLOORS["invoice"],
             "items": [],
         }
         cur = _read_json(self.index_path, base)
@@ -81,6 +95,7 @@ class DocumentsStore:
             cur.setdefault(k, v)
         if not isinstance(cur.get("items"), list):
             cur["items"] = []
+        self._normalize_counters(cur)
         _write_json(self.index_path, cur)
 
     def _load(self) -> Dict[str, Any]:
@@ -88,29 +103,76 @@ class DocumentsStore:
         data = _read_json(self.index_path, {})
         if not isinstance(data, dict):
             data = {}
-        data.setdefault("estimate_next", 1)
-        data.setdefault("invoice_next", 1)
+        data.setdefault("estimate_next", DOC_NUMBER_FLOORS["estimate"])
+        data.setdefault("invoice_next", DOC_NUMBER_FLOORS["invoice"])
         data.setdefault("items", [])
         if not isinstance(data["items"], list):
             data["items"] = []
+        self._normalize_counters(data)
         return data
 
     def _save(self, data: Dict[str, Any]) -> None:
+        self._normalize_counters(data)
         _write_json(self.index_path, data)
+
+    def _normalize_counters(self, data: Dict[str, Any]) -> None:
+        items = data.get("items", []) if isinstance(data.get("items"), list) else []
+        for doc_type, prefix in DOC_NUMBER_PREFIXES.items():
+            key = "estimate_next" if doc_type == "estimate" else "invoice_next"
+            floor = DOC_NUMBER_FLOORS[doc_type]
+            max_seen = 0
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                max_seen = max(
+                    max_seen,
+                    _parse_doc_number(item.get("number"), prefix),
+                    _parse_doc_number(item.get("filename"), prefix),
+                    _parse_doc_number(item.get("estimate_number"), prefix),
+                    _parse_doc_number(item.get("invoice_number"), prefix),
+                )
+            try:
+                current = int(data.get(key, floor) or floor)
+            except Exception:
+                current = floor
+            data[key] = max(current, floor, max_seen + 1)
+
+    def _number_exists(self, data: Dict[str, Any], number: str) -> bool:
+        target = str(number or "").strip().upper()
+        filename = f"{target}.PDF"
+        for item in data.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            if str(item.get("number") or "").strip().upper() == target:
+                return True
+            if str(item.get("filename") or "").strip().upper() == filename:
+                return True
+        return False
 
     def _next_number(self, doc_type: str) -> str:
         data = self._load()
-        if doc_type == "estimate":
-            n = int(data.get("estimate_next", 1))
-            data["estimate_next"] = n + 1
-            self._save(data)
-            return f"RE{n:05d}"
-        if doc_type == "invoice":
-            n = int(data.get("invoice_next", 1))
-            data["invoice_next"] = n + 1
-            self._save(data)
-            return f"JS{n:05d}"
-        raise ValueError("Unknown doc_type")
+        if doc_type not in DOC_NUMBER_PREFIXES:
+            raise ValueError("Unknown doc_type")
+        key = "estimate_next" if doc_type == "estimate" else "invoice_next"
+        prefix = DOC_NUMBER_PREFIXES[doc_type]
+        floor = DOC_NUMBER_FLOORS[doc_type]
+        n = max(int(data.get(key, floor) or floor), floor)
+        while self._number_exists(data, f"{prefix}{n:05d}"):
+            n += 1
+        data[key] = n + 1
+        self._save(data)
+        return f"{prefix}{n:05d}"
+
+    def _valid_requested_number(self, doc_type: str, requested_number: str, data: Dict[str, Any]) -> bool:
+        if doc_type not in DOC_NUMBER_PREFIXES:
+            return False
+        prefix = DOC_NUMBER_PREFIXES[doc_type]
+        n = _parse_doc_number(requested_number, prefix)
+        if n < DOC_NUMBER_FLOORS[doc_type]:
+            return False
+        if self._number_exists(data, requested_number):
+            return False
+        return True
 
     def list_documents(self, job_id: str = "") -> List[Dict[str, Any]]:
         data = self._load()
@@ -354,7 +416,10 @@ class DocumentsStore:
 
     def create_pdf(self, doc_type: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         requested_number = str(payload.get("number") or "").strip()
-        number = requested_number or self._next_number(doc_type)
+        data = self._load()
+        number = requested_number if self._valid_requested_number(doc_type, requested_number, data) else self._next_number(doc_type)
+        payload = dict(payload)
+        payload["number"] = number
         filename = f"{number}.pdf"
         path = self.dir / filename
         self._write_pdf(path, doc_type, payload, number)

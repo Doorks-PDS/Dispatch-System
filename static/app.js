@@ -1474,7 +1474,8 @@ async function apiListForms() {
   function shouldShowEstimate(job) {
     if (job.kind === "sales_lead") return true;
     if (job.kind === "dispatch") {
-      return ["Dispatch", "Quote", "Quote Sent", "Complete/Quote"].includes(String(job.status || ""));
+      // Estimates/follow-up quotes may be needed even after a job is Complete or Done.
+      return true;
     }
     return false;
   }
@@ -1787,11 +1788,52 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     return Array.from(new Set([...fromCustomers, ...fromKnown]));
   }
 
+  function addressBelongsToCustomer(addr, customerName) {
+    const selected = normalizeText(customerName || "");
+    if (!selected) return true;
+    const owner = normalizeText(addressCustomerValue(addr));
+    return !!owner && owner === selected;
+  }
+
+  function filteredAddressObjectsForCustomer(knownAddresses = [], customerName = "") {
+    const selected = normalizeText(customerName || "");
+    if (!selected) return Array.isArray(knownAddresses) ? knownAddresses : [];
+    return (Array.isArray(knownAddresses) ? knownAddresses : []).filter(a => addressBelongsToCustomer(a, selected));
+  }
+
+  function customerSpecificAddressStrings(customerAddresses = [], knownAddresses = [], customerName = "") {
+    const filteredKnown = filteredAddressObjectsForCustomer(knownAddresses, customerName);
+    return combinedAddressStrings(customerAddresses, filteredKnown);
+  }
+
   function wireKnownAddressAutofill({ input, customerInput = null, knownAddresses = [], extraAddresses = [] }) {
     if (!input) return;
-    wireAddressSuggestions(input, combinedAddressStrings(extraAddresses, knownAddresses));
+    if (wireGoogleAddressAutocomplete(input)) return;
+
+    const listId = uid("addrlist");
+    input.setAttribute("list", listId);
+    let dl = buildAddressDatalist(listId, []);
+    if (input.parentElement) input.parentElement.appendChild(dl);
+
+    const getCustomer = () => customerInput ? String(customerInput.value || "").trim() : "";
+    const renderOptions = () => {
+      const customerName = getCustomer();
+      const filteredKnown = filteredAddressObjectsForCustomer(knownAddresses, customerName);
+      // When a customer is selected, only show saved address records tied to that customer.
+      // Generic customer-list addresses do not carry enough owner metadata, so hide them to avoid every address appearing.
+      const filteredExtra = customerName ? [] : (extraAddresses || []);
+      const values = combinedAddressStrings(filteredExtra, filteredKnown);
+      const next = buildAddressDatalist(listId, values);
+      if (dl && dl.parentElement) dl.parentElement.replaceChild(next, dl);
+      dl = next;
+    };
+
+    renderOptions();
+    if (customerInput) ["input", "change", "blur"].forEach(evt => customerInput.addEventListener(evt, renderOptions));
+
     const apply = () => {
-      const match = findMatchingAddress(knownAddresses, input.value);
+      const matchSource = getCustomer() ? filteredAddressObjectsForCustomer(knownAddresses, getCustomer()) : knownAddresses;
+      const match = findMatchingAddress(matchSource, input.value);
       if (!match) return;
       const addr = addressDisplayValue(match);
       if (addr) input.value = addr;
@@ -1838,7 +1880,9 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
   function nextDocNumberFromStorage(kind) {
     const key = kind === "estimate" ? "doorks_estimate_next" : "doorks_invoice_next";
     const prefix = kind === "estimate" ? "RE" : "JS";
-    const cur = Number(localStorage.getItem(key) || "1");
+    const floor = kind === "estimate" ? 75 : 20;
+    let cur = Number(localStorage.getItem(key) || String(floor));
+    if (!Number.isFinite(cur) || cur < floor) cur = floor;
     localStorage.setItem(key, String(cur + 1));
     return formatDocNumber(prefix, cur);
   }
@@ -2153,13 +2197,13 @@ function renderAttachmentSection(titleText, items, options = {}) {
       card.appendChild(locRow);
 
       const updateRollupLunchVisibility = () => {
-        const wrap = card.querySelector("#cf_rollup_lunch_wrap");
+        const wrap = card.querySelector("#ef_rollup_lunch_wrap");
         if (!wrap) return;
         const isRollup = String(doorSel.value || "").toLowerCase() === "roll up";
-        wrap.style.display = isRollup && !isSalesLead ? "flex" : "none";
+        wrap.style.display = isRollup && !isSalesLead ? "block" : "none";
         if (!isRollup) {
-          const cb = card.querySelector("#cf_rollup_lunch");
-          if (cb) cb.checked = false;
+          const sel = card.querySelector("#ef_rollup_lunch");
+          if (sel) sel.value = "";
         }
       };
       doorSel.addEventListener("change", updateRollupLunchVisibility);
@@ -2203,6 +2247,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
         block.style.marginTop = "10px";
         block.innerHTML = `
           <div><div class="label">Time Onsite (hours)</div><input class="input" id="ef_time" type="number" step="0.5" min="0" /></div>
+          <div id="ef_rollup_lunch_wrap" style="display:none; margin-top:10px;">
+            <div class="label">Lunch Taken While Working Roll Up?</div>
+            <select class="input" id="ef_rollup_lunch"><option value="">-- Select Yes or No --</option><option value="yes">Yes</option><option value="no">No</option></select>
+          </div>
           <div style="margin-top:10px;"><div class="label">Tech Notes</div><textarea id="ef_tech_notes"></textarea></div>
           <div class="grid2" style="margin-top:10px;">
             <div><div class="label">Parts Used</div><textarea id="ef_parts"></textarea></div>
@@ -2213,14 +2261,21 @@ function renderAttachmentSection(titleText, items, options = {}) {
         techNotes = block.querySelector("#ef_tech_notes");
         partsUsed = block.querySelector("#ef_parts");
         addRecs = block.querySelector("#ef_add_recs");
+        const lunchSelect = block.querySelector("#ef_rollup_lunch");
  
         timeInput.value = typeof f.time_onsite_hours === "number" ? String(f.time_onsite_hours) : "";
         techNotes.value = f.tech_notes || "";
         partsUsed.value = f.parts_used || "";
         addRecs.value = f.additional_recommendations || "";
+        if (lunchSelect) {
+          if (f.rollup_includes_lunch === true) lunchSelect.value = "yes";
+          else if (f.rollup_includes_lunch === false) lunchSelect.value = "no";
+          else lunchSelect.value = "";
+        }
  
         card.appendChild(block);
       }
+      updateRollupLunchVisibility();
  
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -2295,6 +2350,13 @@ function renderAttachmentSection(titleText, items, options = {}) {
           } else {
             next.status_update = stSel ? stSel.value : next.status_update;
             next.time_onsite_hours = timeInput.value.trim() === "" ? null : Number(timeInput.value.trim());
+            if (String(doorSel.value || "").toLowerCase() === "roll up") {
+              const lunchVal = card.querySelector("#ef_rollup_lunch")?.value || "";
+              if (!lunchVal) { alert("Please select Yes or No for lunch taken while working roll up."); card.querySelector("#ef_rollup_lunch")?.focus(); return; }
+              next.rollup_includes_lunch = lunchVal === "yes";
+            } else {
+              next.rollup_includes_lunch = false;
+            }
             next.tech_notes = techNotes.value.trim();
             next.parts_used = partsUsed.value.trim();
             next.additional_recommendations = addRecs.value.trim();
@@ -3149,10 +3211,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const wrap = card.querySelector("#cf_rollup_lunch_wrap");
         if (!wrap) return;
         const isRollup = String(doorSel.value || "").toLowerCase() === "roll up";
-        wrap.style.display = isRollup && !isSalesLead ? "flex" : "none";
+        wrap.style.display = isRollup && !isSalesLead ? "block" : "none";
         if (!isRollup) {
-          const cb = card.querySelector("#cf_rollup_lunch");
-          if (cb) cb.checked = false;
+          const sel = card.querySelector("#cf_rollup_lunch") || card.querySelector("#ef_rollup_lunch");
+          if (sel) sel.value = "";
         }
       };
       doorSel.addEventListener("change", updateRollupLunchVisibility);
@@ -3181,9 +3243,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="label">Time Onsite (hours)</div>
           <input class="input" id="cf_time" type="number" step="0.5" min="0" placeholder="e.g., 1.5" />
           <div class="hint">Enter hours billed in 0.5 increments.</div>
-          <label id="cf_rollup_lunch_wrap" style="display:none; align-items:center; gap:8px; margin-top:10px; font-weight:1000;">
-            <input type="checkbox" id="cf_rollup_lunch" /> Includes Lunch (-0.5 hrs for roll-up report)
-          </label>
+          <div id="cf_rollup_lunch_wrap" style="display:none; margin-top:10px;">
+            <div class="label">Lunch Taken While Working Roll Up?</div>
+            <select class="input" id="cf_rollup_lunch"><option value="">-- Select Yes or No --</option><option value="yes">Yes</option><option value="no">No</option></select>
+            <div class="hint">Required for roll-up completion forms.</div>
+          </div>
         `;
  
         const techNotes = document.createElement("div");
@@ -3251,10 +3315,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.status_update = stSel ? stSel.value : job.status;
             const v = card.querySelector("#cf_time").value.trim();
             if (v !== "") payload.time_onsite_hours = Number(v);
+            if (String(doorSel.value || "").toLowerCase() === "roll up") {
+              const lunchVal = card.querySelector("#cf_rollup_lunch")?.value || "";
+              if (!lunchVal) { alert("Please select Yes or No for lunch taken while working roll up."); card.querySelector("#cf_rollup_lunch")?.focus(); return; }
+              payload.rollup_includes_lunch = lunchVal === "yes";
+            } else {
+              payload.rollup_includes_lunch = false;
+            }
             payload.tech_notes = card.querySelector("#cf_tech_notes").value.trim();
             payload.parts_used = card.querySelector("#cf_parts").value.trim();
             payload.additional_recommendations = card.querySelector("#cf_add_recs").value.trim();
-            payload.rollup_includes_lunch = !!card.querySelector("#cf_rollup_lunch")?.checked;
           }
  
           await apiAddCompletion(job.id, payload);
@@ -6796,6 +6866,11 @@ function serializeDocItems(items, laborOnly) {
           </div>
         </div>
         <div style="margin-top:12px;"><div class="label">Proposal / Invoice Body</div><textarea id="doc_work" placeholder="Proposal Includes / Invoice Includes..." style="min-height:140px;"></textarea></div>
+        <div class="card" id="doc_source_wrap" style="padding:12px; margin-top:12px; display:none;">
+          <div class="label">Description Source</div>
+          <select class="input" id="doc_source_form"></select>
+          <div class="hint" style="margin-top:6px;">Choose which saved Completion/Recommendation Form should drive Auto Fill Description.</div>
+        </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
           <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
           <button class="btn" id="add_trip">Trip Charge</button>
@@ -6839,8 +6914,38 @@ function serializeDocItems(items, laborOnly) {
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
-      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms") };
+      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms"), sourceWrap:card.querySelector("#doc_source_wrap"), sourceForm:card.querySelector("#doc_source_form") };
       SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
+      const jobFormsForDescriptions = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
+      function isRecommendationLikeForm(f) {
+        if (!f) return false;
+        return !!(f.ready_to_quote || String(f.recommendations || "").trim() || String(f.parts_required || "").trim() || String(f.time_required || "").trim());
+      }
+      function formDateLabel(f) {
+        const raw = String((f && (f.date || f.form_date || f.created_at)) || "").slice(0, 10);
+        if (!raw) return "No date";
+        const parts = raw.split("-");
+        return parts.length === 3 ? `${parts[1]}/${parts[2]}/${parts[0]}` : raw;
+      }
+      function formSourceLabel(f, idx) {
+        const type = isRecommendationLikeForm(f) ? "Recommendation" : "Completion";
+        const details = [formDateLabel(f), f.technician_name || "", f.door_location || "", f.door_type || ""].filter(Boolean).join(" • ");
+        return `${type} Form ${idx + 1}${details ? ` — ${details}` : ""}`;
+      }
+      function selectedDescriptionForms() {
+        const selected = dom.sourceForm ? dom.sourceForm.value : "";
+        if (selected && selected.startsWith("idx:")) {
+          const idx = Number(selected.slice(4));
+          const chosen = jobFormsForDescriptions[idx];
+          return chosen ? [chosen] : [];
+        }
+        return jobFormsForDescriptions;
+      }
+      if (dom.sourceWrap && dom.sourceForm && jobFormsForDescriptions.length) {
+        dom.sourceWrap.style.display = "block";
+        dom.sourceForm.innerHTML = `<option value="">Auto-select best saved form</option>` + jobFormsForDescriptions.map((f, idx) => `<option value="idx:${idx}">${escapeHtml(formSourceLabel(f, idx))}</option>`).join("");
+        dom.sourceForm.value = jobFormsForDescriptions.length === 1 ? "idx:0" : "";
+      }
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
       if (dom.terms) {
         const blankTerm = document.createElement("option");
@@ -6916,7 +7021,7 @@ function serializeDocItems(items, laborOnly) {
       });
       card.querySelector("#doc_auto_fill").addEventListener("click", async ()=> {
         try {
-          const completionForms = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
+          const completionForms = selectedDescriptionForms();
           const crew = completionForms.length > 1 || /crew/i.test(JSON.stringify(completionForms || []));
           const resp = await apiAutoFillDescription({
             job_id: job ? (job.id || "") : "",
@@ -6991,7 +7096,7 @@ function serializeDocItems(items, laborOnly) {
 
         if (helper.autoFill) {
           try {
-            const completionForms = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
+            const completionForms = helper.sourceIndex != null && jobFormsForDescriptions[helper.sourceIndex] ? [jobFormsForDescriptions[helper.sourceIndex]] : selectedDescriptionForms();
             const crew = helper.laborType === "crew" || helper.laborType === "other" || completionForms.length > 1;
             const resp = await apiAutoFillDescription({
               job_id: job ? (job.id || "") : "",
@@ -7046,11 +7151,11 @@ function serializeDocItems(items, laborOnly) {
 card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const newDocNumber = (resp.doc && resp.doc.number) || dom.number.value.trim();
 const updated = await apiUpdateJob(job.id, {
   po_number: dom.po.value.trim(),
-  // Keep the actual job Estimate # protected. A newly generated estimate can fill it only when blank,
-  // but Sent Estimate # is allowed to track the latest sent/generated quote separately.
-  estimate_number: docType === "estimate" ? (job.estimate_number || newDocNumber) : (job.estimate_number || ""),
+  // Estimate/follow-up quote creation should populate Sent Estimate # only.
+  // Never overwrite the job's actual Estimate # and never auto-move the dispatch to Quote Sent.
+  estimate_number: job.estimate_number || "",
   invoice_number: docType === "invoice" ? newDocNumber : (job.invoice_number || ""),
-  status: docType === "invoice" ? "Done" : "Quote Sent",
+  status: docType === "invoice" ? "Done" : (job.status || "Dispatch"),
   quote_assigned_to: dom.completedBy.value || (job.quote_assigned_to || ""),
   sent_quote_number: docType === "estimate" ? newDocNumber : (job.sent_quote_number || "")
 }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
@@ -7083,6 +7188,12 @@ const updated = await apiUpdateJob(job.id, {
           form.time_required ||
           form.recommendations
         ));
+      }
+
+      function helperSourceLabel(form, idx) {
+        const type = isRecommendationForm(form) ? "Recommendation" : "Completion";
+        const details = [helperFormDate(form.date || form.form_date || form.created_at), form.technician_name || "", form.door_location || "", form.door_type || ""].filter(Boolean).join(" • ");
+        return `${type} Form ${idx + 1}${details ? ` — ${details}` : ""}`;
       }
 
       function formSummaryHtml(form, typeLabel) {
@@ -7181,6 +7292,15 @@ const updated = await apiUpdateJob(job.id, {
             <div id="helper_reference_panel" style="display:none;"></div>
           </div>
 
+          <div class="card" id="helper_source_wrap" style="padding:12px; margin-bottom:12px; ${forms.length ? "" : "display:none;"}">
+            <div class="label">Description Source</div>
+            <select class="input" id="helper_source_form">
+              <option value="">Auto-select best saved form</option>
+              ${forms.map((f, idx) => `<option value="${idx}">${escapeHtml(helperSourceLabel(f, idx))}</option>`).join("")}
+            </select>
+            <div class="hint" style="margin-top:6px;">Choose which Completion/Recommendation Form should drive the auto-filled description.</div>
+          </div>
+
           <div class="grid2">
             <div>
               <div class="label">Trip Charge Quantity</div>
@@ -7277,6 +7397,7 @@ const updated = await apiUpdateJob(job.id, {
           hours: Number(card.querySelector("#helper_hours").value || 0),
           partsText: String(card.querySelector("#helper_parts").value || "").trim(),
           autoFill: card.querySelector("#helper_auto_fill").value === "yes",
+          sourceIndex: card.querySelector("#helper_source_form") && card.querySelector("#helper_source_form").value !== "" ? Number(card.querySelector("#helper_source_form").value) : null,
         };
         if (overlay) overlay.remove();
         openEstimateInvoiceDrawer(job, initialType, container, { ...(ctx || {}), skipHelper: true, helperPrefill });
