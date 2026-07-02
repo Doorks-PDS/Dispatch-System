@@ -40,6 +40,11 @@ class TimeCardCreate(BaseModel):
     notes: str = ""
     use_pto: bool = False
     pto_hours: float = 0
+    is_holiday: bool = False
+    holiday_hours: float = 0
+    double_time_hours: float = 0
+    is_rollup_timecard: bool = False
+    rollup_hours: float = 0
     supervisor_approved: bool = False
     supervisor_approved_at: str = ""
 

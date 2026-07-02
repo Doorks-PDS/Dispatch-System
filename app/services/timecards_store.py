@@ -89,6 +89,11 @@ class TimeCardsStore:
             "notes": str(payload.get("notes") or "").strip(),
             "use_pto": bool(payload.get("use_pto", False)),
             "pto_hours": float(payload.get("pto_hours") or 0),
+            "is_holiday": bool(payload.get("is_holiday", False)),
+            "holiday_hours": float(payload.get("holiday_hours") or 0),
+            "double_time_hours": float(payload.get("double_time_hours") or payload.get("dt_hours") or 0),
+            "is_rollup_timecard": bool(payload.get("is_rollup_timecard", False)),
+            "rollup_hours": float(payload.get("rollup_hours") or 0),
             "supervisor_approved": bool(payload.get("supervisor_approved", False)),
             "supervisor_approved_at": str(payload.get("supervisor_approved_at") or "").strip(),
         }
@@ -120,6 +125,11 @@ class TimeCardsStore:
                     "notes": str(payload.get("notes") or existing.get("notes") or "").strip(),
                     "use_pto": bool(payload.get("use_pto", existing.get("use_pto", False))),
                     "pto_hours": float(payload.get("pto_hours", existing.get("pto_hours", 0)) or 0),
+                    "is_holiday": bool(payload.get("is_holiday", existing.get("is_holiday", False))),
+                    "holiday_hours": float(payload.get("holiday_hours", existing.get("holiday_hours", 0)) or 0),
+                    "double_time_hours": float(payload.get("double_time_hours", payload.get("dt_hours", existing.get("double_time_hours", existing.get("dt_hours", 0)))) or 0),
+                    "is_rollup_timecard": bool(payload.get("is_rollup_timecard", existing.get("is_rollup_timecard", False))),
+                    "rollup_hours": float(payload.get("rollup_hours", existing.get("rollup_hours", 0)) or 0),
                     "supervisor_approved": bool(payload.get("supervisor_approved", existing.get("supervisor_approved", False))),
                     "supervisor_approved_at": str(payload.get("supervisor_approved_at") or existing.get("supervisor_approved_at") or "").strip(),
                 })

@@ -1109,6 +1109,42 @@
     return Number(map[String(employee || "").trim()] || 0);
   }
 
+  function getPtoAccrualMap() {
+    const map = SHARED_SETTINGS_CACHE && SHARED_SETTINGS_CACHE.pto_accrual_rates;
+    return map && typeof map === "object" ? map : {};
+  }
+
+  function setPtoAccrualRate(employee, hours) {
+    const name = String(employee || "").trim();
+    if (!name) return;
+    const map = { ...getPtoAccrualMap(), [name]: Number(hours || 0) };
+    SHARED_SETTINGS_CACHE.pto_accrual_rates = map;
+    apiUpdateSharedSettingsSection("pto_accrual_rates", map).catch(e => console.warn("PTO accrual save failed", e));
+  }
+
+  function getPtoAccrualRate(employee) {
+    const map = getPtoAccrualMap();
+    return Number(map[String(employee || "").trim()] || 0);
+  }
+
+  function addPtoAccrualToBank(employee) {
+    const rate = getPtoAccrualRate(employee);
+    if (!rate) return 0;
+    setPtoBankHours(employee, getPtoBankHours(employee) + rate);
+    return rate;
+  }
+
+  function getTimecardDoubleTimeHours(entry) { return Math.max(0, Number(entry && (entry.double_time_hours ?? entry.dt_hours) || 0)); }
+  function getTimecardHolidayHours(entry) { return Math.max(0, Number(entry && entry.holiday_hours || 0)); }
+  function getTimecardPtoHours(entry) { return Math.max(0, Number(entry && entry.pto_hours || 0)); }
+  function getTimecardRollupHours(entry, fallbackWorked) {
+    if (!entry) return 0;
+    const manual = Number(entry.rollup_hours);
+    if (Number.isFinite(manual) && manual > 0) return manual;
+    const text = `${entry.notes || ""} ${entry.job_type || ""} ${entry.door_type || ""}`.toLowerCase();
+    return (entry.is_rollup_timecard || text.includes("roll up") || text.includes("rollup")) ? Math.max(0, Number(fallbackWorked || 0)) : 0;
+  }
+
   function getOtBankMap() {
     const map = SHARED_SETTINGS_CACHE && SHARED_SETTINGS_CACHE.ot_bank;
     return map && typeof map === "object" ? map : {};
@@ -4678,12 +4714,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Lunch Start</div><input class="input" id="et_lunch_start" type="time" value="${escapeHtml(item.lunch_start || "")}" /></div>
           <div><div class="label">Lunch End</div><input class="input" id="et_lunch_end" type="time" value="${escapeHtml(item.lunch_end || "")}" /></div>
           <div><div class="label">PTO Hours</div><input class="input" id="et_pto_hours" type="number" step="0.25" value="${escapeHtml(String(item.pto_hours || ""))}" /></div>
+          <div><div class="label">Holiday Hours</div><input class="input" id="et_holiday_hours" type="number" step="0.25" value="${escapeHtml(String(item.holiday_hours || ""))}" /></div>
+          <div><div class="label">Double Time Hours</div><input class="input" id="et_double_time_hours" type="number" step="0.25" value="${escapeHtml(String(item.double_time_hours || item.dt_hours || ""))}" /></div>
+          <div><div class="label">Roll Up Hours</div><input class="input" id="et_rollup_hours" type="number" step="0.25" value="${escapeHtml(String(item.rollup_hours || ""))}" placeholder="blank unless roll up" /></div>
+          <div><div class="label">Holiday Entry</div><select class="input" id="et_is_holiday"><option value="no">No</option><option value="yes">Yes</option></select></div>
+          <div><div class="label">Roll Up Work</div><select class="input" id="et_is_rollup"><option value="no">No</option><option value="yes">Yes</option></select></div>
         </div>
         <div style="margin-top:12px;"><div class="label">Notes</div><textarea id="et_notes">${escapeHtml(item.notes || "")}</textarea></div>
       `;
       drawerBody.appendChild(card);
       card.querySelector("#et_lunch_taken").value = item.lunch_taken ? "yes" : "no";
       card.querySelector("#et_use_pto").value = item.use_pto ? "yes" : "no";
+      card.querySelector("#et_is_holiday").value = item.is_holiday ? "yes" : "no";
+      card.querySelector("#et_is_rollup").value = item.is_rollup_timecard ? "yes" : "no";
 
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -4711,6 +4754,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             lunch_end: card.querySelector("#et_lunch_end").value,
             use_pto: card.querySelector("#et_use_pto").value === "yes",
             pto_hours: Number(card.querySelector("#et_pto_hours").value || 0),
+            is_holiday: card.querySelector("#et_is_holiday").value === "yes",
+            holiday_hours: Number(card.querySelector("#et_holiday_hours").value || 0),
+            double_time_hours: Number(card.querySelector("#et_double_time_hours").value || 0),
+            is_rollup_timecard: card.querySelector("#et_is_rollup").value === "yes",
+            rollup_hours: Number(card.querySelector("#et_rollup_hours").value || 0),
             notes: card.querySelector("#et_notes").value.trim(),
           });
           save.textContent = "Saved ✓";
@@ -4776,7 +4824,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       <div><div class="label">Lunch Start</div><input class="input" id="tc_lunch_start" type="time" /></div>
       <div><div class="label">Lunch End</div><input class="input" id="tc_lunch_end" type="time" /></div>
       <div><div class="label">PTO Hours</div><input class="input" id="tc_pto_hours" type="number" step="0.25" placeholder="0.00" /></div>
-      <div><div class="hint" style="margin-top:28px;">Use for sick time or paid hours not physically worked.</div></div>
+      <div><div class="label">Holiday Entry</div><select class="input" id="tc_is_holiday"><option value="no">No</option><option value="yes">Yes</option></select></div>
+      <div><div class="label">Holiday Hours</div><input class="input" id="tc_holiday_hours" type="number" step="0.25" placeholder="0.00" /></div>
+      <div><div class="label">Double Time Hours</div><input class="input" id="tc_double_time_hours" type="number" step="0.25" placeholder="0.00" /></div>
+      <div><div class="label">Roll Up Work</div><select class="input" id="tc_is_rollup"><option value="no">No</option><option value="yes">Yes</option></select></div>
+      <div><div class="label">Roll Up Hours</div><input class="input" id="tc_rollup_hours" type="number" step="0.25" placeholder="blank = worked hours" /></div>
     `;
  
     const notes = document.createElement("div");
@@ -4875,7 +4927,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="jobrow-addr">
               ${escapeHtml(formatDisplayDate(t.date || ""))} - ${escapeHtml(formatTimeRange12(t.start_time, t.end_time))}${t.notes ? ` - ${escapeHtml(t.notes)}` : ""}
             </div>
-            <div class="hint" style="margin-top:6px;">${escapeHtml(lunchSummary(t))}${t.supervisor_approved ? ' - Supervisor Approved' : ''}${t.use_pto ? ` - PTO ${escapeHtml(String(t.pto_hours || 0))} hrs` : ''}</div>
+            <div class="hint" style="margin-top:6px;">${escapeHtml(lunchSummary(t))}${t.supervisor_approved ? ' - Supervisor Approved' : ''}${t.use_pto ? ` - PTO ${escapeHtml(String(t.pto_hours || 0))} hrs` : ''}${t.is_holiday ? ` - Holiday ${escapeHtml(String(t.holiday_hours || 0))} hrs` : ''}${getTimecardDoubleTimeHours(t) ? ` - DT ${escapeHtml(String(getTimecardDoubleTimeHours(t).toFixed(2)))} hrs` : ''}${getTimecardRollupHours(t, hrs) ? ` - Roll Up ${escapeHtml(String(getTimecardRollupHours(t, hrs).toFixed(2)))} hrs` : ''}</div>
           `;
           row.addEventListener("click", () => openTimecardEditor(t, refresh));
           list.appendChild(row);
@@ -4901,6 +4953,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           lunch_end: form.querySelector("#tc_lunch_end").value,
           use_pto: form.querySelector("#tc_use_pto").value === "yes",
           pto_hours: Number(form.querySelector("#tc_pto_hours").value || 0),
+          is_holiday: form.querySelector("#tc_is_holiday").value === "yes",
+          holiday_hours: Number(form.querySelector("#tc_holiday_hours").value || 0),
+          double_time_hours: Number(form.querySelector("#tc_double_time_hours").value || 0),
+          is_rollup_timecard: form.querySelector("#tc_is_rollup").value === "yes",
+          rollup_hours: Number(form.querySelector("#tc_rollup_hours").value || 0),
           notes: ta.value.trim(),
         });
         btnSave.textContent = "Saved ✓";
@@ -5037,11 +5094,23 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const dailyOtHours = (hours) => Math.max(0, hours - 8);
 
     function entryHoursBreakdown(entry) {
-      const hours = calcHoursForCard(entry);
+      const worked = calcHoursForCard(entry);
+      const pto = entry && entry.use_pto ? getTimecardPtoHours(entry) : 0;
+      const holiday = entry && entry.is_holiday ? getTimecardHolidayHours(entry) : 0;
+      const doubleTime = getTimecardDoubleTimeHours(entry);
+      const regularBase = Math.max(0, worked - doubleTime);
+      const ot = dailyOtHours(regularBase);
+      const regular = Math.max(0, dailyRegularHours(regularBase));
+      const rollup = getTimecardRollupHours(entry, worked);
       return {
-        worked: hours,
-        regular: dailyRegularHours(hours),
-        ot: dailyOtHours(hours),
+        worked,
+        regular,
+        ot,
+        doubleTime,
+        pto,
+        holiday,
+        rollup,
+        total: worked + pto + holiday,
       };
     }
 
@@ -5051,8 +5120,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         acc.worked += b.worked;
         acc.regular += b.regular;
         acc.ot += b.ot;
+        acc.doubleTime += b.doubleTime;
+        acc.pto += b.pto;
+        acc.holiday += b.holiday;
+        acc.rollup += b.rollup;
+        acc.total += b.total;
         return acc;
-      }, { worked: 0, regular: 0, ot: 0 });
+      }, { worked: 0, regular: 0, ot: 0, doubleTime: 0, pto: 0, holiday: 0, rollup: 0, total: 0 });
     }
 
     function approvedPtoHoursForEmployee(emp, approvedPto, approvedTimecards) {
@@ -5073,7 +5147,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (!employees[emp]) employees[emp] = [];
         employees[emp].push(t);
       });
-      let csv = "Employee,Month,Hours Worked,Regular Hours,OT Hours,OT Bank Adj,OT Total,PTO Bank,PTO Used,PTO Remaining,Approved Cards,Pending Cards\n";
+      let csv = "Employee,Period,Total Hours,Hours Worked,Regular Hours,OT Hours,Double Time Hours,Holiday Hours,PTO Bank,PTO Accrual Rate,PTO Used,PTO Remaining,Roll Up Hours,Approved Cards,Pending Cards\n";
       Object.keys(employees).sort((a,b)=>a.localeCompare(b)).forEach(emp => {
         const entries = employees[emp];
         const breakdown = entriesBreakdown(entries);
@@ -5082,9 +5156,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const ptoBank = getPtoBankHours(emp);
         const ptoUsed = approvedPtoHoursForEmployee(emp, approvedPto, entries.filter(t => !!t.supervisor_approved));
         const ptoRemaining = ptoBank - ptoUsed;
-        const otBank = getOtBankHours(emp);
-        const otTotal = breakdown.ot + otBank;
-        csv += `${emp},${monthVal || ""},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${otBank.toFixed(2)},${otTotal.toFixed(2)},${ptoBank.toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${approvedCards},${pendingCards}\n`;
+        const accrualRate = getPtoAccrualRate(emp);
+        csv += `${emp},${monthVal || ""},${breakdown.total.toFixed(2)},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${breakdown.doubleTime.toFixed(2)},${breakdown.holiday.toFixed(2)},${ptoBank.toFixed(2)},${accrualRate.toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${breakdown.rollup.toFixed(2)},${approvedCards},${pendingCards}\n`;
       });
       return csv;
     }
@@ -5133,19 +5206,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const ptoRemaining = ptoBank - ptoUsed;
           const otBank = getOtBankHours(emp);
           const otTotal = breakdown.ot + otBank;
-          let csv = "Employee,Month,Hours Worked,Regular Hours,OT Hours,OT Bank Adj,OT Total,PTO Bank,PTO Used,PTO Remaining\n";
-          csv += `${emp},${monthVal || ""},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${otBank.toFixed(2)},${otTotal.toFixed(2)},${ptoBank.toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)}\n\n`;
-          csv += "Date,Time Range,Worked Hours,Regular Hours,OT Hours,PTO Used,PTO Hours,Approved,Notes\n";
+          let csv = "Employee,Period,Total Hours,Hours Worked,Regular Hours,OT Hours,Double Time Hours,Holiday Hours,PTO Bank,PTO Accrual Rate,PTO Used,PTO Remaining,Roll Up Hours\n";
+          csv += `${emp},${monthVal || ""},${breakdown.total.toFixed(2)},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${breakdown.doubleTime.toFixed(2)},${breakdown.holiday.toFixed(2)},${ptoBank.toFixed(2)},${getPtoAccrualRate(emp).toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${breakdown.rollup.toFixed(2)}\n\n`;
+          csv += "Date,Time Range,Total Hours,Worked Hours,Regular Hours,OT Hours,Double Time Hours,Holiday Hours,PTO Used,PTO Hours,Roll Up Hours,Approved,Notes\n";
           entries.slice().sort((a,b)=>String(itemDateOf(a)).localeCompare(String(itemDateOf(b)))).forEach(t => {
             const b = entryHoursBreakdown(t);
-            csv += `${itemDateOf(t)},${formatTimeRange12(t.start_time, t.end_time)},${b.worked.toFixed(2)},${b.regular.toFixed(2)},${b.ot.toFixed(2)},${t.use_pto ? "YES":"NO"},${Number(t.pto_hours || 0).toFixed(2)},${t.supervisor_approved ? "YES":"NO"},"${String(t.notes || "").replace(/"/g,'""')}"\n`;
+            csv += `${itemDateOf(t)},${formatTimeRange12(t.start_time, t.end_time)},${b.total.toFixed(2)},${b.worked.toFixed(2)},${b.regular.toFixed(2)},${b.ot.toFixed(2)},${b.doubleTime.toFixed(2)},${b.holiday.toFixed(2)},${t.use_pto ? "YES":"NO"},${Number(t.pto_hours || 0).toFixed(2)},${b.rollup.toFixed(2)},${t.supervisor_approved ? "YES":"NO"},"${String(t.notes || "").replace(/"/g,'""')}"\n`;
           });
           downloadCsv(`${emp.replace(/\s+/g, "_").toLowerCase()}_payroll_report.csv`, csv);
         });
 
         const ptoBankBtn = document.createElement("button");
         ptoBankBtn.className = "btn";
-        ptoBankBtn.textContent = "PTO";
+        ptoBankBtn.textContent = "PTO Bank";
         ptoBankBtn.addEventListener("click", () => {
           const current = getPtoBankHours(emp);
           const next = prompt(`Enter PTO hours available for ${emp}:`, String(current.toFixed(2)));
@@ -5157,15 +5230,39 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           refresh();
         });
 
-        const otBankBtn = document.createElement("button");
-        otBankBtn.className = "btn";
-        otBankBtn.textContent = "OT";
-        otBankBtn.addEventListener("click", () => {
-          const current = getOtBankHours(emp);
-          const next = prompt(`Enter OT hours adjustment for ${emp}:`, String(current.toFixed(2)));
+        const ptoAccrualBtn = document.createElement("button");
+        ptoAccrualBtn.className = "btn";
+        ptoAccrualBtn.textContent = "PTO Accrual";
+        ptoAccrualBtn.addEventListener("click", () => {
+          const current = getPtoAccrualRate(emp);
+          const next = prompt(`Enter PTO accrual hours per pay period for ${emp}:`, String(current.toFixed(2)));
           if (next === null) return;
           const val = Number(next || 0);
-          if (Number.isNaN(val)) return alert("Enter a valid OT hour amount.");
+          if (Number.isNaN(val)) return alert("Enter a valid PTO accrual rate.");
+          setPtoAccrualRate(emp, val);
+          if (overlay && overlay.remove) overlay.remove();
+          refresh();
+        });
+
+        const applyAccrualBtn = document.createElement("button");
+        applyAccrualBtn.className = "btn";
+        applyAccrualBtn.textContent = "Apply PTO Accrual";
+        applyAccrualBtn.addEventListener("click", () => {
+          const added = addPtoAccrualToBank(emp);
+          if (!added) return alert("Set a PTO accrual rate first.");
+          if (overlay && overlay.remove) overlay.remove();
+          refresh();
+        });
+
+        const otBankBtn = document.createElement("button");
+        otBankBtn.className = "btn";
+        otBankBtn.textContent = "Manual OT Adj";
+        otBankBtn.addEventListener("click", () => {
+          const current = getOtBankHours(emp);
+          const next = prompt(`Enter manual OT adjustment hours for ${emp}:`, String(current.toFixed(2)));
+          if (next === null) return;
+          const val = Number(next || 0);
+          if (Number.isNaN(val)) return alert("Enter a valid OT adjustment.");
           setOtBankHours(emp, val);
           if (overlay && overlay.remove) overlay.remove();
           refresh();
@@ -5173,6 +5270,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
         buttonRow.appendChild(exportEmpBtn);
         buttonRow.appendChild(ptoBankBtn);
+        buttonRow.appendChild(ptoAccrualBtn);
+        buttonRow.appendChild(applyAccrualBtn);
         buttonRow.appendChild(otBankBtn);
         wrap.appendChild(buttonRow);
 
@@ -5192,14 +5291,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const otTotal = breakdown.ot + otBank;
 
         [
-          metricCard("Hours", breakdown.worked.toFixed(2)),
+          metricCard("Total Hours", breakdown.total.toFixed(2), "Worked + PTO + holiday"),
+          metricCard("Worked", breakdown.worked.toFixed(2)),
           metricCard("Regular", breakdown.regular.toFixed(2), "Up to 8 per day"),
           metricCard("OT", breakdown.ot.toFixed(2), "Over 8 per day"),
-          metricCard("OT Adj", otBank.toFixed(2)),
+          metricCard("Double Time", breakdown.doubleTime.toFixed(2)),
+          metricCard("Holiday", breakdown.holiday.toFixed(2)),
+          metricCard("Roll Up", breakdown.rollup.toFixed(2)),
+          metricCard("Manual OT Adj", otBank.toFixed(2)),
           metricCard("OT Total", otTotal.toFixed(2)),
           metricCard("Approved", `${approvedCount}/${entries.length}`),
           metricCard("Pending", String(pendingCount)),
           metricCard("PTO Bank", ptoBank.toFixed(2)),
+          metricCard("PTO Accrual", getPtoAccrualRate(emp).toFixed(2), "Per pay period"),
           metricCard("PTO Used", ptoUsed.toFixed(2)),
           metricCard("PTO Remaining", ptoRemaining.toFixed(2)),
         ].forEach(c => totals.appendChild(c));
@@ -5217,7 +5321,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const b = entryHoursBreakdown(t);
             const row = document.createElement("div");
             row.className = "jobrow";
-            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(formatDisplayDate(itemDateOf(t)) || "")}</div><div class="hint">${b.worked.toFixed(2)} hrs</div></div><div class="jobrow-addr">${escapeHtml(formatTimeRange12(t.start_time, t.end_time))}${t.notes ? ` - ${escapeHtml(t.notes)}` : ""}</div><div class="hint" style="margin-top:6px;">Regular ${b.regular.toFixed(2)} | OT ${b.ot.toFixed(2)}${t.supervisor_approved ? ' - Supervisor Approved' : ' - Awaiting Approval'}${t.use_pto ? ` - PTO ${escapeHtml(String(Number(t.pto_hours || 0).toFixed(2)))} hrs` : ''}</div>`;
+            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(formatDisplayDate(itemDateOf(t)) || "")}</div><div class="hint">${b.worked.toFixed(2)} hrs</div></div><div class="jobrow-addr">${escapeHtml(formatTimeRange12(t.start_time, t.end_time))}${t.notes ? ` - ${escapeHtml(t.notes)}` : ""}</div><div class="hint" style="margin-top:6px;">Total ${b.total.toFixed(2)} | Regular ${b.regular.toFixed(2)} | OT ${b.ot.toFixed(2)} | DT ${b.doubleTime.toFixed(2)} | Holiday ${b.holiday.toFixed(2)} | Roll Up ${b.rollup.toFixed(2)}${t.supervisor_approved ? ' - Supervisor Approved' : ' - Awaiting Approval'}${t.use_pto ? ` - PTO ${escapeHtml(String(Number(t.pto_hours || 0).toFixed(2)))} hrs` : ''}</div>`;
             const actions = document.createElement("div");
             actions.style.display = "flex";
             actions.style.gap = "8px";
@@ -5305,6 +5409,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const totalHours = allBreakdowns.reduce((sum, b) => sum + b.worked, 0);
       const totalRegular = allBreakdowns.reduce((sum, b) => sum + b.regular, 0);
       const totalOTWorked = allBreakdowns.reduce((sum, b) => sum + b.ot, 0);
+      const totalDoubleTime = allBreakdowns.reduce((sum, b) => sum + b.doubleTime, 0);
+      const totalHoliday = allBreakdowns.reduce((sum, b) => sum + b.holiday, 0);
+      const totalRollup = allBreakdowns.reduce((sum, b) => sum + b.rollup, 0);
+      const totalPayrollHours = allBreakdowns.reduce((sum, b) => sum + b.total, 0);
       const totalOTBank = Object.keys(employees).reduce((sum, emp) => sum + getOtBankHours(emp), 0);
       const totalOT = totalOTWorked + totalOTBank;
       const totalPtoBank = Object.keys(employees).reduce((sum, emp) => sum + getPtoBankHours(emp), 0);
@@ -5324,9 +5432,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       summaryWrap.innerHTML = "";
       [
         metricCard("Employees", String(uniqueEmployees.length), "With timecards"),
+        metricCard("Total Hours", totalPayrollHours.toFixed(2), "Worked + PTO + holiday"),
         metricCard("Hours Worked", totalHours.toFixed(2), period.label),
         metricCard("Regular Hours", totalRegular.toFixed(2), "Up to 8 per day"),
-        metricCard("OT Hours", totalOT.toFixed(2), `Worked ${totalOTWorked.toFixed(2)} + Adj ${totalOTBank.toFixed(2)}`),
+        metricCard("OT Hours", totalOT.toFixed(2), `Worked ${totalOTWorked.toFixed(2)} + Manual Adj ${totalOTBank.toFixed(2)}`),
+        metricCard("Double Time", totalDoubleTime.toFixed(2), "Manual DT"),
+        metricCard("Holiday Hours", totalHoliday.toFixed(2), "Timecard holiday"),
+        metricCard("Roll Up Hours", totalRollup.toFixed(2), "For comparison"),
         metricCard("PTO Bank", totalPtoBank.toFixed(2), "Entered in payroll"),
         metricCard("PTO Used", totalPtoUsed.toFixed(2), "Approved PTO only"),
         metricCard("PTO Remaining", totalPtoRemaining.toFixed(2), "Bank minus used"),
@@ -5357,6 +5469,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const empPtoRemaining = empPtoBank - empPtoUsed;
         const empOtBank = getOtBankHours(emp);
         const empOtTotal = breakdown.ot + empOtBank;
+        const empAccrualRate = getPtoAccrualRate(emp);
         const latest = entries.slice().sort((a,b)=>String(itemDateOf(b)).localeCompare(String(itemDateOf(a))))[0];
 
         const row = document.createElement("div");
@@ -5364,9 +5477,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row.innerHTML = `
           <div class="jobrow-top">
             <div class="jobrow-name">${escapeHtml(emp)}</div>
-            <div class="hint">${breakdown.worked.toFixed(2)} hrs</div>
+            <div class="hint">${breakdown.total.toFixed(2)} total hrs</div>
           </div>
-          <div class="jobrow-addr">Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | OT Adj ${empOtBank.toFixed(2)} | OT Total ${empOtTotal.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)}</div>
+          <div class="jobrow-addr">Worked ${breakdown.worked.toFixed(2)} | Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | DT ${breakdown.doubleTime.toFixed(2)} | Holiday ${breakdown.holiday.toFixed(2)} | Roll Up ${breakdown.rollup.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)} | PTO Accrual ${empAccrualRate.toFixed(2)}</div>
           <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "—")}</div>
         `;
         row.addEventListener("click", () => openTechBreakdown(emp, entries, period, approvedPto));
@@ -6606,7 +6719,7 @@ function renderEmployeesView() {
           top.appendChild(pill);
           const meta = document.createElement("div");
           meta.className = "jobrow-addr";
-          meta.textContent = `${e.phone || ""}${e.email ? ` - ${e.email}` : ""}`;
+          meta.textContent = `${e.phone || ""}${e.email ? ` - ${e.email}` : ""}${e.name ? ` - PTO Accrual: ${getPtoAccrualRate(e.name).toFixed(2)} hrs/pay period` : ""}`;
           const a = document.createElement("div");
           a.style.display = "flex";
           a.style.gap = "8px";
@@ -6639,6 +6752,19 @@ function renderEmployeesView() {
             } catch (err) { alert(err.message || String(err)); }
           });
 
+          const ptoAccrual = document.createElement("button");
+          ptoAccrual.className = "btn";
+          ptoAccrual.textContent = "PTO Accrual";
+          ptoAccrual.addEventListener("click", async () => {
+            const current = getPtoAccrualRate(e.name);
+            const next = prompt(`PTO accrual hours per pay period for ${e.name}:`, String(current.toFixed(2)));
+            if (next === null) return;
+            const val = Number(next || 0);
+            if (Number.isNaN(val)) return alert("Enter a valid PTO accrual rate.");
+            setPtoAccrualRate(e.name, val);
+            await refresh();
+          });
+
           const del = document.createElement("button");
           del.className = "btn";
           del.textContent = "Delete Employee";
@@ -6652,6 +6778,7 @@ function renderEmployeesView() {
             } catch (err) { alert(err.message || String(err)); }
           });
           a.appendChild(edit);
+          a.appendChild(ptoAccrual);
           a.appendChild(del);
           row.appendChild(top);
           row.appendChild(meta);
