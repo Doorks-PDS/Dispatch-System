@@ -5475,6 +5475,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const totalPtoBank = Object.keys(employees).reduce((sum, emp) => sum + getPtoBankHours(emp), 0);
       const totalPtoUsed = Object.keys(employees).reduce((sum, emp) => sum + approvedPtoHoursForEmployee(emp, approvedPto, (employees[emp] || []).filter(t => !!t.supervisor_approved)), 0);
       const totalPtoRemaining = totalPtoBank - totalPtoUsed;
+      const timecardEmployeeCount = Object.keys(employees).length;
       Object.keys(rollupTotals).forEach(emp => { if (emp && !employees[emp]) employees[emp] = []; });
       const uniqueEmployees = Object.keys(employees);
       const totalDaysOff = approvedPto.length;
@@ -5489,7 +5490,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
       summaryWrap.innerHTML = "";
       [
-        metricCard("Employees", String(uniqueEmployees.length), "With timecards"),
+        metricCard("Employees", String(timecardEmployeeCount), "With timecards"),
         metricCard("Total Hours", totalPayrollHours.toFixed(2), "Worked + PTO + holiday"),
         metricCard("Hours Worked", totalHours.toFixed(2), period.label),
         metricCard("Regular Hours", totalRegular.toFixed(2), "Up to 8 per day"),
@@ -5529,7 +5530,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const empOtTotal = breakdown.ot + empOtBank;
         const empAccrualRate = getPtoAccrualRate(emp);
         const empRollup = Number(rollupTotals[emp] || 0);
-        const latest = entries.slice().sort((a,b)=>String(itemDateOf(b)).localeCompare(String(itemDateOf(a))))[0];
+        const latest = entries.slice().sort((a,b)=>String(itemDateOf(b)).localeCompare(String(itemDateOf(a))))[0] || null;
+        const lastCardLabel = latest ? (formatDisplayDate(itemDateOf(latest)) || "—") : "—";
 
         const row = document.createElement("div");
         row.className = "jobrow";
@@ -5539,7 +5541,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="hint">${breakdown.total.toFixed(2)} total hrs</div>
           </div>
           <div class="jobrow-addr">Worked ${breakdown.worked.toFixed(2)} | Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | DT ${breakdown.doubleTime.toFixed(2)} | Holiday ${breakdown.holiday.toFixed(2)} | Roll Up ${empRollup.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)} | PTO Accrual ${empAccrualRate.toFixed(2)}</div>
-          <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "—")}</div>
+          <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(lastCardLabel)}</div>
         `;
         row.addEventListener("click", () => openTechBreakdown(emp, entries, period, approvedPto, empRollup, rollupRows.filter(r => r.employee === emp)));
         rows.appendChild(row);
