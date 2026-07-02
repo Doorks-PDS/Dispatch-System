@@ -326,10 +326,120 @@ def _invoice_summary(tech_notes: str, parts_used: str = "") -> List[str]:
     return selected[:4]
 
 
+
+def _join_human(items: List[str]) -> str:
+    cleaned = [_clean_text(x) for x in items if _clean_text(x)]
+    if not cleaned:
+        return ""
+    if len(cleaned) == 1:
+        return cleaned[0]
+    if len(cleaned) == 2:
+        return f"{cleaned[0]} and {cleaned[1]}"
+    return ", ".join(cleaned[:-1]) + f", and {cleaned[-1]}"
+
+
+def _format_hours(value: Any) -> str:
+    text = _clean_text(value)
+    if not text:
+        return ""
+    low = text.lower()
+    if "hour" in low or "hr" in low:
+        return text
+    try:
+        num = float(re.sub(r"[^0-9.]", "", text))
+        if num == 1:
+            return "1 hour"
+        if num.is_integer():
+            return f"{int(num)} hours"
+        return f"{num:g} hours"
+    except Exception:
+        return text
+
+
+def _clean_scope_item(item: str) -> str:
+    item = _clean_text(item)
+    if not item:
+        return ""
+    item = re.sub(r"^[-•]\s*", "", item)
+    item = re.sub(r"^recommended\s+scope\s+includes\s*:?", "", item, flags=re.I).strip()
+    item = re.sub(r"^(parts?|materials?)\s+(required|used)\s*:?", "", item, flags=re.I).strip()
+    item = re.sub(r"^(quote\s+to|recommend(ed)?|need(s)?|replace)\s+", "", item, flags=re.I).strip()
+    item = item.strip(" .")
+    return item
+
+
+def _scope_items_from_selected(data: dict[str, Any]) -> List[str]:
+    out: List[str] = []
+    for key in ["selected_parts", "selectedParts", "helper_parts", "helperParts"]:
+        val = data.get(key)
+        if isinstance(val, list):
+            for row in val:
+                if isinstance(row, dict):
+                    code = _clean_text(row.get("Item") or row.get("item") or row.get("code"))
+                    desc = _clean_text(row.get("Description") or row.get("description"))
+                    text = " ".join(x for x in [code, desc] if x)
+                    if text:
+                        out.append(text)
+                else:
+                    text = _clean_text(row)
+                    if text:
+                        out.append(text)
+    for key in ["custom_parts_text", "customPartsText", "parts_text", "partsText"]:
+        val = _clean_multiline(data.get(key))
+        if val:
+            out.extend([x for x in re.split(r"\n+", val) if _clean_text(x)])
+    return [_clean_scope_item(x) for x in out if _clean_scope_item(x)]
+
+
+def _proposal_scope_sentence(scope_items: List[str], tech: str) -> str:
+    items = [_clean_scope_item(x) for x in scope_items if _clean_scope_item(x)]
+    if not items:
+        return ""
+    if len(items) <= 3:
+        return f"We are proposing to furnish and install {_join_human(items)}."
+    return "Recommended scope includes:\n" + "\n".join(f"- {item}" for item in items)
+
+
+def _shorten_findings(text: str, door_location: str, door_type: str, tech: str) -> str:
+    clean = _normalize_findings(text, door_location, door_type)
+    if not clean:
+        target = " ".join(x for x in [door_location, door_type] if x).strip() or "opening"
+        return f"{tech.lower()} reviewed the {target} and identified recommended repairs."
+
+    clean = re.sub(r"^At the\s+", "the ", clean, flags=re.I)
+    clean = re.sub(r"^at the\s+", "the ", clean, flags=re.I)
+    clean = re.sub(r"^customer\s+showed\s+me\s+", "the technician reviewed ", clean, flags=re.I)
+    clean = re.sub(r"\bI\s+recommend\b", "the technician recommended", clean, flags=re.I)
+    clean = re.sub(r"\bwe\s+recommend\b", "the technicians recommended", clean, flags=re.I)
+    clean = re.sub(r"\bquote\s+to\b", "recommended", clean, flags=re.I)
+    clean = re.sub(r"\s+", " ", clean).strip()
+
+    # Avoid giant copy/paste tech notes in proposal body.
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", clean) if s.strip()]
+    selected = []
+    for sentence in sentences:
+        low = sentence.lower()
+        if any(k in low for k in ["broken", "worn", "failing", "failed", "damaged", "not functioning", "needs", "recommended", "replace", "repair", "adjust", "compliance", "daylight", "leaking", "binding", "rubbing"]):
+            selected.append(_as_sentence(sentence))
+        if len(selected) >= 2:
+            break
+    if not selected and sentences:
+        selected.append(_as_sentence(sentences[0]))
+    result = " ".join(selected).strip()
+    if result:
+        result = result[0].upper() + result[1:]
+        result = re.sub(r"(?<=[.!?])\s+the\s+technician", " The technician", result)
+        result = re.sub(r"(?<=[.!?])\s+the\s+technicians", " The technicians", result)
+        return result
+    clean = _as_sentence(clean)
+    return clean[0].upper() + clean[1:] if clean else clean
+
+
 def generate_description_from_data(data: dict[str, Any]) -> str:
     doc_type = _clean_text(data.get("doc_type") or data.get("type") or "estimate").lower()
     crew = bool(data.get("crew"))
     tech = "Technicians" if crew else "Technician"
+    tech_lower = "technicians" if crew else "technician"
 
     form = _best_form(data, doc_type)
     office_notes = _clean_text(data.get("office_notes") or data.get("officeNotes"))
@@ -351,31 +461,38 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
         lines.append("********JOB COMPLETE*********")
         return " ".join(line for line in lines if line).strip()
 
-    # Estimates: recommendation/quote forms first; dispatch/job notes only as last fallback.
+    # Estimates: selected recommendation/completion form first; dispatch/job notes only as fallback.
     preferred_source = form_recs or form_tech_notes or payload_notes or office_notes or job_notes
 
     title = _proposal_title(data, form)
     lines: List[str] = [f"Proposal Includes – {title}"]
 
-    findings = _normalize_findings(preferred_source, door_location, door_type)
+    findings = _shorten_findings(preferred_source, door_location, door_type, tech)
     if findings:
-        lines.append(f"Per our site visit, {findings}")
+        lines.append(f"Per our recent site visit, {findings}")
     else:
-        lines.append("Per our site visit, technician reviewed the condition of the opening and identified recommended repairs.")
+        lines.append(f"Per our recent site visit, {tech_lower} reviewed the opening and identified recommended repairs.")
 
-    scope_items = _extract_parts_required(parts_required)
+    scope_items = _scope_items_from_selected(data)
+    if not scope_items:
+        scope_items = _extract_parts_required(parts_required)
     if not scope_items:
         scope_items = _extract_approval_scope(job_notes)
 
-    if scope_items:
+    scope_sentence = _proposal_scope_sentence(scope_items, tech)
+    if scope_sentence:
         lines.append("")
-        lines.append("Recommended scope includes:")
-        for item in scope_items:
-            lines.append(f"- {item}")
+        lines.extend(scope_sentence.split("\n"))
 
-    if time_required:
+    if scope_items:
+        lines.append(f"Upon completion of work, {tech_lower} will test and adjust as needed to ensure proper function and security.")
+    else:
+        lines.append(f"Upon completion of work, {tech_lower} will test and adjust the opening as needed to ensure proper function and security.")
+
+    labor_text = _format_hours(time_required)
+    if labor_text:
         lines.append("")
-        lines.append(f"Estimated onsite labor: {time_required} hour(s).")
+        lines.append(f"Estimated onsite labor: {labor_text}.")
 
     lines.append("")
     lines.append("Please allow 1–3 weeks for scheduling and material procurement.")

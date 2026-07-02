@@ -7305,6 +7305,8 @@ function serializeDocItems(items, laborOnly) {
               job_notes: (job && job.job_notes) || "",
               completion_forms: completionForms,
               recommendation_forms: completionForms.filter(f => f && (f.ready_to_quote || f.parts_required || f.time_required)),
+              selected_parts: Array.isArray(helper.parts) ? helper.parts : [],
+              custom_parts_text: String(helper.partsText || "").trim(),
               crew: !!crew,
               trips: Number(helper.tripQty || 1),
               type: docType,
