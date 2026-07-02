@@ -554,6 +554,32 @@ class CalendarStore:
         self._save(data)
         return job
 
+
+    def _normalize_completion_forms_for_rollup(self, forms: Any) -> List[Dict[str, Any]]:
+        if not isinstance(forms, list):
+            return []
+        normalized = []
+        for raw in forms:
+            if not isinstance(raw, dict):
+                continue
+            f = dict(raw)
+            door_type = str(f.get("door_type") or "").strip()
+            try:
+                base_hours = float(f.get("time_onsite_hours") or 0)
+            except Exception:
+                base_hours = 0.0
+            base_hours = max(0.0, round(base_hours * 2) / 2.0)
+            if "time_onsite_hours" in f:
+                f["time_onsite_hours"] = base_hours
+            if door_type.lower() == "roll up":
+                includes_lunch = bool(f.get("rollup_includes_lunch", False))
+                f["rollup_includes_lunch"] = includes_lunch
+                f["rollup_adjusted_hours"] = max(0.0, round((base_hours - (0.5 if includes_lunch else 0.0)) * 2) / 2.0)
+            else:
+                f["rollup_adjusted_hours"] = base_hours if "time_onsite_hours" in f else f.get("rollup_adjusted_hours")
+            normalized.append(f)
+        return normalized
+
     def update_job(self, job_id: str, payload: Dict[str, Any]) -> Dict[str, Any]:
         with self._lock:
             data = self._load()
@@ -586,7 +612,7 @@ class CalendarStore:
             if k in payload:
                 if k == "completion_forms":
                     if isinstance(payload.get(k), list):
-                        j[k] = payload.get(k)
+                        j[k] = self._normalize_completion_forms_for_rollup(payload.get(k))
                 elif k == "parts_order":
                     if isinstance(payload.get(k), dict):
                         cur_po = j.get("parts_order") if isinstance(j.get("parts_order"), dict) else {}

@@ -6872,6 +6872,7 @@ function serializeDocItems(items, laborOnly) {
           <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
           <button class="btn" id="add_trip">Trip Charge</button>
           <button class="btn" id="add_fuel">Fuel Surcharge</button>
+          <button class="btn" id="add_freight">Freight Surcharge</button>
           <button class="btn" id="add_single">Single Tech Labor</button>
           <button class="btn" id="add_crew">Crew Tech Labor</button>
           <button class="btn" id="add_blank">Add Blank Line</button>
@@ -6982,6 +6983,7 @@ function serializeDocItems(items, laborOnly) {
       dom.partLookup.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addPartToItems(findPartMatch(dom.partLookup.value)||currentPartResults[0]); }});
       card.querySelector("#add_trip").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:Number(pricing.trip || 175), kind:"trip", taxable:false })); renderItems(); });
       card.querySelector("#add_fuel").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:Number(pricing.fuel || 20), kind:"fuel", taxable:false })); renderItems(); });
+      const freightBtn = card.querySelector("#add_freight"); if (freightBtn) freightBtn.addEventListener("click", ()=>{ const amt = prompt("Freight surcharge amount:", ""); if (amt === null) return; const n = Number(String(amt).replace(/[$,]/g, "") || 0); if (!Number.isFinite(n) || n < 0) return alert("Enter a valid freight amount."); items.push(createDocLineItem({ code:"FREIGHT", description:"Freight Surcharge", qty:1, rate:n, kind:"fee", taxable:false })); renderItems(); });
       card.querySelector("#add_single").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"LABOR", description:"Single Tech Labor", qty:1, rate:Number(pricing.labor || 175), kind:"labor", taxable:false })); renderItems(); });
       card.querySelector("#add_crew").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:1, rate:Number(pricing.crew_labor || 235), kind:"labor", taxable:false })); renderItems(); });
       card.querySelector("#add_blank").addEventListener("click", ()=>{ items.push(createDocLineItem({ kind:"other" })); renderItems(); });
@@ -7083,6 +7085,16 @@ function serializeDocItems(items, laborOnly) {
           }
           items.push(createDocLineItem({ code: "LABOR", description: desc, qty, rate, kind: "labor", taxable: false }));
         }
+
+        const freightAmount = Number(helper.freightAmount || 0);
+        if (freightAmount > 0) {
+          items.push(createDocLineItem({ code: "FREIGHT", description: "Freight Surcharge", qty: 1, rate: freightAmount, kind: "fee", taxable: false }));
+        }
+
+        const helperParts = Array.isArray(helper.parts) ? helper.parts : [];
+        helperParts.forEach(part => {
+          items.push(createDocLineItem({ code: part.Item || "PART", description: part.Description || "", qty: 1, rate: Number(part.Price || 0), kind: "part", taxable: true }));
+        });
 
         const partsText = String(helper.partsText || "").trim();
         if (partsText) {
@@ -7308,6 +7320,10 @@ const updated = await apiUpdateJob(job.id, {
               <input class="input" id="helper_fuel_qty" type="number" min="0" step="1" value="1" />
             </div>
           </div>
+          <div style="margin-top:12px;">
+            <div class="label">Freight Surcharge (Untaxed)</div>
+            <input class="input" id="helper_freight" type="number" min="0" step="0.01" placeholder="Optional freight amount" />
+          </div>
 
           <div class="card" style="padding:12px; margin-top:12px;">
             <div class="label">Labor Type</div>
@@ -7344,7 +7360,12 @@ const updated = await apiUpdateJob(job.id, {
 
           <div style="margin-top:12px;">
             <div class="label">Parts / Materials</div>
-            <textarea id="helper_parts" placeholder="Enter parts, one per line. You can still edit/add parts in the estimate or invoice." style="min-height:100px;"></textarea>
+            <input class="input" id="helper_part_search" placeholder="Search saved parts list by item number or description" autocomplete="off" />
+            <div class="hint" id="helper_part_hint" style="margin-top:6px;">Search and click a part to add it. You can still add blank/special items in the editable estimate.</div>
+            <div id="helper_part_results" style="display:grid; gap:8px; margin-top:8px;"></div>
+            <div class="label" style="margin-top:10px;">Special / Blank Line Items</div>
+            <textarea id="helper_parts" placeholder="Optional: enter custom parts/materials, one per line. These will be added as editable blank lines." style="min-height:90px;"></textarea>
+            <div id="helper_selected_parts" style="display:grid; gap:8px; margin-top:8px;"></div>
           </div>
 
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
@@ -7380,6 +7401,54 @@ const updated = await apiUpdateJob(job.id, {
         card.querySelector("#help_yes").disabled = true;
       });
 
+      const helperSelectedParts = [];
+      const helperPartSearch = card.querySelector("#helper_part_search");
+      const helperPartResults = card.querySelector("#helper_part_results");
+      const helperPartHint = card.querySelector("#helper_part_hint");
+      const helperSelectedPartsBox = card.querySelector("#helper_selected_parts");
+      function renderHelperSelectedParts() {
+        if (!helperSelectedPartsBox) return;
+        helperSelectedPartsBox.innerHTML = "";
+        if (!helperSelectedParts.length) return;
+        helperSelectedParts.forEach((part, idx) => {
+          const row = document.createElement("div");
+          row.className = "jobrow";
+          row.innerHTML = `<div class="jobrow-top"><div><div class="jobrow-name">${escapeHtml(part.Item || part.item || "PART")}</div><div class="hint">${escapeHtml(part.Description || part.description || "")}${part.Price ? ` - $${money(part.Price)}` : ""}</div></div><button class="btn" type="button">Remove</button></div>`;
+          row.querySelector("button").addEventListener("click", () => { helperSelectedParts.splice(idx, 1); renderHelperSelectedParts(); });
+          helperSelectedPartsBox.appendChild(row);
+        });
+      }
+      function renderHelperPartResults(results) {
+        if (!helperPartResults) return;
+        helperPartResults.innerHTML = "";
+        const arr = Array.isArray(results) ? results : [];
+        if (helperPartHint) helperPartHint.textContent = arr.length ? `${arr.length} matching part${arr.length === 1 ? "" : "s"}` : "No matching parts found.";
+        arr.slice(0, 8).forEach(part => {
+          const btn = document.createElement("button");
+          btn.className = "btn";
+          btn.type = "button";
+          btn.style.textAlign = "left";
+          btn.innerHTML = `<strong>${escapeHtml(part.Item || "")}</strong><br><span class="hint">${escapeHtml(part.Description || "")}${part.Price ? ` - $${money(part.Price)}` : ""}</span>`;
+          btn.addEventListener("click", () => {
+            helperSelectedParts.push(part);
+            if (helperPartSearch) helperPartSearch.value = "";
+            renderHelperPartResults([]);
+            renderHelperSelectedParts();
+          });
+          helperPartResults.appendChild(btn);
+        });
+      }
+      let helperPartTimer = null;
+      if (helperPartSearch) helperPartSearch.addEventListener("input", () => {
+        clearTimeout(helperPartTimer);
+        const q = helperPartSearch.value.trim();
+        if (!q) { renderHelperPartResults([]); return; }
+        helperPartTimer = setTimeout(async () => {
+          try { renderHelperPartResults(await apiListParts({ q, limit: 20 })); }
+          catch { renderHelperPartResults([]); }
+        }, 180);
+      });
+
       card.querySelector("#helper_cancel").addEventListener("click", () => {
         if (overlay) overlay.remove();
       });
@@ -7388,11 +7457,13 @@ const updated = await apiUpdateJob(job.id, {
         const helperPrefill = {
           tripQty: Number(card.querySelector("#helper_trip_qty").value || 0),
           fuelQty: Number(card.querySelector("#helper_fuel_qty").value || 0),
+          freightAmount: Number(card.querySelector("#helper_freight")?.value || 0),
           laborType: laborType.value,
           techCount: Number(card.querySelector("#helper_tech_count").value || 1),
           customRate: Number(card.querySelector("#helper_custom_rate").value || pricing.labor || 175),
           hours: Number(card.querySelector("#helper_hours").value || 0),
           partsText: String(card.querySelector("#helper_parts").value || "").trim(),
+          parts: helperSelectedParts.map(p => ({ Item: p.Item || "", Description: p.Description || "", Price: Number(p.Price || 0) })),
           autoFill: card.querySelector("#helper_auto_fill").value === "yes",
           sourceIndex: card.querySelector("#helper_source_form") && card.querySelector("#helper_source_form").value !== "" ? Number(card.querySelector("#helper_source_form").value) : null,
         };
@@ -7453,15 +7524,26 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const docs = await apiListDocuments({ type }).catch(() => []);
       const card = document.createElement("div");
       card.className = "card";
-      card.innerHTML = `<h3>${type === "estimate" ? "Saved Estimates" : "Saved Invoices"}</h3><div class="hint">View, edit, or delete saved documents.</div>`;
+      card.innerHTML = `<h3>${type === "estimate" ? "Saved Estimates" : "Saved Invoices"}</h3><div class="hint">View, edit, or delete saved documents.</div><input class="input" id="doc_list_search" placeholder="Search ${type === "estimate" ? "estimates" : "invoices"} by #, customer, address, job #, PO #, prepared by..." style="margin-top:12px;" />`;
       const list = document.createElement("div");
       list.style.display = "grid";
       list.style.gap = "8px";
       list.style.marginTop = "12px";
-      if (!docs.length) {
-        list.innerHTML = `<div class="hint">No ${type}s saved yet.</div>`;
-      } else {
-        docs.forEach(doc => {
+
+      const renderRows = (query = "") => {
+        const q = String(query || "").trim().toLowerCase();
+        const filtered = docs.filter(doc => {
+          if (!q) return true;
+          const hay = [doc.number, doc.filename, doc.customer, doc.address, doc.job_number, doc.po_number, doc.completed_by, doc.type]
+            .map(v => String(v || "").toLowerCase()).join(" ");
+          return hay.includes(q);
+        });
+        list.innerHTML = "";
+        if (!filtered.length) {
+          list.innerHTML = `<div class="hint">No matching ${type}s found.</div>`;
+          return;
+        }
+        filtered.forEach(doc => {
           const row = document.createElement("div");
           row.className = "jobrow";
           row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${type === "invoice" ? "Invoice" : "Estimate"} ${escapeHtml(doc.number || "")}</div>${statusPill(type === "invoice" ? "Done" : "Quote Sent").outerHTML}</div><div class="jobrow-addr">${escapeHtml(doc.customer || "")}${doc.job_number ? ` - Job #${escapeHtml(doc.job_number)}` : ""}</div><div class="hint">${escapeHtml(doc.address || "")}</div><div class="hint">Prepared By: ${escapeHtml(doc.completed_by || "")}</div>`;
@@ -7501,7 +7583,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
           row.appendChild(actions);
           list.appendChild(row);
         });
-      }
+      };
+
+      renderRows("");
+      const searchInput = card.querySelector("#doc_list_search");
+      if (searchInput) searchInput.addEventListener("input", () => renderRows(searchInput.value));
       card.appendChild(list);
       body.appendChild(card);
     }
