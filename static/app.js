@@ -4716,9 +4716,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">PTO Hours</div><input class="input" id="et_pto_hours" type="number" step="0.25" value="${escapeHtml(String(item.pto_hours || ""))}" /></div>
           <div><div class="label">Holiday Hours</div><input class="input" id="et_holiday_hours" type="number" step="0.25" value="${escapeHtml(String(item.holiday_hours || ""))}" /></div>
           <div><div class="label">Double Time Hours</div><input class="input" id="et_double_time_hours" type="number" step="0.25" value="${escapeHtml(String(item.double_time_hours || item.dt_hours || ""))}" /></div>
-          <div><div class="label">Roll Up Hours</div><input class="input" id="et_rollup_hours" type="number" step="0.25" value="${escapeHtml(String(item.rollup_hours || ""))}" placeholder="blank unless roll up" /></div>
           <div><div class="label">Holiday Entry</div><select class="input" id="et_is_holiday"><option value="no">No</option><option value="yes">Yes</option></select></div>
-          <div><div class="label">Roll Up Work</div><select class="input" id="et_is_rollup"><option value="no">No</option><option value="yes">Yes</option></select></div>
         </div>
         <div style="margin-top:12px;"><div class="label">Notes</div><textarea id="et_notes">${escapeHtml(item.notes || "")}</textarea></div>
       `;
@@ -4726,7 +4724,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.querySelector("#et_lunch_taken").value = item.lunch_taken ? "yes" : "no";
       card.querySelector("#et_use_pto").value = item.use_pto ? "yes" : "no";
       card.querySelector("#et_is_holiday").value = item.is_holiday ? "yes" : "no";
-      card.querySelector("#et_is_rollup").value = item.is_rollup_timecard ? "yes" : "no";
 
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -4757,8 +4754,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             is_holiday: card.querySelector("#et_is_holiday").value === "yes",
             holiday_hours: Number(card.querySelector("#et_holiday_hours").value || 0),
             double_time_hours: Number(card.querySelector("#et_double_time_hours").value || 0),
-            is_rollup_timecard: card.querySelector("#et_is_rollup").value === "yes",
-            rollup_hours: Number(card.querySelector("#et_rollup_hours").value || 0),
             notes: card.querySelector("#et_notes").value.trim(),
           });
           save.textContent = "Saved ✓";
@@ -4827,8 +4822,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       <div><div class="label">Holiday Entry</div><select class="input" id="tc_is_holiday"><option value="no">No</option><option value="yes">Yes</option></select></div>
       <div><div class="label">Holiday Hours</div><input class="input" id="tc_holiday_hours" type="number" step="0.25" placeholder="0.00" /></div>
       <div><div class="label">Double Time Hours</div><input class="input" id="tc_double_time_hours" type="number" step="0.25" placeholder="0.00" /></div>
-      <div><div class="label">Roll Up Work</div><select class="input" id="tc_is_rollup"><option value="no">No</option><option value="yes">Yes</option></select></div>
-      <div><div class="label">Roll Up Hours</div><input class="input" id="tc_rollup_hours" type="number" step="0.25" placeholder="blank = worked hours" /></div>
     `;
  
     const notes = document.createElement("div");
@@ -4927,7 +4920,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="jobrow-addr">
               ${escapeHtml(formatDisplayDate(t.date || ""))} - ${escapeHtml(formatTimeRange12(t.start_time, t.end_time))}${t.notes ? ` - ${escapeHtml(t.notes)}` : ""}
             </div>
-            <div class="hint" style="margin-top:6px;">${escapeHtml(lunchSummary(t))}${t.supervisor_approved ? ' - Supervisor Approved' : ''}${t.use_pto ? ` - PTO ${escapeHtml(String(t.pto_hours || 0))} hrs` : ''}${t.is_holiday ? ` - Holiday ${escapeHtml(String(t.holiday_hours || 0))} hrs` : ''}${getTimecardDoubleTimeHours(t) ? ` - DT ${escapeHtml(String(getTimecardDoubleTimeHours(t).toFixed(2)))} hrs` : ''}${getTimecardRollupHours(t, hrs) ? ` - Roll Up ${escapeHtml(String(getTimecardRollupHours(t, hrs).toFixed(2)))} hrs` : ''}</div>
+            <div class="hint" style="margin-top:6px;">${escapeHtml(lunchSummary(t))}${t.supervisor_approved ? ' - Supervisor Approved' : ''}${t.use_pto ? ` - PTO ${escapeHtml(String(t.pto_hours || 0))} hrs` : ''}${t.is_holiday ? ` - Holiday ${escapeHtml(String(t.holiday_hours || 0))} hrs` : ''}${getTimecardDoubleTimeHours(t) ? ` - DT ${escapeHtml(String(getTimecardDoubleTimeHours(t).toFixed(2)))} hrs` : ''}</div>
           `;
           row.addEventListener("click", () => openTimecardEditor(t, refresh));
           list.appendChild(row);
@@ -4956,8 +4949,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           is_holiday: form.querySelector("#tc_is_holiday").value === "yes",
           holiday_hours: Number(form.querySelector("#tc_holiday_hours").value || 0),
           double_time_hours: Number(form.querySelector("#tc_double_time_hours").value || 0),
-          is_rollup_timecard: form.querySelector("#tc_is_rollup").value === "yes",
-          rollup_hours: Number(form.querySelector("#tc_rollup_hours").value || 0),
           notes: ta.value.trim(),
         });
         btnSave.textContent = "Saved ✓";
@@ -5050,7 +5041,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.className = "card";
       card.style.padding = "14px";
       card.innerHTML = `
-        <div style="font-size:12px;font-weight:800;opacity: ""}</div>
+        <div style="font-size:12px;font-weight:800;opacity:.75;">${escapeHtml(label)}</div>
         <div style="font-size:30px;font-weight:900;line-height:1;">${escapeHtml(value)}</div>
         <div class="hint" style="margin-top:6px;">${escapeHtml(hint)}</div>
       `;
@@ -5101,7 +5092,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const regularBase = Math.max(0, worked - doubleTime);
       const ot = dailyOtHours(regularBase);
       const regular = Math.max(0, dailyRegularHours(regularBase));
-      const rollup = getTimecardRollupHours(entry, worked);
+      const rollup = 0;
       return {
         worked,
         regular,
@@ -5129,6 +5120,41 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }, { worked: 0, regular: 0, ot: 0, doubleTime: 0, pto: 0, holiday: 0, rollup: 0, total: 0 });
     }
 
+    async function payrollRollupDataForPeriod(period) {
+      const jobs = await apiListJobs({ limit: 5000, _ts: Date.now() }).catch(() => []);
+      const rows = [];
+      const totals = {};
+      const includeDate = (d) => {
+        const date = String(d || "");
+        if (!date) return false;
+        return period && period.hasRange
+          ? dateRangeIncludesDate(period.startDate, period.endDate, date)
+          : monthIncludesDate(period && period.monthVal, date);
+      };
+      jobs.forEach(j => {
+        formsOf(j).forEach(f => {
+          const doorType = String(f.door_type || f.doorType || "").trim().toLowerCase();
+          if (doorType !== "roll up") return;
+          const d = f.date || f.form_date || f.created_at || j.date || j.created_at || "";
+          if (!includeDate(d)) return;
+          const tech = String(f.technician_name || f.tech || f.technician || "Unassigned").trim() || "Unassigned";
+          const hrs = Math.max(0, Number(f.rollup_adjusted_hours ?? f.time_onsite_hours ?? f.hours ?? f.time ?? 0));
+          if (!totals[tech]) totals[tech] = 0;
+          totals[tech] += hrs;
+          rows.push({
+            date: d,
+            employee: tech,
+            customer: j.customer || j.customer_name || "",
+            address: j.street_address || j.address || "",
+            job_number: j.job_number || j.job || "",
+            door_location: f.door_location || "",
+            hours: hrs,
+          });
+        });
+      });
+      return { rows, totals, total: Object.values(totals).reduce((sum, v) => sum + Number(v || 0), 0) };
+    }
+
     function approvedPtoHoursForEmployee(emp, approvedPto, approvedTimecards) {
       const timeoffHours = approvedPto
         .filter(t => employeeNameOfItem(t) === emp && !!t.use_pto)
@@ -5139,7 +5165,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       return timeoffHours + tcHours;
     }
 
-    function buildCrewCsv(monthVal, filtered, approvedPto) {
+    function buildCrewCsv(monthVal, filtered, approvedPto, rollupTotals = {}) {
       const employees = {};
       filtered.forEach(t => {
         const emp = employeeNameOfItem(t);
@@ -5157,7 +5183,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const ptoUsed = approvedPtoHoursForEmployee(emp, approvedPto, entries.filter(t => !!t.supervisor_approved));
         const ptoRemaining = ptoBank - ptoUsed;
         const accrualRate = getPtoAccrualRate(emp);
-        csv += `${emp},${monthVal || ""},${breakdown.total.toFixed(2)},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${breakdown.doubleTime.toFixed(2)},${breakdown.holiday.toFixed(2)},${ptoBank.toFixed(2)},${accrualRate.toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${breakdown.rollup.toFixed(2)},${approvedCards},${pendingCards}\n`;
+        const rollupHours = Number(rollupTotals[emp] || 0);
+        csv += `${emp},${monthVal || ""},${breakdown.total.toFixed(2)},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${breakdown.doubleTime.toFixed(2)},${breakdown.holiday.toFixed(2)},${ptoBank.toFixed(2)},${accrualRate.toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${rollupHours.toFixed(2)},${approvedCards},${pendingCards}\n`;
       });
       return csv;
     }
@@ -5177,7 +5204,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }, 500);
     }
 
-    async function openTechBreakdown(emp, entries, period, approvedPto) {
+    async function openTechBreakdown(emp, entries, period, approvedPto, rollupHours = 0, rollupRows = []) {
       const timeoffItems = await apiListTimeOff({ employee_name: emp, limit: 500 }).catch(() => []);
       const monthVal = period && period.monthVal ? period.monthVal : "";
       const monthTimeoff = timeoffItems.filter(t => {
@@ -5207,11 +5234,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const otBank = getOtBankHours(emp);
           const otTotal = breakdown.ot + otBank;
           let csv = "Employee,Period,Total Hours,Hours Worked,Regular Hours,OT Hours,Double Time Hours,Holiday Hours,PTO Bank,PTO Accrual Rate,PTO Used,PTO Remaining,Roll Up Hours\n";
-          csv += `${emp},${monthVal || ""},${breakdown.total.toFixed(2)},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${breakdown.doubleTime.toFixed(2)},${breakdown.holiday.toFixed(2)},${ptoBank.toFixed(2)},${getPtoAccrualRate(emp).toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${breakdown.rollup.toFixed(2)}\n\n`;
-          csv += "Date,Time Range,Total Hours,Worked Hours,Regular Hours,OT Hours,Double Time Hours,Holiday Hours,PTO Used,PTO Hours,Roll Up Hours,Approved,Notes\n";
+          csv += `${emp},${monthVal || ""},${breakdown.total.toFixed(2)},${breakdown.worked.toFixed(2)},${breakdown.regular.toFixed(2)},${breakdown.ot.toFixed(2)},${breakdown.doubleTime.toFixed(2)},${breakdown.holiday.toFixed(2)},${ptoBank.toFixed(2)},${getPtoAccrualRate(emp).toFixed(2)},${ptoUsed.toFixed(2)},${ptoRemaining.toFixed(2)},${Number(rollupHours || 0).toFixed(2)}\n\n`;
+          csv += "Date,Time Range,Total Hours,Worked Hours,Regular Hours,OT Hours,Double Time Hours,Holiday Hours,PTO Used,PTO Hours,Approved,Notes\n";
           entries.slice().sort((a,b)=>String(itemDateOf(a)).localeCompare(String(itemDateOf(b)))).forEach(t => {
             const b = entryHoursBreakdown(t);
-            csv += `${itemDateOf(t)},${formatTimeRange12(t.start_time, t.end_time)},${b.total.toFixed(2)},${b.worked.toFixed(2)},${b.regular.toFixed(2)},${b.ot.toFixed(2)},${b.doubleTime.toFixed(2)},${b.holiday.toFixed(2)},${t.use_pto ? "YES":"NO"},${Number(t.pto_hours || 0).toFixed(2)},${b.rollup.toFixed(2)},${t.supervisor_approved ? "YES":"NO"},"${String(t.notes || "").replace(/"/g,'""')}"\n`;
+            csv += `${itemDateOf(t)},${formatTimeRange12(t.start_time, t.end_time)},${b.total.toFixed(2)},${b.worked.toFixed(2)},${b.regular.toFixed(2)},${b.ot.toFixed(2)},${b.doubleTime.toFixed(2)},${b.holiday.toFixed(2)},${t.use_pto ? "YES":"NO"},${Number(t.pto_hours || 0).toFixed(2)},${t.supervisor_approved ? "YES":"NO"},"${String(t.notes || "").replace(/"/g,'""')}"\n`;
+          });
+          csv += "\nRoll Up Detail From Data Center\n";
+          csv += "Date,Customer,Address,Job Number,Door Location,Hours\n";
+          rollupRows.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(r => {
+            const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
+            csv += [esc(r.date), esc(r.customer), esc(r.address), esc(r.job_number), esc(r.door_location), Number(r.hours || 0).toFixed(2)].join(",") + "\n";
           });
           downloadCsv(`${emp.replace(/\s+/g, "_").toLowerCase()}_payroll_report.csv`, csv);
         });
@@ -5297,7 +5330,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           metricCard("OT", breakdown.ot.toFixed(2), "Over 8 per day"),
           metricCard("Double Time", breakdown.doubleTime.toFixed(2)),
           metricCard("Holiday", breakdown.holiday.toFixed(2)),
-          metricCard("Roll Up", breakdown.rollup.toFixed(2)),
+          metricCard("Roll Up Hours", Number(rollupHours || 0).toFixed(2), "From Roll Up Data Center"),
           metricCard("Manual OT Adj", otBank.toFixed(2)),
           metricCard("OT Total", otTotal.toFixed(2)),
           metricCard("Approved", `${approvedCount}/${entries.length}`),
@@ -5321,7 +5354,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const b = entryHoursBreakdown(t);
             const row = document.createElement("div");
             row.className = "jobrow";
-            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(formatDisplayDate(itemDateOf(t)) || "")}</div><div class="hint">${b.worked.toFixed(2)} hrs</div></div><div class="jobrow-addr">${escapeHtml(formatTimeRange12(t.start_time, t.end_time))}${t.notes ? ` - ${escapeHtml(t.notes)}` : ""}</div><div class="hint" style="margin-top:6px;">Total ${b.total.toFixed(2)} | Regular ${b.regular.toFixed(2)} | OT ${b.ot.toFixed(2)} | DT ${b.doubleTime.toFixed(2)} | Holiday ${b.holiday.toFixed(2)} | Roll Up ${b.rollup.toFixed(2)}${t.supervisor_approved ? ' - Supervisor Approved' : ' - Awaiting Approval'}${t.use_pto ? ` - PTO ${escapeHtml(String(Number(t.pto_hours || 0).toFixed(2)))} hrs` : ''}</div>`;
+            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(formatDisplayDate(itemDateOf(t)) || "")}</div><div class="hint">${b.worked.toFixed(2)} hrs</div></div><div class="jobrow-addr">${escapeHtml(formatTimeRange12(t.start_time, t.end_time))}${t.notes ? ` - ${escapeHtml(t.notes)}` : ""}</div><div class="hint" style="margin-top:6px;">Total ${b.total.toFixed(2)} | Regular ${b.regular.toFixed(2)} | OT ${b.ot.toFixed(2)} | DT ${b.doubleTime.toFixed(2)} | Holiday ${b.holiday.toFixed(2)}${t.supervisor_approved ? ' - Supervisor Approved' : ' - Awaiting Approval'}${t.use_pto ? ` - PTO ${escapeHtml(String(Number(t.pto_hours || 0).toFixed(2)))} hrs` : ''}</div>`;
             const actions = document.createElement("div");
             actions.style.display = "flex";
             actions.style.gap = "8px";
@@ -5334,7 +5367,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
             const approveBtn = document.createElement("button");
             approveBtn.className = t.supervisor_approved ? "btn btn-orange" : "btn";
-            approveBtn.textContent = t.supervisor_approved ? "Supervisor Approved" : "Supervisal Approval";
+            approveBtn.textContent = t.supervisor_approved ? "Supervisor Approved" : "Supervisor Approval";
             approveBtn.addEventListener("click", async (e) => {
               e.stopPropagation();
               try {
@@ -5343,7 +5376,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 const updatedEntries = entries.map(entry => entry.id === t.id ? { ...entry, supervisor_approved: payload.supervisor_approved, supervisor_approved_at: payload.supervisor_approved_at } : entry);
                 if (overlay && overlay.remove) overlay.remove();
                 await refresh();
-                openTechBreakdown(emp, updatedEntries, monthVal, approvedPto);
+                openTechBreakdown(emp, updatedEntries, period, approvedPto, rollupHours, rollupRows);
               } catch (e2) {
                 alert(e2.message || String(e2));
               }
@@ -5358,6 +5391,27 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         }
         wrap.appendChild(rows);
         drawerBody.appendChild(wrap);
+
+        const rollupCard = document.createElement("div");
+        rollupCard.className = "card";
+        rollupCard.style.marginTop = "12px";
+        rollupCard.innerHTML = `<h3>Roll Up Detail</h3><div class="hint">Pulled from Completion Forms / Data Center Roll Up, not manual timecard entry.</div>`;
+        const rollRows = document.createElement("div");
+        rollRows.style.display = "grid";
+        rollRows.style.gap = "8px";
+        rollRows.style.marginTop = "10px";
+        if (!rollupRows.length) {
+          rollRows.innerHTML = `<div class="hint">No roll up completion forms found for this pay period.</div>`;
+        } else {
+          rollupRows.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).forEach(r => {
+            const row = document.createElement("div");
+            row.className = "jobrow";
+            row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(formatDisplayDate(r.date) || "")}</div><div class="hint">${Number(r.hours || 0).toFixed(2)} hrs</div></div><div class="jobrow-addr">${escapeHtml(r.customer || "")}${r.job_number ? ` - Job #${escapeHtml(r.job_number)}` : ""}${r.door_location ? ` - ${escapeHtml(r.door_location)}` : ""}</div><div class="hint" style="margin-top:6px;">${escapeHtml(r.address || "")}</div>`;
+            rollRows.appendChild(row);
+          });
+        }
+        rollupCard.appendChild(rollRows);
+        drawerBody.appendChild(rollupCard);
 
         const ptoCard = document.createElement("div");
         ptoCard.className = "card";
@@ -5404,6 +5458,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         ? timeoff.filter(t => dateRangeIncludesDate(period.startDate, period.endDate, itemDateOf(t)))
         : (monthVal ? timeoff.filter(t => monthIncludesDate(monthVal, itemDateOf(t))) : timeoff.slice());
       const approvedPto = monthPto.filter(t => String(t.status || "").toLowerCase() === "approved");
+      const rollupData = await payrollRollupDataForPeriod(period);
+      const rollupTotals = rollupData.totals || {};
+      const rollupRows = rollupData.rows || [];
 
       const allBreakdowns = Object.values(employees).map(entriesBreakdown);
       const totalHours = allBreakdowns.reduce((sum, b) => sum + b.worked, 0);
@@ -5411,13 +5468,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const totalOTWorked = allBreakdowns.reduce((sum, b) => sum + b.ot, 0);
       const totalDoubleTime = allBreakdowns.reduce((sum, b) => sum + b.doubleTime, 0);
       const totalHoliday = allBreakdowns.reduce((sum, b) => sum + b.holiday, 0);
-      const totalRollup = allBreakdowns.reduce((sum, b) => sum + b.rollup, 0);
+      const totalRollup = Number(rollupData.total || 0);
       const totalPayrollHours = allBreakdowns.reduce((sum, b) => sum + b.total, 0);
       const totalOTBank = Object.keys(employees).reduce((sum, emp) => sum + getOtBankHours(emp), 0);
       const totalOT = totalOTWorked + totalOTBank;
       const totalPtoBank = Object.keys(employees).reduce((sum, emp) => sum + getPtoBankHours(emp), 0);
       const totalPtoUsed = Object.keys(employees).reduce((sum, emp) => sum + approvedPtoHoursForEmployee(emp, approvedPto, (employees[emp] || []).filter(t => !!t.supervisor_approved)), 0);
       const totalPtoRemaining = totalPtoBank - totalPtoUsed;
+      Object.keys(rollupTotals).forEach(emp => { if (emp && !employees[emp]) employees[emp] = []; });
       const uniqueEmployees = Object.keys(employees);
       const totalDaysOff = approvedPto.length;
       const pendingCards = filtered.filter(t => !t.supervisor_approved).length;
@@ -5425,7 +5483,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const approvalRate = filtered.length ? Math.round((approvedCards / filtered.length) * 100) : 0;
 
       exportBtn.onclick = () => {
-        const csv = buildCrewCsv(period.label, filtered, approvedPto);
+        const csv = buildCrewCsv(period.label, filtered, approvedPto, rollupTotals);
         downloadCsv("payroll_report.csv", csv);
       };
 
@@ -5438,7 +5496,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         metricCard("OT Hours", totalOT.toFixed(2), `Worked ${totalOTWorked.toFixed(2)} + Manual Adj ${totalOTBank.toFixed(2)}`),
         metricCard("Double Time", totalDoubleTime.toFixed(2), "Manual DT"),
         metricCard("Holiday Hours", totalHoliday.toFixed(2), "Timecard holiday"),
-        metricCard("Roll Up Hours", totalRollup.toFixed(2), "For comparison"),
+        metricCard("Roll Up Hours", totalRollup.toFixed(2), "From Data Center Roll Up"),
         metricCard("PTO Bank", totalPtoBank.toFixed(2), "Entered in payroll"),
         metricCard("PTO Used", totalPtoUsed.toFixed(2), "Approved PTO only"),
         metricCard("PTO Remaining", totalPtoRemaining.toFixed(2), "Bank minus used"),
@@ -5470,6 +5528,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const empOtBank = getOtBankHours(emp);
         const empOtTotal = breakdown.ot + empOtBank;
         const empAccrualRate = getPtoAccrualRate(emp);
+        const empRollup = Number(rollupTotals[emp] || 0);
         const latest = entries.slice().sort((a,b)=>String(itemDateOf(b)).localeCompare(String(itemDateOf(a))))[0];
 
         const row = document.createElement("div");
@@ -5479,10 +5538,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="jobrow-name">${escapeHtml(emp)}</div>
             <div class="hint">${breakdown.total.toFixed(2)} total hrs</div>
           </div>
-          <div class="jobrow-addr">Worked ${breakdown.worked.toFixed(2)} | Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | DT ${breakdown.doubleTime.toFixed(2)} | Holiday ${breakdown.holiday.toFixed(2)} | Roll Up ${breakdown.rollup.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)} | PTO Accrual ${empAccrualRate.toFixed(2)}</div>
+          <div class="jobrow-addr">Worked ${breakdown.worked.toFixed(2)} | Regular ${breakdown.regular.toFixed(2)} | OT ${breakdown.ot.toFixed(2)} | DT ${breakdown.doubleTime.toFixed(2)} | Holiday ${breakdown.holiday.toFixed(2)} | Roll Up ${empRollup.toFixed(2)} | PTO Remaining ${empPtoRemaining.toFixed(2)} | PTO Accrual ${empAccrualRate.toFixed(2)}</div>
           <div class="hint" style="margin-top:6px;">Approved ${empApproved}/${entries.length} | Pending ${empPending} | Days Off ${empDaysOff} | Last card: ${escapeHtml(formatDisplayDate(itemDateOf(latest)) || "—")}</div>
         `;
-        row.addEventListener("click", () => openTechBreakdown(emp, entries, period, approvedPto));
+        row.addEventListener("click", () => openTechBreakdown(emp, entries, period, approvedPto, empRollup, rollupRows.filter(r => r.employee === emp)));
         rows.appendChild(row);
       });
 
