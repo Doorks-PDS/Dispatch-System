@@ -581,6 +581,87 @@
         </div>
         <div class="hint" style="margin-top:10px;">This creates a live dispatch from the legacy job so it appears on the calendar and can be edited like a normal dispatch.</div>
       `;
+      let doorRecordPanel = null;
+      let doorRecordLogs = [];
+      if (!isSalesLead) {
+        doorRecordPanel = document.createElement("div");
+        doorRecordPanel.className = "card";
+        doorRecordPanel.style.marginTop = "12px";
+        doorRecordPanel.style.background = "#f8fafc";
+        doorRecordPanel.innerHTML = `
+          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+            <div>
+              <div style="font-weight:1000;">Door Records</div>
+              <div class="hint">Optionally attach this completion form to an existing door or create a new door record.</div>
+            </div>
+            <button type="button" class="btn" id="cf_door_record_toggle">Add to Door Records</button>
+          </div>
+          <div id="cf_door_record_body" style="display:none; margin-top:12px;">
+            <div class="grid2">
+              <div>
+                <div class="label">Record Action</div>
+                <select class="input" id="cf_door_record_mode">
+                  <option value="">-- Do Not Add --</option>
+                  <option value="existing">Add to Existing Door</option>
+                  <option value="new">Create New Door Record</option>
+                </select>
+              </div>
+              <div id="cf_existing_door_wrap" style="display:none;">
+                <div class="label">Existing Door</div>
+                <select class="input" id="cf_existing_door"><option value="">-- Select Door --</option></select>
+              </div>
+            </div>
+            <div id="cf_new_door_wrap" style="display:none; margin-top:10px;">
+              <div class="grid2">
+                <div><div class="label">Door ID</div><input class="input" id="cf_new_door_id" placeholder="Required, e.g. AMB-AUTO-01" /></div>
+                <div><div class="label">Manufacturer</div><input class="input" id="cf_new_manufacturer" /></div>
+                <div><div class="label">Model</div><input class="input" id="cf_new_model" /></div>
+                <div><div class="label">Serial Number</div><input class="input" id="cf_new_serial" /></div>
+              </div>
+            </div>
+          </div>
+        `;
+        card.appendChild(doorRecordPanel);
+
+        const toggle = doorRecordPanel.querySelector("#cf_door_record_toggle");
+        const body = doorRecordPanel.querySelector("#cf_door_record_body");
+        const mode = doorRecordPanel.querySelector("#cf_door_record_mode");
+        const existingWrap = doorRecordPanel.querySelector("#cf_existing_door_wrap");
+        const newWrap = doorRecordPanel.querySelector("#cf_new_door_wrap");
+        const existingSel = doorRecordPanel.querySelector("#cf_existing_door");
+
+        const renderDoorChoices = () => {
+          const customer = normalizeText(job.customer || "");
+          const address = normalizeText(job.address || "");
+          const filtered = doorRecordLogs.filter(item => {
+            const itemCustomer = normalizeText(item.customer || "");
+            const itemAddress = normalizeText(item.address || "");
+            if (customer && itemCustomer && itemCustomer === customer) return true;
+            if (address && itemAddress && itemAddress === address) return true;
+            return false;
+          });
+          const choices = filtered.length ? filtered : doorRecordLogs;
+          existingSel.innerHTML = `<option value="">-- Select Door --</option>` + choices.map(item => {
+            const label = [item.door_id, item.door_location, item.address].filter(Boolean).join(" — ") || item.customer || "Door Record";
+            return `<option value="${escapeHtml(item.id || "")}">${escapeHtml(label)}</option>`;
+          }).join("");
+        };
+
+        toggle.addEventListener("click", async () => {
+          const opening = body.style.display === "none";
+          body.style.display = opening ? "block" : "none";
+          toggle.textContent = opening ? "Hide Door Records" : "Add to Door Records";
+          if (opening && !doorRecordLogs.length) {
+            doorRecordLogs = await apiListDoorLogs().catch(() => []);
+            renderDoorChoices();
+          }
+        });
+        mode.addEventListener("change", () => {
+          existingWrap.style.display = mode.value === "existing" ? "block" : "none";
+          newWrap.style.display = mode.value === "new" ? "block" : "none";
+        });
+      }
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
@@ -1013,6 +1094,14 @@
   async function apiUpdateDoorLog(id, payload) {
     return await fetchJSON(`/door-logs/${encodeURIComponent(id)}`, {
       method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async function apiAppendDoorLogHistory(id, payload) {
+    return await fetchJSON(`/door-logs/${encodeURIComponent(id)}/history`, {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
@@ -3392,7 +3481,60 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.additional_recommendations = card.querySelector("#cf_add_recs").value.trim();
           }
  
-          await apiAddCompletion(job.id, payload);
+          const savedForm = await apiAddCompletion(job.id, payload);
+
+          if (!isSalesLead && doorRecordPanel) {
+            const mode = doorRecordPanel.querySelector("#cf_door_record_mode")?.value || "";
+            if (mode) {
+              const historyEntry = {
+                source_key: `completion:${job.id}:${savedForm.id || ""}`,
+                source_type: "completion_form",
+                job_id: job.id,
+                job_number: job.job_number || "",
+                completion_form_id: savedForm.id || "",
+                date: savedForm.form_date || savedForm.date || payload.form_date || payload.date || "",
+                technician: savedForm.technician_name || payload.technician_name || "",
+                door_type: savedForm.door_type || payload.door_type || "",
+                door_location: savedForm.door_location || payload.door_location || "",
+                summary: savedForm.tech_notes || payload.tech_notes || "",
+                parts_used: savedForm.parts_used || payload.parts_used || "",
+                recommendations: savedForm.additional_recommendations || payload.additional_recommendations || "",
+              };
+              try {
+                if (mode === "existing") {
+                  const recordId = doorRecordPanel.querySelector("#cf_existing_door")?.value || "";
+                  if (!recordId) throw new Error("Select an existing Door Record or choose Create New Door Record.");
+                  await apiAppendDoorLogHistory(recordId, historyEntry);
+                } else if (mode === "new") {
+                  const doorId = doorRecordPanel.querySelector("#cf_new_door_id")?.value.trim() || "";
+                  if (!doorId) throw new Error("Door ID is required when creating a new Door Record.");
+                  await apiCreateDoorLog({
+                    customer: job.customer || "",
+                    address: job.address || "",
+                    project: job.po_number || "",
+                    job_number: job.job_number || "",
+                    door_location: payload.door_location || "",
+                    door_id: doorId,
+                    door_type: payload.door_type || "",
+                    manufacturer: doorRecordPanel.querySelector("#cf_new_manufacturer")?.value.trim() || "",
+                    model: doorRecordPanel.querySelector("#cf_new_model")?.value.trim() || "",
+                    serial_number: doorRecordPanel.querySelector("#cf_new_serial")?.value.trim() || "",
+                    pass_fail: "",
+                    work_type: "Other",
+                    work_performed: payload.tech_notes || "",
+                    repairs: payload.tech_notes || "",
+                    has_recommendations: !!payload.additional_recommendations,
+                    needs_follow_up: !!payload.additional_recommendations,
+                    additional_recommendations: payload.additional_recommendations || "",
+                    notes: "Created from completion form.",
+                    history: [historyEntry],
+                  });
+                }
+              } catch (doorRecordError) {
+                alert(`Completion form saved, but Door Records was not updated: ${doorRecordError.message || doorRecordError}`);
+              }
+            }
+          }
  
           overlay.remove();
           const updatedJob = await apiGetJob(job.id);
@@ -7950,6 +8092,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <div><div class="label">Door ID</div><input class="input" id="dl_door_id" placeholder="Required searchable door identifier" /></div>
         <div><div class="label">Door Type</div><select class="input" id="dl_door_type"><option value="">Select Door Type --</option><option>Automatic Door</option><option>Man Door</option><option>Storefront Door</option><option>Herculite Door</option><option>Roll Up</option><option>Glass</option><option>Roll/Swing Gate</option><option>Other</option></select></div>
         <div><div class="label">Pass / Fail</div><select class="input" id="dl_pass_fail"><option value="">-- Select --</option><option>Pass</option><option>Fail</option></select></div>
+        <div><div class="label">Manufacturer</div><input class="input" id="dl_manufacturer" /></div>
+        <div><div class="label">Model</div><input class="input" id="dl_model" /></div>
+        <div><div class="label">Serial Number</div><input class="input" id="dl_serial" /></div>
       </div>
       <div style="margin-top:10px;">
         <div class="label">Work Performed</div>
@@ -8003,6 +8148,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         door_id: card.querySelector("#dl_door_id").value.trim(),
         door_type: card.querySelector("#dl_door_type").value.trim(),
         pass_fail: card.querySelector("#dl_pass_fail").value.trim(),
+        manufacturer: card.querySelector("#dl_manufacturer").value.trim(),
+        model: card.querySelector("#dl_model").value.trim(),
+        serial_number: card.querySelector("#dl_serial").value.trim(),
         work_type: card.querySelector("#dl_work_type").value.trim(),
         repairs: card.querySelector("#dl_work_type").value.trim() === "Other" ? card.querySelector("#dl_repairs").value.trim() : card.querySelector("#dl_work_type").value.trim(),
         work_performed: card.querySelector("#dl_work_type").value.trim() === "Other" ? card.querySelector("#dl_repairs").value.trim() : card.querySelector("#dl_work_type").value.trim(),
@@ -8022,6 +8170,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       card.querySelector("#dl_door_id").value = item?.door_id || "";
       card.querySelector("#dl_door_type").value = item?.door_type || "";
       card.querySelector("#dl_pass_fail").value = item?.pass_fail || "";
+      card.querySelector("#dl_manufacturer").value = item?.manufacturer || "";
+      card.querySelector("#dl_model").value = item?.model || "";
+      card.querySelector("#dl_serial").value = item?.serial_number || "";
       const savedWork = item?.work_type || item?.work_performed || item?.repairs || "";
       if (["PM Services", "Fire Testing"].includes(savedWork)) {
         card.querySelector("#dl_work_type").value = savedWork;
@@ -8040,22 +8191,60 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
     function clearForm() { fillForm(null); }
     function matches(item, q) {
-      const hay = [item.customer, item.address, item.project, item.job_number, item.door_location, item.door_id, item.door_type, item.pass_fail, item.work_type, item.work_performed, item.repairs, item.additional_recommendations, item.notes, item.needs_follow_up].join(" ").toLowerCase();
+      const history = Array.isArray(item.history) ? item.history : [];
+      const historyText = history.map(entry => [entry.job_number, entry.technician, entry.date, entry.summary, entry.parts_used, entry.recommendations, entry.door_location, entry.door_type].join(" ")).join(" ");
+      const hay = [item.customer, item.address, item.project, item.job_number, item.door_location, item.door_id, item.door_type, item.manufacturer, item.model, item.serial_number, item.pass_fail, item.work_type, item.work_performed, item.repairs, item.additional_recommendations, item.notes, item.needs_follow_up, historyText].join(" ").toLowerCase();
       return !q || hay.includes(q);
+    }
+    async function openDoorHistoryJob(entry) {
+      if (!entry || !entry.job_id) return;
+      try {
+        const sourceJob = await apiGetJob(entry.job_id);
+        openDrawer(`Door History — ${sourceJob.job_number || "Job"}`, async (drawerBody) => {
+          renderJobDetails(drawerBody, sourceJob, { afterSave: async () => {}, afterDelete: async () => {} });
+        });
+      } catch (e) {
+        alert(e.message || String(e));
+      }
     }
     function renderList() {
       const q = String(card.querySelector("#dl_search").value || "").trim().toLowerCase();
       list.innerHTML = "";
       const filtered = allLogs.filter(item => matches(item, q));
-      if (!filtered.length) { list.innerHTML = `<div class="hint">No door logs found.</div>`; return; }
+      if (!filtered.length) { list.innerHTML = `<div class="hint">No door records found.</div>`; return; }
       filtered.forEach(item => {
         const row = document.createElement("div");
         row.className = "jobrow";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Record")}</div><div class="badge">${escapeHtml(item.pass_fail || "Open")}</div></div><div class="jobrow-addr">${escapeHtml(item.address || "")}</div><div class="hint">Project: ${escapeHtml(item.project || "")} | Job #: ${escapeHtml(item.job_number || "")}</div><div class="hint">Door Location: ${escapeHtml(item.door_location || "")} | Door ID: ${escapeHtml(item.door_id || "")}</div><div class="hint">Door Type: ${escapeHtml(item.door_type || "")}</div><div class="hint">Work Performed: ${escapeHtml(item.work_performed || item.repairs || "")}</div><div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations || "")}</div>${(item.needs_follow_up || item.has_recommendations) ? `<div class="badge" style="margin-top:6px; background:#fee2e2; color:#991b1b;">Quote / Return Visit Needed</div>` : ""}<div class="hint">Notes: ${escapeHtml(item.notes || "")}</div>`;
+        const history = (Array.isArray(item.history) ? item.history.slice() : []).sort((a, b) => String(b.date || b.created_at || "").localeCompare(String(a.date || a.created_at || "")));
+        const historyHtml = history.length ? history.map((entry, index) => `
+          <div style="border-top:1px solid #e5e7eb; padding:10px 0; margin-top:${index ? 0 : 8}px;">
+            <div style="display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap;">
+              <strong>${escapeHtml(entry.date || "Service Visit")}</strong>
+              <span class="badge">${escapeHtml(entry.job_number || "No Job #")}</span>
+            </div>
+            <div class="hint">Technician: ${escapeHtml(entry.technician || "—")}</div>
+            ${entry.summary ? `<div style="margin-top:5px;">${escapeHtml(entry.summary)}</div>` : ""}
+            ${entry.parts_used ? `<div class="hint" style="margin-top:4px;"><strong>Parts:</strong> ${escapeHtml(entry.parts_used)}</div>` : ""}
+            ${entry.recommendations ? `<div class="hint" style="margin-top:4px;"><strong>Recommendations:</strong> ${escapeHtml(entry.recommendations)}</div>` : ""}
+            ${entry.job_id ? `<button class="btn" data-door-history-index="${index}" style="margin-top:7px;">Open Job / Completion Form</button>` : ""}
+          </div>`).join("") : `<div class="hint" style="margin-top:8px;">No linked completion-form history yet.</div>`;
+        row.innerHTML = `
+          <div class="jobrow-top"><div class="jobrow-name">${escapeHtml(item.customer || "Door Record")}</div><div class="badge">${escapeHtml(item.pass_fail || "Active")}</div></div>
+          <div class="jobrow-addr">${escapeHtml(item.address || "")}</div>
+          <div class="hint">Door: ${escapeHtml(item.door_id || "—")} | ${escapeHtml(item.door_location || "—")} | ${escapeHtml(item.door_type || "—")}</div>
+          <div class="hint">Manufacturer: ${escapeHtml(item.manufacturer || "—")} | Model: ${escapeHtml(item.model || "—")} | Serial: ${escapeHtml(item.serial_number || "—")}</div>
+          <div class="hint">Latest Job #: ${escapeHtml(item.job_number || "—")} | History Entries: ${history.length}</div>
+          ${item.work_performed || item.repairs ? `<div class="hint">Work Performed: ${escapeHtml(item.work_performed || item.repairs || "")}</div>` : ""}
+          ${item.additional_recommendations ? `<div class="hint">Recommendations: ${escapeHtml(item.additional_recommendations)}</div>` : ""}
+          ${(item.needs_follow_up || item.has_recommendations) ? `<div class="badge" style="margin-top:6px; background:#fee2e2; color:#991b1b;">Quote / Return Visit Needed</div>` : ""}
+          <details style="margin-top:8px;"><summary style="cursor:pointer; font-weight:800;">Service History (${history.length})</summary>${historyHtml}</details>`;
+        row.querySelectorAll("button[data-door-history-index]").forEach(btn => {
+          btn.addEventListener("click", () => openDoorHistoryJob(history[Number(btn.dataset.doorHistoryIndex)]));
+        });
         const actions = document.createElement("div");
         actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "8px";
         const edit = document.createElement("button"); edit.className = "btn"; edit.textContent = "Edit"; edit.addEventListener("click", ()=> fillForm(item));
-        const del = document.createElement("button"); del.className = "btn"; del.textContent = "Delete"; del.addEventListener("click", async ()=> { if (!confirm("Delete this door log?")) return; await apiDeleteDoorLog(item.id); await load(); });
+        const del = document.createElement("button"); del.className = "btn"; del.textContent = "Delete"; del.addEventListener("click", async ()=> { if (!confirm("Delete this door record and its linked history?")) return; await apiDeleteDoorLog(item.id); await load(); });
         actions.append(edit, del); row.appendChild(actions); list.appendChild(row);
       });
     }
