@@ -581,86 +581,6 @@
         </div>
         <div class="hint" style="margin-top:10px;">This creates a live dispatch from the legacy job so it appears on the calendar and can be edited like a normal dispatch.</div>
       `;
-      let doorRecordPanel = null;
-      let doorRecordLogs = [];
-      if (!isSalesLead) {
-        doorRecordPanel = document.createElement("div");
-        doorRecordPanel.className = "card";
-        doorRecordPanel.style.marginTop = "12px";
-        doorRecordPanel.style.background = "#f8fafc";
-        doorRecordPanel.innerHTML = `
-          <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-            <div>
-              <div style="font-weight:1000;">Door Records</div>
-              <div class="hint">Optionally attach this completion form to an existing door or create a new door record.</div>
-            </div>
-            <button type="button" class="btn" id="cf_door_record_toggle">Add to Door Records</button>
-          </div>
-          <div id="cf_door_record_body" style="display:none; margin-top:12px;">
-            <div class="grid2">
-              <div>
-                <div class="label">Record Action</div>
-                <select class="input" id="cf_door_record_mode">
-                  <option value="">-- Do Not Add --</option>
-                  <option value="existing">Add to Existing Door</option>
-                  <option value="new">Create New Door Record</option>
-                </select>
-              </div>
-              <div id="cf_existing_door_wrap" style="display:none;">
-                <div class="label">Existing Door</div>
-                <select class="input" id="cf_existing_door"><option value="">-- Select Door --</option></select>
-              </div>
-            </div>
-            <div id="cf_new_door_wrap" style="display:none; margin-top:10px;">
-              <div class="grid2">
-                <div><div class="label">Door ID</div><input class="input" id="cf_new_door_id" placeholder="Required, e.g. AMB-AUTO-01" /></div>
-                <div><div class="label">Manufacturer</div><input class="input" id="cf_new_manufacturer" /></div>
-                <div><div class="label">Model</div><input class="input" id="cf_new_model" /></div>
-                <div><div class="label">Serial Number</div><input class="input" id="cf_new_serial" /></div>
-              </div>
-            </div>
-          </div>
-        `;
-        card.appendChild(doorRecordPanel);
-
-        const toggle = doorRecordPanel.querySelector("#cf_door_record_toggle");
-        const body = doorRecordPanel.querySelector("#cf_door_record_body");
-        const mode = doorRecordPanel.querySelector("#cf_door_record_mode");
-        const existingWrap = doorRecordPanel.querySelector("#cf_existing_door_wrap");
-        const newWrap = doorRecordPanel.querySelector("#cf_new_door_wrap");
-        const existingSel = doorRecordPanel.querySelector("#cf_existing_door");
-
-        const renderDoorChoices = () => {
-          const customer = normalizeText(job.customer || "");
-          const address = normalizeText(job.address || "");
-          const filtered = doorRecordLogs.filter(item => {
-            const itemCustomer = normalizeText(item.customer || "");
-            const itemAddress = normalizeText(item.address || "");
-            if (customer && itemCustomer && itemCustomer === customer) return true;
-            if (address && itemAddress && itemAddress === address) return true;
-            return false;
-          });
-          const choices = filtered.length ? filtered : doorRecordLogs;
-          existingSel.innerHTML = `<option value="">-- Select Door --</option>` + choices.map(item => {
-            const label = [item.door_id, item.door_location, item.address].filter(Boolean).join(" — ") || item.customer || "Door Record";
-            return `<option value="${escapeHtml(item.id || "")}">${escapeHtml(label)}</option>`;
-          }).join("");
-        };
-
-        toggle.addEventListener("click", async () => {
-          const opening = body.style.display === "none";
-          body.style.display = opening ? "block" : "none";
-          toggle.textContent = opening ? "Hide Door Records" : "Add to Door Records";
-          if (opening && !doorRecordLogs.length) {
-            doorRecordLogs = await apiListDoorLogs().catch(() => []);
-            renderDoorChoices();
-          }
-        });
-        mode.addEventListener("change", () => {
-          existingWrap.style.display = mode.value === "existing" ? "block" : "none";
-          newWrap.style.display = mode.value === "new" ? "block" : "none";
-        });
-      }
 
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -3420,6 +3340,91 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.appendChild(techNotes);
         card.appendChild(partsRecs);
       }
+
+      let doorRecordLogs = [];
+      const doorRecordPanel = document.createElement("div");
+      doorRecordPanel.className = "card";
+      doorRecordPanel.style.marginTop = "12px";
+      doorRecordPanel.style.background = "#f8fafc";
+      doorRecordPanel.innerHTML = `
+        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
+          <div>
+            <div style="font-weight:1000;">Door Records</div>
+            <div class="hint">Optionally link this ${isSalesLead ? "recommendation" : "completion"} form to an existing door or create a new door record.</div>
+          </div>
+          <button type="button" class="btn" id="cf_door_record_toggle">Add to Door Records</button>
+        </div>
+        <div id="cf_door_record_body" style="display:none; margin-top:12px;">
+          <div class="grid2">
+            <div>
+              <div class="label">Record Action</div>
+              <select class="input" id="cf_door_record_mode">
+                <option value="">-- Do Not Add --</option>
+                <option value="existing">Add to Existing Door</option>
+                <option value="new">Create New Door Record</option>
+              </select>
+            </div>
+            <div id="cf_existing_door_wrap" style="display:none;">
+              <div class="label">Existing Door</div>
+              <select class="input" id="cf_existing_door"><option value="">-- Select Door --</option></select>
+            </div>
+          </div>
+          <div id="cf_new_door_wrap" style="display:none; margin-top:10px;">
+            <div class="grid2">
+              <div><div class="label">Door ID</div><input class="input" id="cf_new_door_id" placeholder="Required, e.g. AMB-AUTO-01" /></div>
+              <div><div class="label">Manufacturer</div><input class="input" id="cf_new_manufacturer" /></div>
+              <div><div class="label">Model</div><input class="input" id="cf_new_model" /></div>
+              <div><div class="label">Serial Number</div><input class="input" id="cf_new_serial" /></div>
+            </div>
+          </div>
+        </div>
+      `;
+      card.appendChild(doorRecordPanel);
+
+      const doorToggle = doorRecordPanel.querySelector("#cf_door_record_toggle");
+      const doorBody = doorRecordPanel.querySelector("#cf_door_record_body");
+      const doorMode = doorRecordPanel.querySelector("#cf_door_record_mode");
+      const existingDoorWrap = doorRecordPanel.querySelector("#cf_existing_door_wrap");
+      const newDoorWrap = doorRecordPanel.querySelector("#cf_new_door_wrap");
+      const existingDoorSelect = doorRecordPanel.querySelector("#cf_existing_door");
+
+      const renderDoorChoices = () => {
+        const customer = normalizeText(job.customer || "");
+        const address = normalizeText(job.address || "");
+        const matching = doorRecordLogs.filter(item => {
+          const sameCustomer = customer && normalizeText(item.customer || "") === customer;
+          const sameAddress = address && normalizeText(item.address || "") === address;
+          return sameCustomer || sameAddress;
+        });
+        const choices = matching.length ? matching : doorRecordLogs;
+        existingDoorSelect.innerHTML = `<option value="">-- Select Door --</option>` + choices.map(item => {
+          const label = [item.door_id, item.door_location, item.door_type, item.address].filter(Boolean).join(" — ") || item.customer || "Door Record";
+          return `<option value="${escapeHtml(item.id || "")}">${escapeHtml(label)}</option>`;
+        }).join("");
+      };
+
+      doorToggle.addEventListener("click", async () => {
+        const opening = doorBody.style.display === "none";
+        doorBody.style.display = opening ? "block" : "none";
+        doorToggle.textContent = opening ? "Hide Door Records" : "Add to Door Records";
+        if (opening && !doorRecordLogs.length) {
+          doorRecordLogs = await apiListDoorLogs().catch(() => []);
+          renderDoorChoices();
+        }
+      });
+      doorMode.addEventListener("change", () => {
+        existingDoorWrap.style.display = doorMode.value === "existing" ? "block" : "none";
+        newDoorWrap.style.display = doorMode.value === "new" ? "block" : "none";
+      });
+      existingDoorSelect.addEventListener("change", () => {
+        const selected = doorRecordLogs.find(item => String(item.id || "") === String(existingDoorSelect.value || ""));
+        if (!selected) return;
+        if (selected.door_type && DOOR_TYPES.includes(selected.door_type)) {
+          doorSel.value = selected.door_type;
+          updateRollupLunchVisibility();
+        }
+        if (selected.door_location) locRow.querySelector("#cf_door_loc").value = selected.door_location;
+      });
  
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -3483,12 +3488,22 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
           const savedForm = await apiAddCompletion(job.id, payload);
 
-          if (!isSalesLead && doorRecordPanel) {
+          if (doorRecordPanel) {
             const mode = doorRecordPanel.querySelector("#cf_door_record_mode")?.value || "";
             if (mode) {
+              const sourceType = isSalesLead ? "recommendation_form" : "completion_form";
+              const recommendations = isSalesLead
+                ? (savedForm.recommendations || payload.recommendations || "")
+                : (savedForm.additional_recommendations || payload.additional_recommendations || "");
+              const summary = isSalesLead
+                ? (savedForm.recommendations || payload.recommendations || "")
+                : (savedForm.tech_notes || payload.tech_notes || "");
+              const parts = isSalesLead
+                ? (savedForm.parts_required || payload.parts_required || "")
+                : (savedForm.parts_used || payload.parts_used || "");
               const historyEntry = {
-                source_key: `completion:${job.id}:${savedForm.id || ""}`,
-                source_type: "completion_form",
+                source_key: `${sourceType}:${job.id}:${savedForm.id || ""}`,
+                source_type: sourceType,
                 job_id: job.id,
                 job_number: job.job_number || "",
                 completion_form_id: savedForm.id || "",
@@ -3496,15 +3511,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                 technician: savedForm.technician_name || payload.technician_name || "",
                 door_type: savedForm.door_type || payload.door_type || "",
                 door_location: savedForm.door_location || payload.door_location || "",
-                summary: savedForm.tech_notes || payload.tech_notes || "",
-                parts_used: savedForm.parts_used || payload.parts_used || "",
-                recommendations: savedForm.additional_recommendations || payload.additional_recommendations || "",
+                summary,
+                parts_used: parts,
+                recommendations,
+                ready_to_quote: !!(savedForm.ready_to_quote || payload.ready_to_quote),
               };
               try {
                 if (mode === "existing") {
                   const recordId = doorRecordPanel.querySelector("#cf_existing_door")?.value || "";
                   if (!recordId) throw new Error("Select an existing Door Record or choose Create New Door Record.");
                   await apiAppendDoorLogHistory(recordId, historyEntry);
+                  await apiUpdateDoorLog(recordId, {
+                    job_number: job.job_number || "",
+                    door_location: payload.door_location || "",
+                    door_type: payload.door_type || "",
+                    work_performed: summary,
+                    repairs: summary,
+                    additional_recommendations: recommendations,
+                    has_recommendations: !!recommendations,
+                    needs_follow_up: !!(recommendations || payload.ready_to_quote),
+                    last_service_date: historyEntry.date,
+                    last_technician: historyEntry.technician,
+                  });
                 } else if (mode === "new") {
                   const doorId = doorRecordPanel.querySelector("#cf_new_door_id")?.value.trim() || "";
                   if (!doorId) throw new Error("Door ID is required when creating a new Door Record.");
@@ -3521,17 +3549,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
                     serial_number: doorRecordPanel.querySelector("#cf_new_serial")?.value.trim() || "",
                     pass_fail: "",
                     work_type: "Other",
-                    work_performed: payload.tech_notes || "",
-                    repairs: payload.tech_notes || "",
-                    has_recommendations: !!payload.additional_recommendations,
-                    needs_follow_up: !!payload.additional_recommendations,
-                    additional_recommendations: payload.additional_recommendations || "",
-                    notes: "Created from completion form.",
+                    work_performed: summary,
+                    repairs: summary,
+                    has_recommendations: !!recommendations,
+                    needs_follow_up: !!(recommendations || payload.ready_to_quote),
+                    additional_recommendations: recommendations,
+                    last_service_date: historyEntry.date,
+                    last_technician: historyEntry.technician,
+                    notes: `Created from ${isSalesLead ? "recommendation" : "completion"} form.`,
                     history: [historyEntry],
                   });
                 }
               } catch (doorRecordError) {
-                alert(`Completion form saved, but Door Records was not updated: ${doorRecordError.message || doorRecordError}`);
+                alert(`${isSalesLead ? "Recommendation" : "Completion"} form saved, but Door Records was not updated: ${doorRecordError.message || doorRecordError}`);
               }
             }
           }
