@@ -59,6 +59,7 @@ class JobCreate(BaseModel):
     source_job_id: Optional[str] = ""
     source_job_number: Optional[str] = ""
     created_by: Optional[str] = ""
+    last_modified_by: Optional[str] = ""
 
 
 class JobUpdate(BaseModel):
@@ -90,6 +91,7 @@ class JobUpdate(BaseModel):
     approved: Optional[bool] = None
     approved_at: Optional[str] = None
     created_by: Optional[str] = None
+    last_modified_by: Optional[str] = None
 
 
 class CompletionCreate(BaseModel):

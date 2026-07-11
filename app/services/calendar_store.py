@@ -505,6 +505,10 @@ class CalendarStore:
         else:
             job_number = self._next_dispatch_job_number(data, date)
 
+        created_at = _now_iso()
+        created_by = str(payload.get("created_by") or "").strip()
+        last_modified_by = str(payload.get("last_modified_by") or created_by).strip()
+
         job = {
             "id": job_id,
             "kind": "sales_lead" if kind == "sales_lead" else "dispatch",
@@ -529,7 +533,9 @@ class CalendarStore:
             "source_job_number": str(payload.get("source_job_number") or "").strip(),
             "job_notes": str(payload.get("job_notes") or "").strip(),
             "office_notes": str(payload.get("office_notes") or "").strip(),
-            "created_by": str(payload.get("created_by") or "").strip(),
+            "created_by": created_by,
+            "last_modified_by": last_modified_by,
+            "last_modified_at": created_at,
             "attachments": [],
             "completion_forms": [],
             "parts_order": {
@@ -546,8 +552,8 @@ class CalendarStore:
                 "started_at": None,
                 "stopped_at": None,
             },
-            "created_at": _now_iso(),
-            "updated_at": _now_iso(),
+            "created_at": created_at,
+            "updated_at": created_at,
         }
 
         jobs.append(job)
@@ -607,7 +613,7 @@ class CalendarStore:
             "date", "status", "customer", "contact", "phone", "email", "address",
             "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
             "followup_job_id", "followup_job_number", "source_job_id", "source_job_number", "approved", "approved_at",
-            "created_by", "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
+            "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
         ]:
             if k in payload:
                 if k == "completion_forms":
@@ -663,7 +669,12 @@ class CalendarStore:
         self._append_status_history(j, old_status, new_status)
         self._backfill_approved(j)
 
-        j["updated_at"] = _now_iso()
+        modified_at = _now_iso()
+        modified_by = str(payload.get("last_modified_by") or "").strip()
+        if modified_by:
+            j["last_modified_by"] = modified_by
+        j["last_modified_at"] = modified_at
+        j["updated_at"] = modified_at
         jobs[idx] = j
         self._save(data)
         return j

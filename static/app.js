@@ -626,20 +626,34 @@
     return data.job;
   }
  
+  function currentAuditUserName() {
+    if (!currentUser) return "";
+    return String(currentUser.name || currentUser.full_name || currentUser.username || "").trim();
+  }
+
   async function apiCreateJob(payload) {
+    const actor = currentAuditUserName();
+    const body = { ...(payload || {}) };
+    if (actor) {
+      body.created_by = actor;
+      body.last_modified_by = actor;
+    }
     const data = await fetchJSON("/calendar/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     return data.job;
   }
  
   async function apiUpdateJob(jobId, payload) {
+    const actor = currentAuditUserName();
+    const body = { ...(payload || {}) };
+    if (actor) body.last_modified_by = actor;
     const data = await fetchJSON(`/calendar/jobs/${jobId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(body),
     });
     return data.job;
   }
@@ -2702,6 +2716,23 @@ function renderAttachmentSection(titleText, items, options = {}) {
     const notes = document.createElement("div");
     notes.style.marginTop = "10px";
     notes.innerHTML = `<div class="label">Job Notes</div><div class="field" style="white-space:pre-wrap;">${job.job_notes || ""}</div>`;
+
+    const audit = document.createElement("div");
+    audit.style.marginTop = "12px";
+    const createdBy = String(job.created_by || "").trim();
+    const modifiedBy = String(job.last_modified_by || "").trim();
+    const createdStamp = createdBy ? formatStamp(job.created_at) : "";
+    const modifiedStamp = modifiedBy ? formatStamp(job.last_modified_at || job.updated_at) : "";
+    if (createdBy || modifiedBy) {
+      audit.innerHTML = `
+        <div class="label">Record History</div>
+        <div class="grid2" style="margin-top:6px;">
+          <div><div class="label">Created By</div><div class="field">${escapeHtml(createdBy || "—")}</div></div>
+          <div><div class="label">Created</div><div class="field">${escapeHtml(createdStamp || "—")}</div></div>
+          <div><div class="label">Last Modified By</div><div class="field">${escapeHtml(modifiedBy || createdBy || "—")}</div></div>
+          <div><div class="label">Last Modified</div><div class="field">${escapeHtml(modifiedStamp || createdStamp || "—")}</div></div>
+        </div>`;
+    }
  
     const actions = document.createElement("div");
     actions.style.display = "flex";
@@ -2858,6 +2889,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.appendChild(poCard);
     }
     card.appendChild(notes);
+    if (createdBy || modifiedBy) card.appendChild(audit);
     card.appendChild(actions);
     card.appendChild(renderAttachmentSection(job.kind === "sales_lead" ? "Lead Attachments" : "Job Attachments", job.attachments || [], {
       urlBuilder: (file) => buildJobAttachmentUrl(job.id, file.filename),
