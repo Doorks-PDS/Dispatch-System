@@ -8121,7 +8121,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <div><div class="label">Door Location</div><input class="input" id="dl_location" /></div>
         <div><div class="label">Door ID</div><input class="input" id="dl_door_id" placeholder="Required searchable door identifier" /></div>
         <div><div class="label">Door Type</div><select class="input" id="dl_door_type"><option value="">Select Door Type --</option><option>Automatic Door</option><option>Man Door</option><option>Storefront Door</option><option>Herculite Door</option><option>Roll Up</option><option>Glass</option><option>Roll/Swing Gate</option><option>Other</option></select></div>
-        <div><div class="label">Pass / Fail</div><select class="input" id="dl_pass_fail"><option value="">-- Select --</option><option>Pass</option><option>Fail</option></select></div>
+        
         <div><div class="label">Manufacturer</div><input class="input" id="dl_manufacturer" /></div>
         <div><div class="label">Model</div><input class="input" id="dl_model" /></div>
         <div><div class="label">Serial Number</div><input class="input" id="dl_serial" /></div>
@@ -8146,8 +8146,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         </label>
         <div class="hint">Check this to flag the record for the office to quote or plan a return visit.</div>
       </div>
-      <div id="dl_recommendations_wrap" style="margin-top:10px; display:none;">
-        <div class="label">Additional Recommendations</div>
+      
         <textarea id="dl_recommendations" style="min-height:120px;"></textarea>
       </div>
       <div style="margin-top:10px;"><div class="label">Notes</div><textarea id="dl_notes"></textarea></div>
