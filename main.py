@@ -66,6 +66,8 @@ from app.services.shared_settings_store import SharedSettingsStore
 from app.routers.shared_settings import router as shared_settings_router
 from app.services.document_approvals_store import DocumentApprovalsStore
 from app.routers.document_approvals import router as document_approvals_router
+from app.services.door_logs_store import DoorLogsStore
+from app.routers.door_logs import router as door_logs_router
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
@@ -195,6 +197,7 @@ app.state.address_store = AddressStore(PROJECT_ROOT)
 app.state.saddleback_store = SaddlebackStore(PROJECT_ROOT)
 app.state.shared_settings_store = SharedSettingsStore(PROJECT_ROOT)
 app.state.document_approvals_store = DocumentApprovalsStore(PROJECT_ROOT)
+app.state.door_logs_store = DoorLogsStore(PROJECT_ROOT)
 app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
@@ -213,6 +216,7 @@ app.include_router(addresses_router)
 app.include_router(saddleback_router)
 app.include_router(shared_settings_router)
 app.include_router(document_approvals_router)
+app.include_router(door_logs_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
