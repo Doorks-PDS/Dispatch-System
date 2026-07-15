@@ -82,21 +82,22 @@ class DocumentsStore:
         self._ensure()
 
     def _ensure(self):
+        """Create the document index only when it does not already exist.
+
+        Never rewrite an existing index during startup. The prior behavior read the
+        file with an empty default and immediately wrote that result back. A
+        temporary read/parse failure could therefore replace a populated index with
+        an empty one while leaving every PDF untouched.
+        """
+        if self.index_path.exists():
+            return
         base = {
             "version": 5,
             "estimate_next": DOC_NUMBER_FLOORS["estimate"],
             "invoice_next": DOC_NUMBER_FLOORS["invoice"],
             "items": [],
         }
-        cur = _read_json(self.index_path, base)
-        if not isinstance(cur, dict):
-            cur = base
-        for k, v in base.items():
-            cur.setdefault(k, v)
-        if not isinstance(cur.get("items"), list):
-            cur["items"] = []
-        self._normalize_counters(cur)
-        _write_json(self.index_path, cur)
+        _write_json(self.index_path, base)
 
     def _load(self) -> Dict[str, Any]:
         self._ensure()
@@ -174,15 +175,78 @@ class DocumentsStore:
             return False
         return True
 
+    def _read_only_pdf_entries(self) -> List[Dict[str, Any]]:
+        """Return temporary metadata for PDFs missing from the JSON index.
+
+        This method is deliberately read-only. It never writes the index, renames a
+        PDF, changes counters, or deletes anything. It simply allows existing files
+        on the Render disk to appear in Saved Estimates/Invoices again.
+        """
+        recovered: List[Dict[str, Any]] = []
+        for path in sorted(self.dir.glob("*.pdf")):
+            filename = path.name
+            stem = path.stem
+            upper = stem.upper()
+            if upper.startswith("RE") and _parse_doc_number(upper, "RE") > 0:
+                doc_type = "estimate"
+            elif upper.startswith("JS") and _parse_doc_number(upper, "JS") > 0:
+                doc_type = "invoice"
+            elif upper.startswith("SIGNOFF"):
+                doc_type = "signoff"
+            else:
+                continue
+            try:
+                created_at = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
+            except Exception:
+                created_at = ""
+            recovered.append({
+                "type": doc_type,
+                "number": stem,
+                "filename": filename,
+                "path": str(path),
+                "job_id": "",
+                "customer": "",
+                "address": "",
+                "ship_to": "",
+                "po_number": "",
+                "job_number": "",
+                "invoice_number": stem if doc_type == "invoice" else "",
+                "estimate_number": stem if doc_type == "estimate" else "",
+                "completed_by": "",
+                "tax_rate": 0.0,
+                "terms": "",
+                "items": [],
+                "work": "",
+                "labor": "",
+                "parts": "",
+                "date": "",
+                "created_at": created_at,
+                "updated_at": created_at,
+                "_read_only_pdf_fallback": True,
+            })
+        return recovered
+
     def list_documents(self, job_id: str = "") -> List[Dict[str, Any]]:
         data = self._load()
-        items = data.get("items", [])
-        if not isinstance(items, list):
-            return []
-        out = []
-        for item in items:
-            if not isinstance(item, dict):
-                continue
+        indexed = data.get("items", [])
+        if not isinstance(indexed, list):
+            indexed = []
+
+        # Merge in PDFs that still exist on disk but are absent from the index.
+        # This is display-only and performs no write or recovery operation.
+        by_filename: Dict[str, Dict[str, Any]] = {}
+        for item in indexed:
+            if isinstance(item, dict):
+                filename = str(item.get("filename") or "")
+                if filename:
+                    by_filename[filename] = item
+        for item in self._read_only_pdf_entries():
+            filename = str(item.get("filename") or "")
+            if filename and filename not in by_filename:
+                by_filename[filename] = item
+
+        out: List[Dict[str, Any]] = []
+        for item in by_filename.values():
             if job_id and str(item.get("job_id") or "") != str(job_id):
                 continue
             out.append(item)
