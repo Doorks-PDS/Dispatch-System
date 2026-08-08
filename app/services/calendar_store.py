@@ -760,10 +760,32 @@ class CalendarStore:
             if door_type and door_type not in DOOR_TYPES:
                 door_type = "Other"
 
+            time_in = str(payload.get("time_in") or "").strip()
+            time_out = str(payload.get("time_out") or "").strip()
+            if not time_in:
+                raise ValueError("Time In is required")
+            if not time_out:
+                raise ValueError("Time Out is required")
+
             def round_half(x: float) -> float:
                 return round(x * 2) / 2.0
 
-            time_hours = payload.get("time_onsite_hours")
+            def clock_minutes(value: str) -> int:
+                try:
+                    h, m = value.split(":", 1)
+                    return int(h) * 60 + int(m)
+                except Exception as exc:
+                    raise ValueError("Time In and Time Out must be valid times") from exc
+
+            start_minutes = clock_minutes(time_in)
+            end_minutes = clock_minutes(time_out)
+            if end_minutes <= start_minutes:
+                end_minutes += 24 * 60
+            calculated_time_hours = max(0.0, round_half((end_minutes - start_minutes) / 60.0))
+            if calculated_time_hours <= 0:
+                raise ValueError("Time In and Time Out must create a valid onsite time")
+
+            time_hours = calculated_time_hours if str(j.get("kind") or "dispatch") != "sales_lead" else payload.get("time_onsite_hours")
             try:
                 time_hours_f = float(time_hours) if time_hours is not None and str(time_hours).strip() != "" else None
             except Exception:
@@ -800,6 +822,8 @@ class CalendarStore:
                 "technician_name": technician_name,
                 "door_type": door_type,
                 "door_location": str(payload.get("door_location") or "").strip(),
+                "time_in": time_in,
+                "time_out": time_out,
                 "tech_notes": str(payload.get("tech_notes") or "").strip(),
                 "parts_used": str(payload.get("parts_used") or "").strip(),
                 "additional_recommendations": str(payload.get("additional_recommendations") or "").strip(),
@@ -850,6 +874,8 @@ class CalendarStore:
                     "technician_name",
                     "door_type",
                     "door_location",
+                    "time_in",
+                    "time_out",
                     "tech_notes",
                     "parts_used",
                     "additional_recommendations",
@@ -863,7 +889,18 @@ class CalendarStore:
                 if "ready_to_quote" in payload:
                     f["ready_to_quote"] = bool(payload.get("ready_to_quote", False))
 
-                if "time_onsite_hours" in payload:
+                if str(f.get("time_in") or "").strip() and str(f.get("time_out") or "").strip() and str(j.get("kind") or "dispatch") != "sales_lead":
+                    try:
+                        h1, m1 = str(f.get("time_in")).split(":", 1)
+                        h2, m2 = str(f.get("time_out")).split(":", 1)
+                        start_minutes = int(h1) * 60 + int(m1)
+                        end_minutes = int(h2) * 60 + int(m2)
+                        if end_minutes <= start_minutes:
+                            end_minutes += 24 * 60
+                        f["time_onsite_hours"] = max(0.0, round(((end_minutes - start_minutes) / 60.0) * 2) / 2.0)
+                    except Exception:
+                        pass
+                elif "time_onsite_hours" in payload:
                     try:
                         x = float(payload.get("time_onsite_hours"))
                         f["time_onsite_hours"] = max(0.0, round(x * 2) / 2.0)

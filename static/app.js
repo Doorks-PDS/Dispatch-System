@@ -2252,6 +2252,33 @@ function renderAttachmentSection(titleText, items, options = {}) {
       card.appendChild(techRow);
       card.appendChild(locRow);
 
+      const editTimeClockRow = document.createElement("div");
+      editTimeClockRow.className = "grid2";
+      editTimeClockRow.style.marginTop = "10px";
+      editTimeClockRow.innerHTML = `
+        <div><div class="label">Time In</div><input class="input" id="ef_time_in" type="time" /></div>
+        <div><div class="label">Time Out</div><input class="input" id="ef_time_out" type="time" /></div>
+      `;
+      editTimeClockRow.querySelector("#ef_time_in").value = f.time_in || "";
+      editTimeClockRow.querySelector("#ef_time_out").value = f.time_out || "";
+      card.appendChild(editTimeClockRow);
+
+      const calculateEditOnsiteHours = (timeIn, timeOut) => {
+        const parseMinutes = (value) => {
+          const parts = String(value || "").split(":");
+          if (parts.length !== 2) return null;
+          const h = Number(parts[0]);
+          const m = Number(parts[1]);
+          if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+          return (h * 60) + m;
+        };
+        const start = parseMinutes(timeIn);
+        let end = parseMinutes(timeOut);
+        if (start === null || end === null) return null;
+        if (end <= start) end += 24 * 60;
+        return Math.max(0, Math.round(((end - start) / 60) * 2) / 2);
+      };
+
       const updateRollupLunchVisibility = () => {
         const wrap = card.querySelector("#ef_rollup_lunch_wrap");
         if (!wrap) return;
@@ -2303,6 +2330,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         block.style.marginTop = "10px";
         block.innerHTML = `
           <div><div class="label">Time Onsite (hours)</div><input class="input" id="ef_time" type="number" step="0.5" min="0" /></div>
+          <div class="hint">For newer forms, Time Onsite is calculated from Time In and Time Out. Older forms without those times keep their saved Time Onsite.</div>
           <div id="ef_rollup_lunch_wrap" style="display:none; margin-top:10px;">
             <div class="label">Lunch Taken While Working Roll Up?</div>
             <select class="input" id="ef_rollup_lunch"><option value="">-- Select Yes or No --</option><option value="yes">Yes</option><option value="no">No</option></select>
@@ -2331,6 +2359,17 @@ function renderAttachmentSection(titleText, items, options = {}) {
  
         card.appendChild(block);
       }
+      const syncEditTimeOnsite = () => {
+        if (isSalesLead || !timeInput) return;
+        const timeIn = card.querySelector("#ef_time_in")?.value || "";
+        const timeOut = card.querySelector("#ef_time_out")?.value || "";
+        if (!timeIn || !timeOut) return;
+        const hours = calculateEditOnsiteHours(timeIn, timeOut);
+        if (hours !== null) timeInput.value = String(hours);
+      };
+      card.querySelector("#ef_time_in")?.addEventListener("change", syncEditTimeOnsite);
+      card.querySelector("#ef_time_out")?.addEventListener("change", syncEditTimeOnsite);
+      syncEditTimeOnsite();
       updateRollupLunchVisibility();
  
       const actions = document.createElement("div");
@@ -2386,6 +2425,13 @@ function renderAttachmentSection(titleText, items, options = {}) {
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
           next.door_type = doorSel.value;
           next.door_location = locRow.querySelector("#ef_door_loc").value.trim();
+          const editTimeIn = card.querySelector("#ef_time_in")?.value || "";
+          const editTimeOut = card.querySelector("#ef_time_out")?.value || "";
+          if (editTimeIn || editTimeOut) {
+            if (!editTimeIn || !editTimeOut) { alert("Enter both Time In and Time Out, or leave both blank for an older form."); return; }
+            next.time_in = editTimeIn;
+            next.time_out = editTimeOut;
+          }
  
           if (!doorSel.value) throw new Error("Door type is required.");
 
@@ -2405,7 +2451,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
             next.ready_to_quote = !!ready.checked;
           } else {
             next.status_update = stSel ? stSel.value : next.status_update;
-            next.time_onsite_hours = timeInput.value.trim() === "" ? null : Number(timeInput.value.trim());
+            const editCalculatedHours = (editTimeIn && editTimeOut) ? calculateEditOnsiteHours(editTimeIn, editTimeOut) : null;
+            next.time_onsite_hours = editCalculatedHours !== null ? editCalculatedHours : (timeInput.value.trim() === "" ? null : Number(timeInput.value.trim()));
             if (String(doorSel.value || "").toLowerCase() === "roll up") {
               const lunchVal = card.querySelector("#ef_rollup_lunch")?.value || "";
               if (!lunchVal) { alert("Please select Yes or No for lunch taken while working roll up."); card.querySelector("#ef_rollup_lunch")?.focus(); return; }
@@ -2554,6 +2601,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
       if (f.technician_name) lines.push(`Tech: ${f.technician_name}`);
       if (f.door_type) lines.push(`Door Type: ${f.door_type}`);
       if (f.door_location) lines.push(`Door Location: ${f.door_location}`);
+      if (f.time_in) lines.push(`Time In: ${f.time_in}`);
+      if (f.time_out) lines.push(`Time Out: ${f.time_out}`);
       if (typeof f.time_onsite_hours === "number") lines.push(`Time: ${f.time_onsite_hours} hrs`);
       if (f.tech_notes) lines.push(`Tech Notes: ${f.tech_notes}`);
       if (f.recommendations) lines.push(`Recommendations: ${f.recommendations}`);
@@ -3280,6 +3329,32 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
       card.appendChild(techRow);
       card.appendChild(locRow);
+
+      const timeClockRow = document.createElement("div");
+      timeClockRow.className = "grid2";
+      timeClockRow.style.marginTop = "10px";
+      timeClockRow.innerHTML = `
+        <div><div class="label">Time In</div><input class="input" id="cf_time_in" type="time" required /></div>
+        <div><div class="label">Time Out</div><input class="input" id="cf_time_out" type="time" required /></div>
+      `;
+      card.appendChild(timeClockRow);
+
+      const calculateOnsiteHours = (timeIn, timeOut) => {
+        const parseMinutes = (value) => {
+          const parts = String(value || "").split(":");
+          if (parts.length !== 2) return null;
+          const h = Number(parts[0]);
+          const m = Number(parts[1]);
+          if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+          return (h * 60) + m;
+        };
+        const start = parseMinutes(timeIn);
+        let end = parseMinutes(timeOut);
+        if (start === null || end === null) return null;
+        if (end <= start) end += 24 * 60;
+        const rawHours = (end - start) / 60;
+        return Math.max(0, Math.round(rawHours * 2) / 2);
+      };
  
       const updateRollupLunchVisibility = () => {
         const wrap = card.querySelector("#cf_rollup_lunch_wrap");
@@ -3315,8 +3390,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         timeRow.style.marginTop = "10px";
         timeRow.innerHTML = `
           <div class="label">Time Onsite (hours)</div>
-          <input class="input" id="cf_time" type="number" step="0.5" min="0" placeholder="e.g., 1.5" />
-          <div class="hint">Enter hours billed in 0.5 increments.</div>
+          <input class="input" id="cf_time" type="number" step="0.5" min="0" placeholder="Auto-calculated" readonly />
+          <div class="hint">Auto-calculated from Time In and Time Out.</div>
           <div id="cf_rollup_lunch_wrap" style="display:none; margin-top:10px;">
             <div class="label">Lunch Taken While Working Roll Up?</div>
             <select class="input" id="cf_rollup_lunch"><option value="">-- Select Yes or No --</option><option value="yes">Yes</option><option value="no">No</option></select>
@@ -3340,6 +3415,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.appendChild(techNotes);
         card.appendChild(partsRecs);
       }
+
+      const syncTimeOnsite = () => {
+        if (isSalesLead) return;
+        const timeIn = card.querySelector("#cf_time_in")?.value || "";
+        const timeOut = card.querySelector("#cf_time_out")?.value || "";
+        const hours = calculateOnsiteHours(timeIn, timeOut);
+        const onsiteInput = card.querySelector("#cf_time");
+        if (onsiteInput) onsiteInput.value = hours === null ? "" : String(hours);
+      };
+      card.querySelector("#cf_time_in")?.addEventListener("change", syncTimeOnsite);
+      card.querySelector("#cf_time_out")?.addEventListener("change", syncTimeOnsite);
 
       let doorRecordLogs = [];
       const doorRecordPanel = document.createElement("div");
@@ -3453,16 +3539,20 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           if (!selectedDate) { alert("Date is required."); card.querySelector("#cf_form_date")?.focus(); return; }
           if (!techSel.value.trim()) { alert("Technician is required."); techSel.focus(); return; }
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
-          if (!isSalesLead) {
-            const timeValue = card.querySelector("#cf_time")?.value.trim();
-            if (!timeValue) { alert("Time onsite is required."); card.querySelector("#cf_time")?.focus(); return; }
-          }
+          const timeIn = card.querySelector("#cf_time_in")?.value || "";
+          const timeOut = card.querySelector("#cf_time_out")?.value || "";
+          if (!timeIn) { alert("Time In is required."); card.querySelector("#cf_time_in")?.focus(); return; }
+          if (!timeOut) { alert("Time Out is required."); card.querySelector("#cf_time_out")?.focus(); return; }
+          const calculatedHours = calculateOnsiteHours(timeIn, timeOut);
+          if (calculatedHours === null || calculatedHours <= 0) { alert("Time In and Time Out must create a valid onsite time."); return; }
           const payload = {
             date: selectedDate,
             form_date: selectedDate,
             technician_name: techSel.value,
             door_type: doorSel.value,
             door_location: locRow.querySelector("#cf_door_loc").value.trim(),
+            time_in: timeIn,
+            time_out: timeOut,
           };
  
           if (isSalesLead) {
@@ -3472,8 +3562,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.ready_to_quote = !!card.querySelector("#cf_ready").checked;
           } else {
             payload.status_update = stSel ? stSel.value : job.status;
-            const v = card.querySelector("#cf_time").value.trim();
-            if (v !== "") payload.time_onsite_hours = Number(v);
+            payload.time_onsite_hours = calculatedHours;
             if (String(doorSel.value || "").toLowerCase() === "roll up") {
               const lunchVal = card.querySelector("#cf_rollup_lunch")?.value || "";
               if (!lunchVal) { alert("Please select Yes or No for lunch taken while working roll up."); card.querySelector("#cf_rollup_lunch")?.focus(); return; }
@@ -7610,6 +7699,8 @@ const updated = await apiUpdateJob(job.id, {
         addRow("Tech", form.technician_name);
         addRow("Door Type", form.door_type);
         addRow("Door Location", form.door_location);
+        addRow("Time In", form.time_in);
+        addRow("Time Out", form.time_out);
 
         if (typeLabel === "Recommendation") {
           addRow("Recommendations", form.recommendations || form.additional_recommendations || form.tech_notes);

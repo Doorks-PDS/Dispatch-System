@@ -100,6 +100,8 @@ class CompletionCreate(BaseModel):
     door_type: Optional[str] = ""
     door_location: Optional[str] = ""
 
+    time_in: Optional[str] = ""
+    time_out: Optional[str] = ""
     time_onsite_hours: Optional[float] = None
 
     tech_notes: Optional[str] = ""
