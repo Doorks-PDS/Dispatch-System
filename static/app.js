@@ -7388,10 +7388,23 @@ function serializeDocItems(items, laborOnly) {
           </div>
         </div>
         <div style="margin-top:12px;"><div class="label">Proposal / Invoice Body</div><textarea id="doc_work" placeholder="Proposal Includes / Invoice Includes..." style="min-height:140px;"></textarea></div>
-        <div class="card" id="doc_source_wrap" style="padding:12px; margin-top:12px; display:none;">
+        <div class="card" id="doc_source_wrap" style="padding:12px; margin-top:12px;">
           <div class="label">Description Source</div>
           <select class="input" id="doc_source_form"></select>
           <div class="hint" style="margin-top:6px;">Choose which saved Completion/Recommendation Form should drive Auto Fill Description.</div>
+          <div id="doc_scope_wrap" style="margin-top:10px;">
+            <div class="label">Proposed Scope</div>
+            <select class="input" id="doc_scope_intent">
+              <option value="">-- Select proposed work --</option>
+              <option value="Furnish and install">Furnish &amp; Install</option>
+              <option value="Repair">Repair</option>
+              <option value="Adjust">Adjust</option>
+              <option value="Replace">Replace</option>
+              <option value="New installation">New Installation</option>
+              <option value="Other">Other</option>
+            </select>
+            <div class="hint" style="margin-top:6px;">Tells Auto Fill what you are proposing. The generated description remains editable.</div>
+          </div>
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
           <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
@@ -7437,7 +7450,7 @@ function serializeDocItems(items, laborOnly) {
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
-      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms"), sourceWrap:card.querySelector("#doc_source_wrap"), sourceForm:card.querySelector("#doc_source_form") };
+      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms"), sourceWrap:card.querySelector("#doc_source_wrap"), sourceForm:card.querySelector("#doc_source_form"), scopeWrap:card.querySelector("#doc_scope_wrap"), scopeIntent:card.querySelector("#doc_scope_intent") };
       SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const jobFormsForDescriptions = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
       function isRecommendationLikeForm(f) {
@@ -7464,11 +7477,17 @@ function serializeDocItems(items, laborOnly) {
         }
         return jobFormsForDescriptions;
       }
-      if (dom.sourceWrap && dom.sourceForm && jobFormsForDescriptions.length) {
-        dom.sourceWrap.style.display = "block";
-        dom.sourceForm.innerHTML = `<option value="">Auto-select best saved form</option>` + jobFormsForDescriptions.map((f, idx) => `<option value="idx:${idx}">${escapeHtml(formSourceLabel(f, idx))}</option>`).join("");
+      if (dom.sourceForm) {
+        dom.sourceForm.innerHTML = jobFormsForDescriptions.length
+          ? `<option value="">Auto-select best saved form</option>` + jobFormsForDescriptions.map((f, idx) => `<option value="idx:${idx}">${escapeHtml(formSourceLabel(f, idx))}</option>`).join("")
+          : `<option value="">No saved Completion/Recommendation Forms</option>`;
         dom.sourceForm.value = jobFormsForDescriptions.length === 1 ? "idx:0" : "";
+        dom.sourceForm.disabled = !jobFormsForDescriptions.length;
       }
+      function syncDescriptionControls() {
+        if (dom.scopeWrap) dom.scopeWrap.style.display = dom.type.value === "estimate" ? "block" : "none";
+      }
+      syncDescriptionControls();
       const customOpt=document.createElement("option"); customOpt.value="__custom__"; customOpt.textContent="Custom"; dom.taxRateSelect.appendChild(customOpt);
       if (dom.terms) {
         const blankTerm = document.createElement("option");
@@ -7513,7 +7532,7 @@ function serializeDocItems(items, laborOnly) {
       card.querySelector("#add_crew").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:1, rate:Number(pricing.crew_labor || 235), kind:"labor", taxable:false })); renderItems(); });
       card.querySelector("#add_blank").addEventListener("click", ()=>{ items.push(createDocLineItem({ kind:"other" })); renderItems(); });
       card.querySelector("#doc_cancel").addEventListener("click", ()=> overlay.remove());
-      dom.type.addEventListener("change", renderItems);
+      dom.type.addEventListener("change", ()=>{ renderItems(); syncDescriptionControls(); });
       dom.taxRateSelect.addEventListener("change", ()=>{
         if (dom.taxRateSelect.value === "__custom__") {
           dom.taxRateCustom.style.display = "block";
@@ -7545,6 +7564,9 @@ function serializeDocItems(items, laborOnly) {
       });
       card.querySelector("#doc_auto_fill").addEventListener("click", async ()=> {
         try {
+          if (dom.type.value === "estimate" && !String(dom.scopeIntent?.value || "").trim()) {
+            return alert("Select the Proposed Scope before using Auto Fill Description.");
+          }
           const completionForms = selectedDescriptionForms();
           const crew = completionForms.length > 1 || /crew/i.test(JSON.stringify(completionForms || []));
           const resp = await apiAutoFillDescription({
@@ -7557,6 +7579,7 @@ function serializeDocItems(items, laborOnly) {
             job_notes: (job && job.job_notes) || "",
             completion_forms: completionForms,
             recommendation_forms: completionForms.filter(f => f && (f.ready_to_quote || f.parts_required || f.time_required)),
+            scope_intent: String(dom.scopeIntent?.value || "").trim(),
             crew: !!crew,
             trips: 1,
             type: docType,
@@ -7642,6 +7665,7 @@ function serializeDocItems(items, laborOnly) {
               job_notes: (job && job.job_notes) || "",
               completion_forms: completionForms,
               recommendation_forms: completionForms.filter(f => f && (f.ready_to_quote || f.parts_required || f.time_required)),
+              scope_intent: String(dom.scopeIntent?.value || "").trim(),
               selected_parts: Array.isArray(helper.parts) ? helper.parts : [],
               custom_parts_text: String(helper.partsText || "").trim(),
               crew: !!crew,

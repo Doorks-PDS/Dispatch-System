@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from typing import Optional, Any, List, Dict
+import json
 import re
+
+from app.services.openai_assist import call_openai_text
 
 from fastapi import APIRouter, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse
@@ -718,6 +721,45 @@ def create_signoff(request: Request, payload: SignoffCreate, x_api_key: Optional
     return {"ok": True, "doc": _doc_response(item)}
 
 
+def _ai_document_description(data: dict[str, Any]) -> str:
+    doc_type = _clean_text(data.get("doc_type") or data.get("type") or "estimate").lower()
+    scope_intent = _clean_text(data.get("scope_intent") or "")
+    forms = list(data.get("completion_forms") or [])
+    recommendation_forms = list(data.get("recommendation_forms") or [])
+    selected_parts = list(data.get("selected_parts") or [])
+    custom_parts_text = _clean_text(data.get("custom_parts_text") or "")
+
+    source = {
+        "document_type": doc_type, "scope_intent": scope_intent,
+        "customer": _clean_text(data.get("customer")), "address": _clean_text(data.get("address")),
+        "door_location": _clean_text(data.get("door_location") or data.get("doorLocation")),
+        "door_id": _clean_text(data.get("door_id") or data.get("doorId")),
+        "completion_or_recommendation_forms": forms, "recommendation_forms": recommendation_forms,
+        "selected_parts": selected_parts, "custom_parts_text": custom_parts_text,
+    }
+
+    if doc_type == "invoice":
+        task = "Write a concise customer-facing invoice work description for completed commercial door service. State only work that the supplied field forms say was actually performed. Do not turn recommendations into completed work. End with ********JOB COMPLETE*********."
+    else:
+        task = "Write a concise customer-facing estimate/proposal scope for commercial door work. Use the selected scope intent as the estimator instruction for what is being proposed. Recommendations and technician notes are source facts, not permission to invent additional work."
+
+    rules = [
+        "You write estimate and invoice descriptions for Priority Door Systems.", task,
+        "Use only facts present in the supplied source data. Never invent parts, quantities, dimensions, finishes, labor hours, door conditions, diagnoses, or completed work.",
+        "Do not use office notes or job notes as scope unless they are explicitly included in the supplied selected forms or parts.",
+        "Preserve useful exact part names, handing, finishes, locations, door IDs, and quantities when provided.",
+        "Remove technician shorthand and rewrite it professionally for a customer.",
+        "Do not add pricing, tax, terms, scheduling promises, material lead times, exclusions, warranties, or hidden-condition language.",
+        "Do not add greetings, explanations, markdown headings, or commentary outside the description.",
+        "For an estimate, clearly describe proposed work, not work already completed.",
+        "For an invoice, clearly describe completed work and do not claim recommended future repairs were completed.",
+        "Keep it concise but specific.",
+    ]
+    system = "\n".join(rules)
+    user = "Source data:\n" + json.dumps(source, ensure_ascii=False, default=str, indent=2)
+    return call_openai_text(system, user).strip()
+
+
 @router.post("/auto-description")
 def auto_description(payload: dict[str, Any], request: Request, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
@@ -726,4 +768,11 @@ def auto_description(payload: dict[str, Any], request: Request, x_api_key: Optio
     job = _job_from_store(request, job_id)
     data = _merge_payload_with_job(payload, job)
 
-    return {"ok": True, "description": generate_description_from_data(data)}
+    try:
+        description = _ai_document_description(data)
+        if description:
+            return {"ok": True, "description": description, "ai_used": True}
+    except Exception as exc:
+        print(f"Auto-description OpenAI fallback: {exc}")
+
+    return {"ok": True, "description": generate_description_from_data(data), "ai_used": False}
