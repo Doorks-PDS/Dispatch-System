@@ -1191,19 +1191,57 @@
     return map && typeof map === "object" ? map : {};
   }
 
-  function getRollupProfile(employee) {
+  function getRollupProfile(employee, effectiveDate = "") {
     const map = getRollupProfileMap();
     const row = map[String(employee || "").trim()] || {};
+    const legacyWage = Number(row.wage || 0);
+    const month = String(effectiveDate || "").slice(0, 7);
+    const history = Array.isArray(row.wage_history)
+      ? row.wage_history
+          .filter(item => item && /^\d{4}-\d{2}$/.test(String(item.effective_month || "")))
+          .slice()
+          .sort((a, b) => String(a.effective_month).localeCompare(String(b.effective_month)))
+      : [];
+    let wage = legacyWage;
+    if (month) {
+      history.forEach(item => {
+        if (String(item.effective_month) <= month) wage = Number(item.wage || 0);
+      });
+    } else if (history.length) {
+      wage = Number(history[history.length - 1].wage || 0);
+    }
     return {
-      wage: Number(row.wage || 0),
+      wage,
       multiplier: Number(row.multiplier || 0),
+      wage_history: history,
     };
   }
 
-  function setRollupProfile(employee, wage, multiplier) {
+  function setRollupProfile(employee, wage, multiplier, effectiveMonth = "") {
     const name = String(employee || "").trim();
     if (!name) return;
-    const map = { ...getRollupProfileMap(), [name]: { wage: Number(wage || 0), multiplier: Number(multiplier || 0) } };
+    const map = { ...getRollupProfileMap() };
+    const previous = map[name] && typeof map[name] === "object" ? { ...map[name] } : {};
+    const legacyWage = Number(previous.wage || 0);
+    const history = Array.isArray(previous.wage_history) ? previous.wage_history.slice() : [];
+    const month = String(effectiveMonth || "").slice(0, 7);
+
+    if (month) {
+      const today = new Date();
+      const currentCalendarMonth = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+      if (!history.length && month < currentCalendarMonth && legacyWage > 0) {
+        history.push({ effective_month: currentCalendarMonth, wage: legacyWage });
+      }
+      const nextEntry = { effective_month: month, wage: Number(wage || 0) };
+      const idx = history.findIndex(item => String(item?.effective_month || "") === month);
+      if (idx >= 0) history[idx] = nextEntry;
+      else history.push(nextEntry);
+      history.sort((a, b) => String(a.effective_month || "").localeCompare(String(b.effective_month || "")));
+      map[name] = { ...previous, wage: legacyWage, multiplier: Number(multiplier || 0), wage_history: history };
+    } else {
+      map[name] = { ...previous, wage: Number(wage || 0), multiplier: Number(multiplier || 0), wage_history: history };
+    }
+
     SHARED_SETTINGS_CACHE.rollup_profiles = map;
     apiUpdateSharedSettingsSection("rollup_profiles", map).catch(e => console.warn("Roll up profile save failed", e));
   }
@@ -2601,8 +2639,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
       if (f.technician_name) lines.push(`Tech: ${f.technician_name}`);
       if (f.door_type) lines.push(`Door Type: ${f.door_type}`);
       if (f.door_location) lines.push(`Door Location: ${f.door_location}`);
-      if (f.time_in) lines.push(`Time In: ${f.time_in}`);
-      if (f.time_out) lines.push(`Time Out: ${f.time_out}`);
+      if (f.time_in) lines.push(`Time In: ${formatTime12(f.time_in)}`);
+      if (f.time_out) lines.push(`Time Out: ${formatTime12(f.time_out)}`);
       if (typeof f.time_onsite_hours === "number") lines.push(`Time: ${f.time_onsite_hours} hrs`);
       if (f.tech_notes) lines.push(`Tech Notes: ${f.tech_notes}`);
       if (f.recommendations) lines.push(`Recommendations: ${f.recommendations}`);
@@ -6122,9 +6160,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const totalHours = totalFormHours + totalTimecardRollupHours;
       const totalJobs = rollUps.length;
       const uniqueTechs = Object.keys(techTotals).length;
-      const totalCost = Object.entries(techTotals).reduce((sum, [tech, data]) => {
-        const prof = getRollupProfile(tech);
-        return sum + (Number(data.total || 0) * Number(prof.wage || 0));
+      const totalCost = detailRows.reduce((sum, r) => {
+        const prof = getRollupProfile(r.technician, r.date);
+        return sum + (Number(r.hours || 0) * Number(prof.wage || 0));
       }, 0);
 
       const exportBtn = document.createElement("button");
@@ -6133,7 +6171,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       exportBtn.addEventListener("click", () => {
         let csv = "Date,Customer,Address,Technician,Hours,Job Status,Job Number,Door Location,Source,Wage,Total Cost\n";
         detailRows.slice().sort((a,b)=>String(a.date).localeCompare(String(b.date))).forEach(r => {
-          const prof = getRollupProfile(r.technician);
+          const prof = getRollupProfile(r.technician, r.date);
           const cost = Number(r.hours || 0) * Number(prof.wage || 0);
           const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
           csv += [esc(r.date), esc(r.customer), esc(r.address), esc(r.technician), Number(r.hours || 0).toFixed(2), esc(r.status), esc(r.job_number), esc(r.door_location), esc(r.source), Number(prof.wage || 0).toFixed(2), cost.toFixed(2)].join(",") + "\n";
@@ -6193,7 +6231,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           .slice()
           .sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")))
           .forEach(r => {
-            const prof = getRollupProfile(r.technician);
+            const prof = getRollupProfile(r.technician, r.date);
             const cost = Number(r.hours || 0) * Number(prof.wage || 0);
             const row = document.createElement("div");
             row.className = "jobrow";
@@ -6230,8 +6268,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         rightList.innerHTML = `<div class="hint">No technician hours logged yet.</div>`;
       } else {
         techRows.forEach(([tech, data]) => {
-          const prof = getRollupProfile(tech);
-          const totalCostTech = data.total * Number(prof.wage || 0);
+          const prof = getRollupProfile(tech, month);
+          const totalCostTech = detailRows
+            .filter(r => r.technician === tech)
+            .reduce((sum, r) => {
+              const rowProf = getRollupProfile(tech, r.date);
+              return sum + (Number(r.hours || 0) * Number(rowProf.wage || 0));
+            }, 0);
 
           const row = document.createElement("div");
           row.className = "jobrow";
@@ -6251,14 +6294,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
           const editBtn = document.createElement("button");
           editBtn.className = "btn";
-          editBtn.textContent = "Edit";
+          editBtn.textContent = "Edit Wage";
           editBtn.addEventListener("click", (e) => {
             e.stopPropagation();
-            const wage = prompt(`Hourly wage for ${tech}:`, String(Number(prof.wage || 0).toFixed(2)));
+            const effectiveMonth = monthKey(currentMonth);
+            const wage = prompt(`Hourly wage for ${tech} effective ${monthPretty(currentMonth)} and forward:`, String(Number(prof.wage || 0).toFixed(2)));
             if (wage === null) return;
             const wageNum = Number(wage || 0);
             if (Number.isNaN(wageNum)) return alert("Enter a valid wage.");
-            setRollupProfile(tech, wageNum, 1);
+            setRollupProfile(tech, wageNum, 1, effectiveMonth);
             renderActiveTab();
           });
 
@@ -6269,7 +6313,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             e.stopPropagation();
             let csv = "Date,Customer,Address,Technician,Hours,Job Status,Job Number,Door Location,Source,Wage,Total Cost\n";
             detailRows.filter(r => r.technician === tech).forEach(r => {
-              const p = getRollupProfile(tech);
+              const p = getRollupProfile(tech, r.date);
               const cost = Number(r.hours || 0) * Number(p.wage || 0);
               const esc = (v) => `"${String(v || "").replace(/"/g, '""')}"`;
               csv += [esc(r.date), esc(r.customer), esc(r.address), esc(r.technician), Number(r.hours || 0).toFixed(2), esc(r.status), esc(r.job_number), esc(r.door_location), esc(r.source), Number(p.wage || 0).toFixed(2), cost.toFixed(2)].join(",") + "\n";
@@ -7699,8 +7743,8 @@ const updated = await apiUpdateJob(job.id, {
         addRow("Tech", form.technician_name);
         addRow("Door Type", form.door_type);
         addRow("Door Location", form.door_location);
-        addRow("Time In", form.time_in);
-        addRow("Time Out", form.time_out);
+        addRow("Time In", formatTime12(form.time_in));
+        addRow("Time Out", formatTime12(form.time_out));
 
         if (typeLabel === "Recommendation") {
           addRow("Recommendations", form.recommendations || form.additional_recommendations || form.tech_notes);
