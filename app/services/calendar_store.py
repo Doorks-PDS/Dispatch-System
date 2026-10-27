@@ -1063,8 +1063,4 @@ class CalendarStore:
 
             jobs = [j for j in jobs if hit(j)]
 
-        # Calendar date-range/day requests must not lose later jobs to the
-        # general-purpose 1,000-record listing cap. Preserve that cap for
-        # unfiltered listings used elsewhere in the application.
-        max_results = 5000 if (date_from or date_to or date) else 1000
-        return jobs[: max(1, min(int(limit), max_results))]
+        return jobs[: max(1, min(int(limit), 10000))]
