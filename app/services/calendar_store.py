@@ -1016,8 +1016,15 @@ class CalendarStore:
         status: Optional[str] = None,
         q: Optional[str] = None,
         limit: int = 200,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         jobs = self.list_jobs()
+
+        if date_from:
+            jobs = [j for j in jobs if str(j.get("date") or "") >= date_from]
+        if date_to:
+            jobs = [j for j in jobs if str(j.get("date") or "") <= date_to]
 
         if date:
             jobs = [j for j in jobs if str(j.get("date")) == date]

@@ -129,10 +129,12 @@ def list_jobs(
     status: Optional[str] = None,
     q: Optional[str] = None,
     limit: int = 200,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
 ):
     _require(request, x_api_key)
     try:
-        jobs = _store(request).query_jobs(date=date, status=status, q=q, limit=limit)
+        jobs = _store(request).query_jobs(date=date, status=status, q=q, limit=limit, date_from=date_from, date_to=date_to)
         return {"ok": True, "jobs": jobs}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))

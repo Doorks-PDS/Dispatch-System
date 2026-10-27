@@ -3793,7 +3793,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       end.setDate(0);
       end.setDate(end.getDate() + (6 - end.getDay()));
  
-      const jobs = await apiListJobs({ limit: 5000 });
+      let jobs;
+      try {
+        jobs = await apiListJobs({ date_from: yyyyMmDd(start), date_to: yyyyMmDd(end), limit: 5000 });
+      } catch (err) {
+        const msg = document.createElement("div");
+        msg.className = "hint";
+        msg.textContent = `Calendar could not load: ${err.message || err}`;
+        grid.appendChild(msg);
+        return;
+      }
       const byDate = {};
       for (const j of jobs) {
         const dt = j.date;
