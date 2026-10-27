@@ -24,6 +24,7 @@
   let navFormsTimeOff = el("navFormsTimeOff");
   const navTakeoffs = el("navTakeoffs");
   let navFormsSignOff = el("navFormsSignOff");
+  let navFormsReceipts = el("navFormsReceipts");
  
   const navJobFlow = el("navJobFlow");
   let navToDoList = el("navToDoList");
@@ -64,6 +65,19 @@
     }
   }
  
+  if (!navFormsReceipts) {
+    const formsNavCol = document.querySelector("#formsBody .navcol");
+    if (formsNavCol) {
+      const btn = document.createElement("button");
+      btn.className = "navbtn";
+      btn.id = "navFormsReceipts";
+      btn.innerHTML = `<span>Receipts</span><small>Upload / History</small>`;
+      if (navFormsTimeCard && navFormsTimeCard.nextSibling) formsNavCol.insertBefore(btn, navFormsTimeCard.nextSibling);
+      else formsNavCol.appendChild(btn);
+      navFormsReceipts = btn;
+    }
+  }
+
   if (!navToDoList) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
     if (jobsNavCol) {
@@ -241,7 +255,7 @@
  
   function setNavActive(btn) {
     [
-      navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff,
+      navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff, navFormsReceipts,
       navJobFlow, navToDoList, navAllJobs, navPartsList, navDoorLogs, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
       navDataCenter, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
       navNotifications, navAtlas, navMoses
@@ -581,6 +595,18 @@
         </div>
         <div class="hint" style="margin-top:10px;">This creates a live dispatch from the legacy job so it appears on the calendar and can be edited like a normal dispatch.</div>
       `;
+
+      const uploadPanel = document.createElement("div");
+      uploadPanel.style.marginTop = "12px";
+      uploadPanel.innerHTML = `<div class="label">Photos / Files (optional)</div><input class="input" type="file" id="cf_files" multiple accept="image/*,application/pdf" /><div class="hint">Attachments are linked to this saved form.</div>`;
+      card.appendChild(uploadPanel);
+      const checklist = document.createElement("div");
+      checklist.style.marginTop = "12px";
+      checklist.innerHTML = `<div class="label">Before Saving</div>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_review" /> I reviewed the form details and am ready to save.</label>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
+      card.appendChild(checklist);
 
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -3613,7 +3639,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.additional_recommendations = card.querySelector("#cf_add_recs").value.trim();
           }
  
+          if (!card.querySelector("#cf_confirm_review").checked || !card.querySelector("#cf_confirm_signoff").checked || !card.querySelector("#cf_confirm_checkin").checked) {
+            alert("Please complete the save confirmation checklist."); return;
+          }
+          const selectedFiles = Array.from(card.querySelector("#cf_files")?.files || []);
           const savedForm = await apiAddCompletion(job.id, payload);
+          if (selectedFiles.length) {
+            try { await apiUploadCompletionAttachments(job.id, savedForm.id, selectedFiles); }
+            catch (uploadError) { alert(`Form saved, but attachments could not be uploaded: ${uploadError.message || uploadError}`); }
+          }
 
           if (doorRecordPanel) {
             const mode = doorRecordPanel.querySelector("#cf_door_record_mode")?.value || "";
@@ -4979,6 +5013,84 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     controls.querySelector('#so_search').addEventListener('input', refresh);
     controls.querySelector('#so_new').addEventListener('click', ()=> openSignOffView());
     root.append(card, controls, list); workspaceBody.innerHTML=''; workspaceBody.appendChild(root); currentView={ refresh }; refresh();
+  }
+
+  async function renderReceiptsView() {
+    setNavActive(navFormsReceipts);
+    setActiveChip("Receipts");
+    setWorkspace("Receipts");
+    clearWorkspaceActions();
+    workspaceBody.innerHTML = "";
+    const card = document.createElement("div");
+    card.className = "card";
+    card.innerHTML = `<h3>Submit Receipt</h3>
+      <div class="hint">Upload a photo or PDF. Enter only the last four digits of the card, never the full card number.</div>
+      <form id="receipt_submit_form">
+        <div class="grid2">
+          <div><div class="label">Date</div><input class="input" type="date" name="date" required /></div>
+          <div><div class="label">Employee</div><input class="input" name="employee" required /></div>
+          <div><div class="label">Vendor</div><input class="input" name="vendor" required /></div>
+          <div><div class="label">Amount ($)</div><input class="input" type="number" min="0" step="0.01" name="amount" required /></div>
+          <div><div class="label">Card last 4 digits</div><input class="input" name="card_last4" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="1234" /></div>
+          <div><div class="label">Receipt Number</div><input class="input" name="receipt_number" /></div>
+        </div>
+        <div class="label">Notes</div><textarea class="input" name="notes" rows="2"></textarea>
+        <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required />
+        <div style="margin-top:12px;"><button class="btn btn-orange" type="submit">Save Receipt</button></div>
+      </form>
+      <div id="receipt_feedback" class="hint" style="margin-top:8px;"></div>`;
+    workspaceBody.appendChild(card);
+    const history = document.createElement("div");
+    history.className = "card";
+    history.innerHTML = `<h3>Saved Receipts</h3><div class="hint">Loading…</div>`;
+    workspaceBody.appendChild(history);
+    const form = card.querySelector("#receipt_submit_form");
+    form.elements.date.value = new Date().toISOString().slice(0, 10);
+    form.elements.employee.value = currentUser?.name || currentUser?.username || "";
+    async function refreshReceipts() {
+      try {
+        const result = await fetchJSON("/receipts");
+        const items = result.items || [];
+        history.innerHTML = `<h3>Saved Receipts (${items.length})</h3>`;
+        if (!items.length) history.appendChild(Object.assign(document.createElement("div"), {className:"hint", textContent:"No receipts saved yet."}));
+        for (const item of items) {
+          const line = document.createElement("div");
+          line.style.cssText = "padding:10px 0;border-bottom:1px solid #ddd";
+          const heading = document.createElement("div");
+          heading.textContent = `${item.date || ""} — ${item.vendor || ""} — $${Number(item.amount || 0).toFixed(2)} — ${item.employee || ""}`;
+          const detail = document.createElement("div");
+          detail.className = "hint";
+          detail.textContent = `Card •••• ${item.card_last4 || "N/A"} | Receipt # ${item.receipt_number || "N/A"} | ${item.notes || ""}`;
+          const link = document.createElement("a");
+          link.href = `/receipts/${encodeURIComponent(item.id)}/file`;
+          link.target = "_blank";
+          link.rel = "noopener";
+          link.textContent = "Open receipt";
+          line.append(heading, detail, link);
+          history.appendChild(line);
+        }
+      } catch (err) { history.textContent = `Unable to load receipts: ${err.message || err}`; }
+    }
+    form.addEventListener("submit", async event => {
+      event.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      btn.disabled = true;
+      const feedback = card.querySelector("#receipt_feedback");
+      feedback.textContent = "Saving…";
+      try {
+        const res = await fetch("/receipts", {method:"POST", credentials:"same-origin", body:new FormData(form)});
+        const result = await res.json();
+        if (!res.ok) throw new Error(result.detail || `HTTP ${res.status}`);
+        feedback.textContent = "Receipt saved.";
+        form.reset();
+        form.elements.date.value = new Date().toISOString().slice(0,10);
+        form.elements.employee.value = currentUser?.name || currentUser?.username || "";
+        await refreshReceipts();
+      } catch (err) { feedback.textContent = `Unable to save receipt: ${err.message || err}`; }
+      finally { btn.disabled = false; }
+    });
+    await refreshReceipts();
+    currentView = {refresh: refreshReceipts};
   }
 
   function renderTakeoffsView() {
@@ -9165,6 +9277,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
   if (navTakeoffs) navTakeoffs.addEventListener("click", renderTakeoffsView);
+  if (navFormsReceipts) navFormsReceipts.addEventListener("click", renderReceiptsView);
   if (navFormsSignOff) navFormsSignOff.addEventListener("click", renderSignOffLibraryView);
  
   if (navDataCenter) {

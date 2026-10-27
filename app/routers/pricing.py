@@ -5,10 +5,10 @@ from pydantic import BaseModel
 router = APIRouter()
 
 class PricingUpdate(BaseModel):
-    trip: float = 175
+    trip: float = 190
     fuel: float = 20
-    labor: float = 175
-    crew_labor: float = 235
+    labor: float = 190
+    crew_labor: float = 250
     tax: float = 7.75
     default_terms: str = "Due on Receipt"
     billing_terms: list[str] = []
@@ -16,9 +16,13 @@ class PricingUpdate(BaseModel):
 
 @router.get("/pricing")
 def get_pricing(request: Request):
+    if not getattr(request.state, "auth_user", None):
+        request.app.state.require_key(None)
     return request.app.state.pricing_store.load()
 
 @router.put("/pricing")
 def update_pricing(data: PricingUpdate, request: Request):
+    if not getattr(request.state, "auth_user", None):
+        request.app.state.require_key(None)
     request.app.state.pricing_store.save(data.dict())
     return {"ok": True}
