@@ -25,6 +25,17 @@
   const navTakeoffs = el("navTakeoffs");
   let navFormsSignOff = el("navFormsSignOff");
   let navFormsReceipts = el("navFormsReceipts");
+  // Bind the static Forms navigation immediately, not after all other startup work.
+  // Function declarations are hoisted, so the view is available here.
+  if (navFormsReceipts) {
+    navFormsReceipts.addEventListener("click", (event) => {
+      event.preventDefault();
+      renderReceiptsView().catch(err => {
+        console.error("Receipts view failed", err);
+        alert(`Unable to open Receipts: ${err.message || err}`);
+      });
+    });
+  }
  
   const navJobFlow = el("navJobFlow");
   let navToDoList = el("navToDoList");
@@ -595,6 +606,19 @@
         </div>
         <div class="hint" style="margin-top:10px;">This creates a live dispatch from the legacy job so it appears on the calendar and can be edited like a normal dispatch.</div>
       `;
+
+      // Existing saved forms use a separate editor from new forms.
+      // Give both workflows the same attachment and save-review controls.
+      const editExtras = document.createElement("div");
+      editExtras.style.marginTop = "12px";
+      editExtras.innerHTML = `<div class="label">Add Photos / Files (optional)</div>
+        <input class="input" type="file" id="ef_files" multiple accept="image/*,application/pdf" />
+        <div class="hint">New uploads are attached to this saved form.</div>
+        <div class="label" style="margin-top:12px">Before Saving</div>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_review" /> I reviewed the form details and am ready to save.</label>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
+      card.appendChild(editExtras);
 
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -2517,8 +2541,23 @@ function renderAttachmentSection(titleText, items, options = {}) {
             next.additional_recommendations = addRecs.value.trim();
           }
  
+          if (!["ef_confirm_review", "ef_confirm_signoff", "ef_confirm_checkin"].every(id => card.querySelector(`#${id}`)?.checked)) {
+            alert("Please complete the save confirmation checklist.");
+            return;
+          }
+          const editFiles = Array.from(card.querySelector("#ef_files")?.files || []);
           updatedForms[formIndex] = next;
           const updatedJob = await apiReplaceCompletionForms(job.id, updatedForms);
+          if (editFiles.length) {
+            const saved = formsOf(updatedJob)[formIndex];
+            const formId = saved?.id || next.id || f.id;
+            if (!formId) {
+              alert("Form changes saved, but an attachment ID was not returned. No files were uploaded.");
+            } else {
+              try { await apiUploadCompletionAttachments(job.id, formId, editFiles); }
+              catch (uploadError) { alert(`Form saved, but attachment upload failed: ${uploadError.message || uploadError}`); }
+            }
+          }
  
           overlay.remove();
           if (ctx && ctx.afterSave) await ctx.afterSave();
@@ -3645,7 +3684,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const selectedFiles = Array.from(card.querySelector("#cf_files")?.files || []);
           const savedForm = await apiAddCompletion(job.id, payload);
           if (selectedFiles.length) {
-            try { await apiUploadCompletionAttachments(job.id, savedForm.id, selectedFiles); }
+            try {
+              if (!savedForm?.id) throw new Error("Saved form did not return an attachment ID");
+              await apiUploadCompletionAttachments(job.id, savedForm.id, selectedFiles);
+            }
             catch (uploadError) { alert(`Form saved, but attachments could not be uploaded: ${uploadError.message || uploadError}`); }
           }
 
@@ -9277,7 +9319,6 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
   if (navTakeoffs) navTakeoffs.addEventListener("click", renderTakeoffsView);
-  if (navFormsReceipts) navFormsReceipts.addEventListener("click", renderReceiptsView);
   if (navFormsSignOff) navFormsSignOff.addEventListener("click", renderSignOffLibraryView);
  
   if (navDataCenter) {
