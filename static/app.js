@@ -3774,7 +3774,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     let cur = new Date();
     cur.setDate(1);
  
+    let calendarRequestId = 0;
     async function refresh() {
+      const requestId = ++calendarRequestId;
       label.textContent = monthLabel(cur);
       grid.innerHTML = "";
  
@@ -3795,8 +3797,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
       let jobs;
       try {
-        jobs = await apiListJobs({ date_from: yyyyMmDd(start), date_to: yyyyMmDd(end), limit: 5000 });
+        // Calendar-only request: never use the unfiltered, capped job list.
+        // Keep all historical months available by requesting their visible dates.
+        const qs = new URLSearchParams({
+          date_from: yyyyMmDd(start),
+          date_to: yyyyMmDd(end),
+          limit: "1000"
+        });
+        const response = await fetchJSON(`/calendar/jobs?${qs.toString()}`);
+        if (requestId !== calendarRequestId) return; // Ignore stale month responses.
+        jobs = Array.isArray(response.jobs) ? response.jobs : [];
+        console.info(`[Doorks Calendar] ${qs.toString()} — ${jobs.length} jobs`);
       } catch (err) {
+        if (requestId !== calendarRequestId) return;
         const msg = document.createElement("div");
         msg.className = "hint";
         msg.textContent = `Calendar could not load: ${err.message || err}`;
