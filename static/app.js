@@ -596,18 +596,6 @@
         <div class="hint" style="margin-top:10px;">This creates a live dispatch from the legacy job so it appears on the calendar and can be edited like a normal dispatch.</div>
       `;
 
-      const uploadPanel = document.createElement("div");
-      uploadPanel.style.marginTop = "12px";
-      uploadPanel.innerHTML = `<div class="label">Photos / Files (optional)</div><input class="input" type="file" id="cf_files" multiple accept="image/*,application/pdf" /><div class="hint">Attachments are linked to this saved form.</div>`;
-      card.appendChild(uploadPanel);
-      const checklist = document.createElement("div");
-      checklist.style.marginTop = "12px";
-      checklist.innerHTML = `<div class="label">Before Saving</div>
-        <label style="display:block;"><input type="checkbox" id="cf_confirm_review" /> I reviewed the form details and am ready to save.</label>
-        <label style="display:block;"><input type="checkbox" id="cf_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
-        <label style="display:block;"><input type="checkbox" id="cf_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
-      card.appendChild(checklist);
-
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
@@ -3576,6 +3564,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (selected.door_location) locRow.querySelector("#cf_door_loc").value = selected.door_location;
       });
  
+      const uploadPanel = document.createElement("div");
+      uploadPanel.style.marginTop = "12px";
+      uploadPanel.innerHTML = `<div class="label">Photos / Files (optional)</div><input class="input" type="file" id="cf_files" multiple accept="image/*,application/pdf" /><div class="hint">Attachments are linked to this saved form.</div>`;
+      card.appendChild(uploadPanel);
+      const checklist = document.createElement("div");
+      checklist.style.marginTop = "12px";
+      checklist.innerHTML = `<div class="label">Before Saving</div>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_review" /> I reviewed the form details and am ready to save.</label>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
+      card.appendChild(checklist);
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
