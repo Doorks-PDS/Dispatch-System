@@ -3623,32 +3623,46 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (selected.door_location) locRow.querySelector("#cf_door_loc").value = selected.door_location;
       });
  
-      // Optional on-device/browser voice dictation into existing form fields.
-      // Transcript is editable and never saved without the technician pressing Save Form.
+      // Moses: one transcript, then OpenAI proposes structured form fields for review.
       const speechCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const speechFields = isSalesLead
-        ? [["cf_lead_recs","Recommendations"],["cf_lead_parts","Parts Required"]]
-        : [["cf_tech_notes","Tech Notes"],["cf_parts","Parts Used"],["cf_add_recs","Recommendations"]];
       const speechPanel=document.createElement("div");speechPanel.className="card";
-      speechPanel.style.cssText="margin-top:12px;padding:12px";
-      const speechTitle=document.createElement("strong");speechTitle.textContent="Moses Form Assistant — Voice Dictation";speechPanel.appendChild(speechTitle);
+      speechPanel.style.cssText="margin:12px 0;padding:14px";
+      const speechTitle=document.createElement("strong");speechTitle.textContent="Moses — Voice Form Assistant";speechPanel.appendChild(speechTitle);
       const speechHint=document.createElement("p");speechHint.className="hint";
-      speechHint.textContent="Speak naturally about work performed, parts used, and recommendations. Review the form before saving.";speechPanel.appendChild(speechHint);
-      const speechSelect=document.createElement("select");speechSelect.className="input";
-      for(const [id,label] of speechFields){if(!card.querySelector(`#${id}`))continue;const o=document.createElement("option");o.value=id;o.textContent=label;speechSelect.appendChild(o);}// Single voice input; no field selector for technicians.
-      speechSelect.style.display="none";
-      const speechBtn=document.createElement("button");speechBtn.type="button";speechBtn.className="btn";speechBtn.textContent="Start Dictation";speechPanel.appendChild(speechBtn);
-      if(!speechCtor){speechBtn.disabled=true;speechHint.textContent="Voice dictation is not available in this browser. You can still type into the form.";}
-      else {let recognition=null;let active=false;
+      speechHint.textContent="Describe the work, parts, and recommendations in one recording. Review the transcript, then let AI fill the form. Nothing saves automatically.";speechPanel.appendChild(speechHint);
+      const transcript=document.createElement("textarea");transcript.className="input";transcript.rows=4;transcript.placeholder="Speak or type your full job description here...";transcript.setAttribute("aria-label","Voice transcript");speechPanel.appendChild(transcript);
+      const voiceActions=document.createElement("div");voiceActions.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px";speechPanel.appendChild(voiceActions);
+      const speechBtn=document.createElement("button");speechBtn.type="button";speechBtn.className="btn";speechBtn.textContent="Start Recording";voiceActions.appendChild(speechBtn);
+      const aiBtn=document.createElement("button");aiBtn.type="button";aiBtn.className="btn btn-orange";aiBtn.textContent="Fill Form with OpenAI";voiceActions.appendChild(aiBtn);
+      if(!speechCtor){speechBtn.disabled=true;speechHint.textContent="Voice recognition is unavailable in this browser. Type notes below and select Fill Form with OpenAI.";}
+      else {let recognition=null,active=false,finalText="";
         speechBtn.addEventListener("click",()=>{
           if(active){recognition?.stop();return;}
-          const target=card.querySelector(isSalesLead?"#cf_lead_recs":"#cf_tech_notes");if(!target)return;
-          recognition=new speechCtor();recognition.lang="en-US";recognition.continuous=false;recognition.interimResults=false;
-          recognition.onresult=(e)=>{const words=Array.from(e.results).map(r=>r[0]?.transcript||"").join(" ").trim();if(words){target.value=[target.value.trim(),words].filter(Boolean).join(" ");target.dispatchEvent(new Event("input",{bubbles:true}));}};
-          recognition.onerror=(e)=>{speechHint.textContent=`Dictation unavailable: ${e.error||"microphone error"}. Type normally or try again.`;};
-          recognition.onend=()=>{active=false;speechBtn.textContent="Start Dictation";};
-          try{recognition.start();active=true;speechBtn.textContent="Stop Dictation";}catch(e){speechHint.textContent=`Could not start dictation: ${e.message||e}`;}
+          recognition=new speechCtor();recognition.lang="en-US";recognition.continuous=true;recognition.interimResults=true;
+          finalText=transcript.value.trim();
+          recognition.onresult=(e)=>{let interim="";for(let i=e.resultIndex;i<e.results.length;i++){const part=e.results[i][0]?.transcript||"";if(e.results[i].isFinal)finalText=[finalText,part].filter(Boolean).join(" ");else interim+=part;}transcript.value=[finalText,interim].filter(Boolean).join(" ");};
+          recognition.onerror=(e)=>{speechHint.textContent=`Recording error: ${e.error||"microphone error"}. You can type notes manually.`;};
+          recognition.onend=()=>{active=false;speechBtn.textContent="Start Recording";speechHint.textContent="Recording stopped. Review the transcript, then select Fill Form with OpenAI.";};
+          try{recognition.start();active=true;speechBtn.textContent="Stop Recording";speechHint.textContent="Recording... press Stop Recording when finished.";}catch(e){speechHint.textContent=`Could not record: ${e.message||e}`;}
         });
+      }
+      aiBtn.addEventListener("click",async()=>{
+        const text=transcript.value.trim();if(!text){alert("Record or type your notes first.");return;}
+        aiBtn.disabled=true;aiBtn.textContent="Organizing notes...";
+        try{
+          const result=await fetchJSON("/moses/form-assist",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({transcript:text,form_type:isSalesLead?"recommendation":"completion"})});
+          const fields=result.fields||{};
+          const mapping=isSalesLead?[["recommendations","#cf_lead_recs"],["parts_used","#cf_lead_parts"]]:[["work_performed","#cf_tech_notes"],["parts_used","#cf_parts"],["recommendations","#cf_add_recs"]];
+          for(const [key,selector] of mapping){const el=card.querySelector(selector);if(el&&fields[key]){el.value=String(fields[key]);el.dispatchEvent(new Event("input",{bubbles:true}));}}
+          speechHint.textContent="AI draft filled in. Review every field and correct anything inaccurate before saving.";
+          if(result.message) speechHint.textContent=result.message;
+        }catch(e){speechHint.textContent=`AI assistance failed: ${e.message||e}. Your transcript is still available.`;}
+        finally{aiBtn.disabled=false;aiBtn.textContent="Fill Form with OpenAI";}
+      });
+      if(currentUser && ["tech","lead"].includes(String(currentUser.role||""))){
+        const employeeName=String(currentUser.name||currentUser.full_name||currentUser.username||"").trim();
+        if(employeeName){const match=Array.from(techSel.options).find(o=>o.value.toLowerCase()===employeeName.toLowerCase());
+          if(match){techSel.value=match.value;techSel.disabled=true;techSel.title="Automatically assigned from your logged-in account";}}
       }
       card.insertBefore(speechPanel,card.firstChild);
       const uploadPanel = document.createElement("div");
@@ -5264,7 +5278,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     window.__doorksAcctInPeriod=inPeriod;
     const periodBar=document.createElement("div");periodBar.className="card";periodBar.style.cssText="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0";
     periodBar.innerHTML='<strong>Reporting period</strong><select class="input" id="acct_period_mode"><option value="month">Month</option><option value="custom">Custom period</option><option value="all">All time</option></select><input class="input" id="acct_period_month" type="month"/><input class="input" id="acct_period_start" type="date"/><span>to</span><input class="input" id="acct_period_end" type="date"/>';
-    workspaceBody.appendChild(periodBar);
+    workspaceBody.insertBefore(periodBar, workspaceBody.querySelector("#acct_content"));
     const pm=periodBar.querySelector("#acct_period_mode"),mm=periodBar.querySelector("#acct_period_month"),ps=periodBar.querySelector("#acct_period_start"),pe=periodBar.querySelector("#acct_period_end");
     pm.value=periodState.mode;mm.value=periodState.month;ps.value=periodState.start;pe.value=periodState.end;
     const periodUpdate=()=>{periodState.mode=pm.value;periodState.month=mm.value;periodState.start=ps.value;periodState.end=pe.value;renderAccountingView(section);};
