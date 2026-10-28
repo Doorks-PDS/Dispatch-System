@@ -323,61 +323,70 @@
     inventory:["supplier","part_number","description","quantity","unit_cost","notes"]
   };
   function safeWorkspaceText(value) { const e=document.createElement("span");e.textContent=String(value??"");return e.innerHTML; }
+  // Phase 2D: business-specific dashboard and record editor. Never uses PDS data endpoints.
   async function renderBusinessCollection(platform,kind) {
     if(activePlatform!==platform)return;
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
-    clearWorkspaceActions();setWorkspace(`${platform==="sdc"?"SDC":"Doorks"} — ${labels[kind]}`);
-    workspaceBody.innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>${labels[kind]}</h2><button class="btn" id="businessBack">← Dashboard</button></div><p>Records are saved to the ${platform.toUpperCase()} workspace only.</p><label style="display:grid;gap:5px;max-width:620px">Search saved records<input id="businessSearch" type="search" placeholder="Search customer, order, PO, amount, notes or any field" style="padding:12px;border:1px solid #ccd2dc;border-radius:9px"></label><div id="businessRecords" aria-live="polite">Loading...</div><h3 id="businessFormTitle">New ${labels[kind].replace(' & Production','')}</h3><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form><p id="businessSaveMessage" role="status"></p></div>`;
-    el('businessBack').onclick=()=>showPlatformShell(platform);
-    const form=el('businessRecordForm'), message=el('businessSaveMessage'), endpoint=`/workspaces/${platform}/${kind}`;
-    const fieldTypes={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date'};
+    clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
+    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:6px 0 0">${platform.toUpperCase()} records only · Saved on the persistent business workspace</p></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><p class="hint">Review details before saving. Nothing is created until you press Save.</p><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
+    const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
+    const endpoint=`/workspaces/${platform}/${kind}`;
+    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date'};
     const statuses=kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['New','Scheduled','In Progress','Completed','Cancelled']:null;
     let records=[],editingId=null;
     for(const field of fields){
-      const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;text-transform:capitalize;font-weight:600';label.textContent=field.replaceAll('_',' ');
+      const label=document.createElement('label');label.style.cssText='display:grid;gap:6px;font-weight:600';label.textContent=field.replaceAll('_',' ');
       let input;
-      if(field==='status'&&statuses){input=document.createElement('select');for(const st of statuses){const opt=document.createElement('option');opt.value=st;opt.textContent=st;input.append(opt);}}
-      else if(field==='notes'||field==='description'){input=document.createElement('textarea');input.rows=3;}
-      else{input=document.createElement('input');input.type=fieldTypes[field]||'text';if(input.type==='number'){input.step='any';}}
-      input.name=field;input.placeholder=field.replaceAll('_',' ');input.style.cssText='width:100%;box-sizing:border-box;padding:11px;border:1px solid #ccd2dc;border-radius:9px';
-      label.append(input);form.append(label);
+      if(field==='status'&&statuses){input=document.createElement('select');for(const status of statuses){const option=document.createElement('option');option.value=status;option.textContent=status;input.append(option);}}
+      else if(['notes','description'].includes(field)){input=document.createElement('textarea');input.rows=4;}
+      else{input=document.createElement('input');input.type=types[field]||'text';if(input.type==='number')input.step='any';}
+      input.name=field;input.className='input';input.style.cssText='width:100%;box-sizing:border-box';label.append(input);form.append(label);
     }
-    const actions=document.createElement('div');actions.style.cssText='grid-column:1/-1;display:flex;gap:10px;align-items:center';
-    const submit=document.createElement('button');submit.className='btn primary';submit.type='submit';submit.textContent='Save '+platform.toUpperCase()+' record';actions.append(submit);
-    const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel edit';cancel.hidden=true;actions.append(cancel);form.append(actions);
-    const resetEdit=()=>{editingId=null;form.reset();cancel.hidden=true;submit.textContent='Save '+platform.toUpperCase()+' record';el('businessFormTitle').textContent='New '+labels[kind];};
-    cancel.onclick=resetEdit;
+    const actions=document.createElement('div');actions.style.cssText='grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap';
+    const submit=document.createElement('button');submit.type='submit';submit.className='btn btn-orange';submit.textContent='Save record';actions.append(submit);
+    const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';actions.append(cancel);form.append(actions);
+    const close=()=>{editor.hidden=true;editingId=null;form.reset();message.textContent='';};
+    cancel.onclick=close;el('businessClose').onclick=close;
+    el('businessBack').onclick=()=>showPlatformShell(platform);
+    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=item[f]??'';}el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';editor.hidden=false;editor.scrollIntoView({behavior:'smooth',block:'start'});};
+    el('businessNew').onclick=()=>open();
     const search=el('businessSearch');
     function draw(){const host=el('businessRecords');host.replaceChildren();const q=search.value.toLowerCase().trim();const filtered=records.filter(item=>!q||Object.values(item).some(v=>String(v??'').toLowerCase().includes(q)));
-      const count=document.createElement('p');count.textContent=`${filtered.length} of ${records.length} saved records`;host.append(count);
-      if(!filtered.length){const empty=document.createElement('p');empty.textContent=q?'No matching records.':'No records saved yet.';host.append(empty);return;}
+      const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${filtered.length} of ${records.length} records`;host.append(count);
+      if(!filtered.length){const empty=document.createElement('p');empty.className='hint';empty.textContent=q?'No matching records.':'No records saved yet. Select New to create the first one.';host.append(empty);return;}
       for(const item of filtered.slice().reverse()){
-        const row=document.createElement('div');row.style.cssText='padding:14px;margin:9px 0;border:1px solid #d9dee7;border-radius:10px';
+        const row=document.createElement('div');row.style.cssText='padding:16px;margin:10px 0;border:1px solid #d9dee7;border-radius:12px;background:#fff';
         const title=document.createElement('strong');title.textContent=item.customer||item.name||item.item||item.description||item.part_number||'Record';row.append(title);
-        const body=document.createElement('div');body.style.cssText='white-space:pre-wrap;margin:9px 0';body.textContent=fields.filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>`${k.replaceAll('_',' ')}: ${item[k]}`).join('\n');row.append(body);
-        const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit record';edit.onclick=()=>{editingId=item.id;for(const f of fields){const inp=form.elements.namedItem(f);if(inp)inp.value=item[f]??'';}cancel.hidden=false;submit.textContent='Update record';el('businessFormTitle').textContent='Edit '+labels[kind];form.scrollIntoView({behavior:'smooth',block:'start'});};row.append(edit);host.append(row);
+        const details=document.createElement('div');details.style.cssText='white-space:pre-wrap;margin:10px 0;color:#526071';details.textContent=fields.filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>`${k.replaceAll('_',' ')}: ${item[k]}`).join('\n');row.append(details);
+        const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>open(item);row.append(edit);host.append(row);
       }
     }
     search.oninput=draw;
     async function refresh(){const result=await fetchJSON(endpoint);records=Array.isArray(result.items)?result.items:[];draw();}
     form.onsubmit=async e=>{e.preventDefault();message.textContent='Saving…';const data={};for(const field of fields){const input=form.elements.namedItem(field);data[field]=String(input?.value??'').trim();}submit.disabled=true;
-      try{const url=editingId?endpoint+'/'+encodeURIComponent(editingId):endpoint;await fetchJSON(url,{method:editingId?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});resetEdit();await refresh();message.textContent='Saved successfully to '+platform.toUpperCase()+'.';}
-      catch(err){message.textContent='Save failed: '+(err.message||'Unknown error');console.error('Workspace save failed',err);}
+      try{await fetchJSON(editingId?`${endpoint}/${encodeURIComponent(editingId)}`:endpoint,{method:editingId?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});await refresh();close();}
+      catch(err){message.textContent=`Save failed: ${err.message||'Unknown error'}`;console.error('Workspace save failed',err);}
       finally{submit.disabled=false;}
     };
-    try{await refresh();}catch(err){el('businessRecords').textContent='Unable to load records: '+(err.message||'Unknown error');}
+    try{await refresh();}catch(err){el('businessRecords').textContent=`Unable to load records: ${err.message||'Unknown error'}`;}
   }
   function showPlatformShell(platform) {
     activePlatform=platform;
     if(platformSelect)platformSelect.value=platform;
-    const inPds=platform==="pds";
-    if(platformSidebar)platformSidebar.style.display=inPds?"":"none";
-    if(headerCalendarBtn)headerCalendarBtn.style.display=inPds&&currentUser&&currentUser.role==="office_admin"?"inline-flex":"none";
-    if(!inPds){
-      clearWorkspaceActions();setWorkspace(platform==="sdc"?"SDC — Saddleback Design Co.":"Doorks — Administration");
-      const label=platform==="sdc"?"Saddleback Design Co.":"Doorks Service Network";
-      workspaceBody.innerHTML=`<div class="card"><h2>${label}</h2><p>Separate ${platform.toUpperCase()} workspace. New records are stored independently from PDS.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div><p style="margin-top:20px;color:#687184">Phase 2A: New workspace records only. Existing Saddleback orders remain in PDS until a verified migration. Advanced AI Accounting and employee assignments follow in later phases.</p></div>`;
-      const nav=el("businessNav");for(const [kind,title] of Object.entries(workspaceKinds[platform])){const b=document.createElement("button");b.className="btn";b.textContent=title;b.onclick=()=>renderBusinessCollection(platform,kind);nav.append(b);}
+    const inPds=platform==='pds';
+    if(platformSidebar)platformSidebar.style.display=inPds?'':'none';
+    if(headerCalendarBtn)headerCalendarBtn.style.display=inPds&&currentUser&&currentUser.role==='office_admin'?'inline-flex':'none';
+    if(inPds)return;
+    clearWorkspaceActions();setWorkspace(platform==='sdc'?'SDC — Saddleback Design Co.':'Doorks — Administration');
+    const isSdc=platform==='sdc',name=isSdc?'Saddleback Design Co.':'Doorks Service Network';
+    const items=Object.entries(workspaceKinds[platform]);
+    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><p class="hint">Independent ${platform.toUpperCase()} workspace · PDS business records remain unchanged</p><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><p class="hint">Select a section to manage its records. Existing Saddleback records remain in PDS pending verified migration.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
+    const nav=el('businessNav'),cards=el('businessDashboardCards');
+    for(const [kind,title] of items){
+      const btn=document.createElement('button');btn.className='btn';btn.textContent=title;btn.onclick=()=>renderBusinessCollection(platform,kind);nav.append(btn);
+      const card=document.createElement('button');card.type='button';card.style.cssText='text-align:left;border:1px solid #d9dee7;border-radius:12px;padding:18px;background:#fff;cursor:pointer';
+      const heading=document.createElement('strong');heading.textContent=title;const count=document.createElement('p');count.className='hint';count.textContent='Loading…';card.append(heading,count);card.onclick=()=>renderBusinessCollection(platform,kind);cards.append(card);
+      fetchJSON(`/workspaces/${platform}/${kind}`).then(result=>{count.textContent=`${Array.isArray(result.items)?result.items.length:0} saved records`;}).catch(err=>{count.textContent=`Unable to load: ${err.message||'Error'}`;});
     }
   }
   async function initializePlatform() {
