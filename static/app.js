@@ -301,6 +301,57 @@
     return data;
   }
  
+
+  // Doorks 2.0 Phase 1: PIN-locked, admin-only platform shells.
+  // Non-PDS screens intentionally do not invoke PDS data APIs.
+  const platformSwitchWrap = el("platformSwitchWrap");
+  const platformSelect = el("platformSelect");
+  const platformSidebar = document.querySelector("main.layout > aside.sidebar");
+  let activePlatform = "pds";
+  let switchingPlatform = false;
+  function showPlatformShell(platform) {
+    activePlatform = platform;
+    if (platformSelect) platformSelect.value = platform;
+    const inPds = platform === "pds";
+    if (platformSidebar) platformSidebar.style.display = inPds ? "" : "none";
+    if (headerCalendarBtn) headerCalendarBtn.style.display = inPds && currentUser && currentUser.role === "office_admin" ? "inline-flex" : "none";
+    if (!inPds) {
+      clearWorkspaceActions();
+      setWorkspace(platform === "sdc" ? "SDC — Saddleback Design Co." : "Doorks — Administration");
+      workspaceBody.innerHTML = `<div class="card" style="max-width:800px"><h2>${platform === "sdc" ? "Saddleback Design Co." : "Doorks Service Network"}</h2><p>This is the new, isolated ${platform === "sdc" ? "SDC" : "Doorks"} workspace foundation.</p><p><strong>Business records and Accounting are not enabled here yet.</strong> We will activate them only after separate persistent storage and server-side permissions are implemented and tested. Your existing PDS and Saddleback records remain unchanged.</p><p>Use the platform selector to return to PDS.</p></div>`;
+    }
+  }
+  async function initializePlatform() {
+    if (!currentUser) {
+      if (platformSwitchWrap) platformSwitchWrap.style.display = "none";
+      activePlatform = "pds";
+      if (platformSidebar) platformSidebar.style.display = "";
+      return;
+    }
+    const admin = currentUser.role === "office_admin";
+    if (platformSwitchWrap) platformSwitchWrap.style.display = admin ? "flex" : "none";
+    if (!admin) { showPlatformShell("pds"); return; }
+    try {
+      const state = await fetchJSON("/platforms/current");
+      showPlatformShell(state.platform || "pds");
+    } catch (err) { console.warn("Platform selection unavailable", err); showPlatformShell("pds"); }
+  }
+  if (platformSelect) platformSelect.addEventListener("change", async () => {
+    if (switchingPlatform || !currentUser || currentUser.role !== "office_admin") return;
+    const target = platformSelect.value;
+    platformSelect.value = activePlatform;
+    if (target === activePlatform) return;
+    const pin = target === "pds" ? "" : prompt(`Enter the ${target === "sdc" ? "SDC" : "Doorks"} platform PIN:`);
+    if (pin === null) return;
+    switchingPlatform = true;
+    try {
+      await fetchJSON("/platforms/switch", {method:"POST", headers:{"Content-Type":"application/json"},body:JSON.stringify({platform:target,pin})});
+      // A full reload clears the old platform's in-memory UI and cached records.
+      window.location.reload();
+    } catch (err) { alert(err.message || "Unable to switch platforms"); }
+    finally { switchingPlatform = false; }
+  });
+
   function togglePanel(bodyEl, chevEl) {
     const isHidden = bodyEl.style.display === "none";
     bodyEl.style.display = isHidden ? "block" : "none";
@@ -1544,6 +1595,7 @@ async function apiListForms() {
       applyRoleAccess(currentUser ? currentUser.role : null);
       updateLoginUi();
       renderCalendarView();
+      initializePlatform();
       refreshBadges();
     } catch (e) {
       pendingPinUser = null;
@@ -1565,6 +1617,7 @@ async function apiListForms() {
       applyRoleAccess(currentUser ? currentUser.role : null);
       updateLoginUi();
       renderCalendarView();
+      initializePlatform();
       refreshBadges();
     } catch (e) {
       updateLoginUi(e.message || "PIN verification failed.");
@@ -1579,6 +1632,7 @@ async function apiListForms() {
     applyRoleAccess(null);
     updateLoginUi("Logged out.");
     showLoggedOutSplash("Logged out.");
+    initializePlatform();
   }
 
   async function refreshBadges() {
@@ -10714,6 +10768,7 @@ function renderSaddlebackView() {
       return;
     }
     renderCalendarView();
+    await initializePlatform();
     apiListTimeOff({ limit: 500 }).then(items => {
       const pendingCount = (items || []).filter(item => isActionableTimeOffRequest(item)).length;
       const timeOffBadge = el('badgeTimeOff');

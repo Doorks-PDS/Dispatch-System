@@ -227,6 +227,8 @@ app.include_router(receipts_router)
 app.include_router(moses_router)
 from app.routers.accounting import router as accounting_router
 app.include_router(accounting_router)
+from app.routers.platforms import router as platforms_router
+app.include_router(platforms_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
