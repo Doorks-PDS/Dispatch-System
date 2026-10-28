@@ -3654,7 +3654,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const fields=result.fields||{};
           const mapping=isSalesLead?[["recommendations","#cf_lead_recs"],["parts_used","#cf_lead_parts"]]:[["work_performed","#cf_tech_notes"],["parts_used","#cf_parts"],["recommendations","#cf_add_recs"]];
           for(const [key,selector] of mapping){const el=card.querySelector(selector);if(el&&fields[key]){el.value=String(fields[key]);el.dispatchEvent(new Event("input",{bubbles:true}));}}
-          speechHint.textContent="AI draft filled in. Review every field and correct anything inaccurate before saving.";
+          if(fields.door_location){const locationInput=card.querySelector("#cf_door_loc");if(locationInput){locationInput.value=String(fields.door_location);locationInput.dispatchEvent(new Event("input",{bubbles:true}));}}
+          if(fields.door_type && DOOR_TYPES.includes(fields.door_type)){doorSel.value=fields.door_type;doorSel.dispatchEvent(new Event("change",{bubbles:true}));}
+          speechHint.textContent="AI draft filled in, including stated door details. Review every field and correct anything inaccurate before saving.";
           if(result.message) speechHint.textContent=result.message;
         }catch(e){speechHint.textContent=`AI assistance failed: ${e.message||e}. Your transcript is still available.`;}
         finally{aiBtn.disabled=false;aiBtn.textContent="Fill Form with OpenAI";}
@@ -5126,7 +5128,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     host.innerHTML="";
     const h=document.createElement("h3");h.textContent=titles[kind];host.appendChild(h);
     const note=document.createElement("p");note.className="hint";
-    note.textContent=kind==="receiving"?"Record packing slips and partial deliveries. Stock is not automatically adjusted.":kind==="statements"?"Upload statements for AI suggestions; review every transaction before saving. Statement rows are not automatically matched to receipts.":"Track manually entered customer invoice balances. These are separate from the existing invoice builder until reconciled.";
+    note.textContent=kind==="receiving"?"Record packing slips and partial deliveries. Stock is not automatically adjusted.":kind==="statements"?"Upload credit card statements, vendor bills, and other accounting documents. Review AI-extracted line items before saving; documents are not automatically matched to receipts.":"Track manually entered customer invoice balances. These are separate from the existing invoice builder until reconciled.";
     host.appendChild(note);
     const actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0";host.appendChild(actions);
     const exportLink=document.createElement("a");exportLink.className="btn";exportLink.textContent="Export CSV";exportLink.href=`/accounting/${kind}/export.csv`;actions.appendChild(exportLink);
@@ -5175,8 +5177,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }
     }
     const form=document.createElement("form");form.className="card";host.appendChild(form);
-    const title=document.createElement("h4");title.textContent=`New ${kind==="receiving"?"receiving record":kind==="statements"?"statement":"receivable"}`;form.appendChild(title);
-    const fields=kind==="receiving"?[["supplier","Supplier"],["date","Date"],["po_number","PO #"],["job_number","Job #"],["status","Status"],["notes","Notes"]]:kind==="statements"?[["issuer","Card issuer / account"],["period_start","Period start"],["period_end","Period end"],["notes","Notes"]]:[["customer","Customer"],["invoice_number","Invoice #"],["invoice_date","Invoice date"],["due_date","Due date"],["job_number","Job #"],["invoice_total","Invoice total"],["paid_amount","Payments received"],["notes","Notes"]];
+    const title=document.createElement("h4");title.textContent=`New ${kind==="receiving"?"receiving record":kind==="statements"?"accounting document":"receivable"}`;form.appendChild(title);
+    const fields=kind==="receiving"?[["supplier","Supplier"],["date","Date"],["po_number","PO #"],["job_number","Job #"],["status","Status"],["notes","Notes"]]:kind==="statements"?[["document_type","Document type (Credit Card Statement, Vendor Bill, Bank Statement, Other)"],["issuer","Issuer / vendor / account"],["period_start","Period start"],["period_end","Period end"],["notes","Notes"]]:[["customer","Customer"],["invoice_number","Invoice #"],["invoice_date","Invoice date"],["due_date","Due date"],["job_number","Job #"],["invoice_total","Invoice total"],["paid_amount","Payments received"],["notes","Notes"]];
     const inputs={};
     for(const [key,label] of fields){
       const wrap=document.createElement("div");wrap.style.marginBottom="8px";
@@ -5188,7 +5190,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
     let lines;
     if(kind!=="receivables"){
-      const label=document.createElement("label");label.className="label";label.textContent=kind==="receiving"?"Parts lines (JSON array: part_number, description, quantity_received)":"Transactions (JSON array: date, vendor, employee, card_last4, receipt_number, category, amount, notes)";form.appendChild(label);
+      const label=document.createElement("label");label.className="label";label.textContent=kind==="receiving"?"Parts lines (JSON array: part_number, description, quantity_received)":"Line items (JSON array: date, vendor, employee, card_last4, receipt_number, category, amount, notes)";form.appendChild(label);
       lines=document.createElement("textarea");lines.className="input";lines.rows=8;lines.value="[]";form.appendChild(lines);
       const help=document.createElement("p");help.className="hint";help.textContent="AI fills these entries as editable JSON. Review and correct each line before saving.";form.appendChild(help);
       const upload=document.createElement("input");upload.type="file";upload.accept=".jpg,.jpeg,.png,.webp,.pdf";form.appendChild(upload);
@@ -5217,7 +5219,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const heading=document.createElement("h4");heading.textContent=`Saved ${titles[kind]}`;list.appendChild(heading);
       for(const item of res.items||[]){
         const row=document.createElement("div");row.className="card";row.style.marginBottom="8px";
-        const summary=document.createElement("strong");summary.textContent=kind==="receiving"?`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`:kind==="statements"?`${item.issuer||""} ${item.period_start||""} — ${item.period_end||""} (${(item.transactions||[]).length} transactions)`: `${item.customer||""} Invoice ${item.invoice_number||""} — $${Number(item.invoice_total||0).toFixed(2)} / Paid $${Number(item.paid_amount||0).toFixed(2)}`;
+        const summary=document.createElement("strong");summary.textContent=kind==="receiving"?`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`:kind==="statements"?`${item.document_type||"Credit Card Statement"} — ${item.issuer||""} ${item.period_start||""} — ${item.period_end||""} (${(item.transactions||[]).length} line items)`: `${item.customer||""} Invoice ${item.invoice_number||""} — $${Number(item.invoice_total||0).toFixed(2)} / Paid $${Number(item.paid_amount||0).toFixed(2)}`;
         row.appendChild(summary);
         if(kind==="statements") {
           const txs=item.transactions||[];
@@ -5232,7 +5234,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const catCell=document.createElement("td");const dropdown=document.createElement("select");dropdown.className="input";dropdown.setAttribute("aria-label","Change transaction category");
             const options=[...new Set([tx.category||"",...(window.__doorksAcctCategories||[]),"Parts & Materials","Tools & Equipment","Fuel","Vehicle Maintenance","Office Supplies","Shipping & Freight","Meals","Travel","Stock / Inventory","Business & Licensing Fees","Other","Card Payment / Transfer","Refund / Credit","Personal / Nonbusiness","Uncategorized"])];
             for(const c of options){const o=document.createElement("option");o.value=c;o.textContent=c||"Uncategorized";dropdown.appendChild(o);}dropdown.value=tx.category||"";
-            dropdown.addEventListener("change",async()=>{dropdown.disabled=true;const previous=tx.category;try{const updated=txs.map((t,i)=>i===txIndex?{...t,category:dropdown.value}:t);await fetchJSON(`/accounting/statements/${encodeURIComponent(item.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...item,transactions:updated})});tx.category=dropdown.value;await renderAccountingView("statements");}catch(e){dropdown.value=previous||"";alert(`Category update failed: ${e.message||e}`);}finally{dropdown.disabled=false;}});
+            dropdown.addEventListener("change",async()=>{dropdown.disabled=true;const previous=tx.category;try{const updated=txs.map((t,i)=>i===txIndex?{...t,category:dropdown.value}:t);await fetchJSON(`/accounting/statements/${encodeURIComponent(item.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...item,transactions:updated})});tx.category=dropdown.value;txs[txIndex]={...txs[txIndex],category:dropdown.value};tr.children[5].textContent=dropdown.value;dropdown.title="Saved";}catch(e){dropdown.value=previous||"";alert(`Category update failed: ${e.message||e}`);}finally{dropdown.disabled=false;}});
             catCell.appendChild(dropdown);tr.appendChild(catCell);table.appendChild(tr);}
           if(!txs.length){const p=document.createElement("p");p.className="hint";p.textContent="No transactions were saved for this statement. Select Edit to inspect the saved JSON.";wrap.appendChild(p);}
           wrap.appendChild(table);detail.appendChild(wrap);row.appendChild(detail);
