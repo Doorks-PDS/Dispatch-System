@@ -306,34 +306,75 @@
   // Non-PDS screens intentionally do not invoke PDS data APIs.
   const platformSwitchWrap = el("platformSwitchWrap");
   const platformSelect = el("platformSelect");
-  const platformCurrentLabel = el("platformCurrentLabel");
   const platformSidebar = document.querySelector("main.layout > aside.sidebar");
   let activePlatform = "pds";
   let switchingPlatform = false;
+  const workspaceKinds = {
+    doorks: {customers:"Customers",vendors:"Vendors",work_orders:"Work Orders",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"},
+    sdc: {customers:"Customers",orders:"Orders & Production",products:"Products",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"}
+  };
+  const workspaceFields = {
+    customers:["name","contact","email","phone","notes"], vendors:["name","contact","email","phone","notes"],
+    work_orders:["customer","address","description","status","amount","notes"],
+    orders:["customer","item","order_date","status","total","shipping","tax","notes"],
+    products:["name","sku","price","description"],
+    expenses:["date","vendor","category","amount","notes"],
+    receivables:["customer","invoice_number","date","amount","paid","notes"],
+    inventory:["supplier","part_number","description","quantity","unit_cost","notes"]
+  };
+  function safeWorkspaceText(value) { const e=document.createElement("span");e.textContent=String(value??"");return e.innerHTML; }
+  async function renderBusinessCollection(platform,kind) {
+    if (activePlatform!==platform) return;
+    const labels=workspaceKinds[platform];
+    clearWorkspaceActions();setWorkspace(`${platform==="sdc"?"SDC":"Doorks"} — ${labels[kind]}`);
+    workspaceBody.innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><h2>${labels[kind]}</h2><button class="btn" id="businessBack">← Dashboard</button></div><p>Independent ${platform.toUpperCase()} records. Existing PDS data is unchanged.</p><div id="businessRecords">Loading...</div><h3>Add record</h3><form id="businessRecordForm" style="display:grid;gap:10px;max-width:600px"></form></div>`;
+    el("businessBack").onclick=()=>showPlatformShell(platform);
+    const form=el("businessRecordForm");
+    for(const field of workspaceFields[kind]){
+      const label=document.createElement("label");label.textContent=field.replaceAll("_"," ");label.style.cssText="display:grid;gap:4px;text-transform:capitalize";
+      const input=document.createElement("input");input.name=field;input.placeholder=field.replaceAll("_"," ");input.style.cssText="padding:10px;border:1px solid #ccd2dc;border-radius:8px";
+      label.append(input);form.append(label);
+    }
+    const submit=document.createElement("button");submit.className="btn primary";submit.type="submit";submit.textContent="Save to "+platform.toUpperCase();form.append(submit);
+    const endpoint=`/workspaces/${platform}/${kind}`;
+    async function refresh(){
+      const result=await fetchJSON(endpoint);const host=el("businessRecords");host.innerHTML="";
+      if(!result.items.length){host.textContent="No records yet.";return;}
+      for(const item of result.items.slice().reverse()){
+        const row=document.createElement("div");row.style.cssText="padding:12px;margin:8px 0;border:1px solid #d9dee7;border-radius:10px";
+        const body=document.createElement("div");body.style.whiteSpace="pre-wrap";
+        body.textContent=workspaceFields[kind].filter(k=>item[k]!==undefined&&item[k]!=="").map(k=>`${k.replaceAll("_"," ")}: ${item[k]}`).join("\n")||"Empty record";
+        row.append(body);
+        const edit=document.createElement("button");edit.className="btn";edit.textContent="Edit";edit.style.marginTop="8px";
+        edit.onclick=async()=>{const key=prompt("Field to edit: "+workspaceFields[kind].join(", "));if(!key)return;if(!workspaceFields[kind].includes(key)){alert("Unknown field");return;}const value=prompt("New value",String(item[key]??""));if(value===null)return;try{await fetchJSON(endpoint+"/"+item.id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:{[key]:value}})});await refresh();}catch(err){alert(err.message||"Save failed");}};
+        row.append(edit);host.append(row);
+      }
+    }
+    form.onsubmit=async e=>{e.preventDefault();const data={};for(const field of workspaceFields[kind])data[field]=form.elements[field].value.trim();submit.disabled=true;try{await fetchJSON(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data})});form.reset();await refresh();}catch(err){alert(err.message||"Save failed");}finally{submit.disabled=false;}};
+    try{await refresh();}catch(err){el("businessRecords").textContent=err.message||"Unable to load workspace records";}
+  }
   function showPlatformShell(platform) {
-    activePlatform = platform;
-    if (platformSelect) platformSelect.value = platform;
-    if (platformCurrentLabel) platformCurrentLabel.textContent = platform === "sdc" ? "SDC" : platform === "doorks" ? "Doorks" : "PDS";
-    const inPds = platform === "pds";
-    if (platformSidebar) platformSidebar.style.display = inPds ? "" : "none";
-    if (headerCalendarBtn) headerCalendarBtn.style.display = inPds && currentUser && currentUser.role === "office_admin" ? "inline-flex" : "none";
-    if (!inPds) {
-      clearWorkspaceActions();
-      setWorkspace(platform === "sdc" ? "SDC — Saddleback Design Co." : "Doorks — Administration");
-      workspaceBody.innerHTML = `<div class="card" style="max-width:800px"><h2>${platform === "sdc" ? "Saddleback Design Co." : "Doorks Service Network"}</h2><p>This is the new, isolated ${platform === "sdc" ? "SDC" : "Doorks"} workspace foundation.</p><p><strong>Business records and Accounting are not enabled here yet.</strong> We will activate them only after separate persistent storage and server-side permissions are implemented and tested. Your existing PDS and Saddleback records remain unchanged.</p><p>Use the platform selector to return to PDS.</p></div>`;
+    activePlatform=platform;
+    if(platformSelect)platformSelect.value=platform;
+    const inPds=platform==="pds";
+    if(platformSidebar)platformSidebar.style.display=inPds?"":"none";
+    if(headerCalendarBtn)headerCalendarBtn.style.display=inPds&&currentUser&&currentUser.role==="office_admin"?"inline-flex":"none";
+    if(!inPds){
+      clearWorkspaceActions();setWorkspace(platform==="sdc"?"SDC — Saddleback Design Co.":"Doorks — Administration");
+      const label=platform==="sdc"?"Saddleback Design Co.":"Doorks Service Network";
+      workspaceBody.innerHTML=`<div class="card"><h2>${label}</h2><p>Separate ${platform.toUpperCase()} workspace. New records are stored independently from PDS.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div><p style="margin-top:20px;color:#687184">Phase 2A: New workspace records only. Existing Saddleback orders remain in PDS until a verified migration. Advanced AI Accounting and employee assignments follow in later phases.</p></div>`;
+      const nav=el("businessNav");for(const [kind,title] of Object.entries(workspaceKinds[platform])){const b=document.createElement("button");b.className="btn";b.textContent=title;b.onclick=()=>renderBusinessCollection(platform,kind);nav.append(b);}
     }
   }
   async function initializePlatform() {
     if (!currentUser) {
       if (platformSwitchWrap) platformSwitchWrap.style.display = "none";
-      if (platformCurrentLabel) platformCurrentLabel.style.display = "none";
       activePlatform = "pds";
       if (platformSidebar) platformSidebar.style.display = "";
       return;
     }
     const admin = currentUser.role === "office_admin";
     if (platformSwitchWrap) platformSwitchWrap.style.display = admin ? "flex" : "none";
-    if (platformCurrentLabel) platformCurrentLabel.style.display = admin ? "none" : "inline-flex";
     if (!admin) { showPlatformShell("pds"); return; }
     try {
       const state = await fetchJSON("/platforms/current");
