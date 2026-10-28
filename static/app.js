@@ -25,6 +25,24 @@
   const navTakeoffs = el("navTakeoffs");
   let navFormsSignOff = el("navFormsSignOff");
   let navFormsReceipts = el("navFormsReceipts");
+  // Delegated navigation: works for both the static button and a re-created Forms sidebar.
+  document.addEventListener("click", (event) => {
+    const target = event.target instanceof Element ? event.target.closest("#navFormsReceipts") : null;
+    if (!target) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    try {
+      Promise.resolve(renderReceiptsView()).catch(error => {
+        console.error("Receipts failed to render", error);
+        if (workspaceBody) workspaceBody.textContent = `Unable to open Receipts: ${error.message || error}`;
+        alert(`Unable to open Receipts: ${error.message || error}`);
+      });
+    } catch (error) {
+      console.error("Receipts navigation failed", error);
+      alert(`Unable to open Receipts: ${error.message || error}`);
+    }
+  }, true);
+
 
   const navJobFlow = el("navJobFlow");
   let navToDoList = el("navToDoList");
@@ -548,7 +566,22 @@
     });
     close.addEventListener("click", () => overlay.remove());
  
-    renderFn(bd, overlay);
+    // A rejected async renderer must be visible instead of silently leaving a blank drawer.
+    try {
+      Promise.resolve(renderFn(bd, overlay)).catch(error => {
+        console.error("Doorks drawer render failed:", titleText, error);
+        const message = document.createElement("div");
+        message.className = "card";
+        message.textContent = `Unable to open ${titleText}: ${error.message || error}`;
+        bd.appendChild(message);
+      });
+    } catch (error) {
+      console.error("Doorks drawer render failed:", titleText, error);
+      const message = document.createElement("div");
+      message.className = "card";
+      message.textContent = `Unable to open ${titleText}: ${error.message || error}`;
+      bd.appendChild(message);
+    }
     return overlay;
   }
  
@@ -2423,7 +2456,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       // Existing saved forms use a separate editor from new forms.
       // Give both workflows the same attachment and save-review controls.
       const editExtras = document.createElement("div");
-      editExtras.style.marginTop = "12px";
+      editExtras.style.cssText = "margin-top:12px;padding:12px;border:1px solid #cbd5e1;border-radius:8px";
       editExtras.innerHTML = `<div class="label">Add Photos / Files (optional)</div>
         <input class="input" type="file" id="ef_files" multiple accept="image/*,application/pdf" />
         <div class="hint">New uploads are attached to this saved form.</div>
@@ -2502,7 +2535,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
             const orderDate = prompt("Order Date (YYYY-MM-DD):", job.parts_order?.order_date || "") || "";
             const etaDate = prompt("Expected Arrival Date (YYYY-MM-DD):", job.parts_order?.expected_arrival_date || "") || "";
             const notesVal = prompt("Notes:", job.parts_order?.notes || "") || "";
-            payload.parts_order = { supplier, po_number: poNumber, order_date: orderDate, expected_arrival_date: etaDate, notes: notesVal };
+            next.parts_order = { supplier, po_number: poNumber, order_date: orderDate, expected_arrival_date: etaDate, notes: notesVal };
           }
 
           if (isSalesLead) {
@@ -3589,7 +3622,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
  
       const uploadPanel = document.createElement("div");
-      uploadPanel.style.marginTop = "12px";
+      uploadPanel.style.cssText = "margin-top:12px;padding:12px;border:1px solid #cbd5e1;border-radius:8px";
       uploadPanel.innerHTML = `<div class="label">Photos / Files (optional)</div><input class="input" type="file" id="cf_files" multiple accept="image/*,application/pdf" /><div class="hint">Attachments are linked to this saved form.</div>`;
       card.appendChild(uploadPanel);
       const checklist = document.createElement("div");
@@ -9304,14 +9337,6 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
   if (navTakeoffs) navTakeoffs.addEventListener("click", renderTakeoffsView);
-  // Receipts is a static Forms tab in templates/ui.html; wire it beside the other tabs.
-  if (navFormsReceipts) navFormsReceipts.addEventListener("click", (event) => {
-    event.preventDefault();
-    Promise.resolve().then(() => renderReceiptsView()).catch(err => {
-      console.error("Receipts view failed", err);
-      alert(`Unable to open Receipts: ${err.message || err}`);
-    });
-  });
   if (navFormsSignOff) navFormsSignOff.addEventListener("click", renderSignOffLibraryView);
  
   if (navDataCenter) {
