@@ -84,6 +84,16 @@
     }
   }
  
+  // Keep Forms in the requested order, including dynamically created Time Off Request.
+  // Moving existing DOM nodes preserves their event handlers and form behavior.
+  const formsOrder = document.querySelector("#formsBody .navcol");
+  if (formsOrder) {
+    for (const id of ["navFormsSignOff", "navFormsTimeCard", "navFormsReceipts", "navFormsTimeOff", "navTakeoffs"]) {
+      const button = document.getElementById(id);
+      if (button && button.parentElement === formsOrder) formsOrder.appendChild(button);
+    }
+  }
+
   if (!navToDoList) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
     if (jobsNavCol) {
