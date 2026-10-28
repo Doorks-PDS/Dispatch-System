@@ -298,7 +298,7 @@
   }
  
   if (loginToggle) loginToggle.addEventListener("click", () => togglePanel(loginBody, loginChev));
-  if (formsToggle) formsToggle.addEventListener("click", () => togglePanel(formsBody, formsChev));
+
  
   function yyyyMmDd(d) {
     const y = d.getFullYear();
@@ -1458,7 +1458,7 @@ async function apiListForms() {
     setVisible(formsPanel, !!role && perms.forms);
     setVisible(jobFlowPanel, !!role && perms.jobFlow);
     setVisible(officeFlowPanel, !!role && perms.office);
-    setVisible(chatPanel, !!role && perms.chat);
+    // Chat navigation removed in Doorks 2.0; Moses form assistant remains available.
     setVisible(notificationsPanel, !!role && perms.notifications);
     if (headerCalendarBtn) headerCalendarBtn.style.display = role && perms.calendar ? "inline-flex" : "none";
     setVisible(navDataCenter, !!role && perms.dataCenter);
@@ -10680,9 +10680,9 @@ function renderSaddlebackView() {
  
   (async () => {
     if (loginBody) loginBody.style.display = "none";
-    if (formsBody) formsBody.style.display = "none";
+    if (formsBody) formsBody.style.display = "block";
     if (loginChev) loginChev.innerHTML = "&#9656;";
-    if (formsChev) formsChev.innerHTML = "&#9656;";
+
     const me = await apiAuthMe().catch(() => ({ logged_in: false, user: null }));
     currentUser = me && me.logged_in ? me.user : null;
     pendingPinUser = null;
