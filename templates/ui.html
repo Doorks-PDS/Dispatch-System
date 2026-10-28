@@ -5,6 +5,19 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Doorks</title>
   <link rel="stylesheet" href="/static/style.css" />
+
+  <style>
+    /* Doorks 2.0 — header workspace control; native select retains keyboard accessibility. */
+    .platform-switch-wrap {align-items:center;gap:10px;margin-left:18px;}
+    .platform-switch-label {color:rgba(255,255,255,.82);font-size:10px;font-weight:800;letter-spacing:1.3px;white-space:nowrap;}
+    .platform-select-shell {position:relative;display:inline-flex;align-items:center;min-width:135px;max-width:180px;}
+    .platform-select {appearance:none;-webkit-appearance:none;width:100%;border:1px solid rgba(255,255,255,.5);border-radius:999px;background:rgba(109,43,0,.24);color:#fff;font-size:13px;font-weight:750;line-height:1.2;padding:9px 33px 9px 15px;box-shadow:0 2px 8px rgba(113,48,0,.08);cursor:pointer;transition:background .15s,border-color .15s;}
+    .platform-select:hover {background:rgba(109,43,0,.38);border-color:#fff;}
+    .platform-select:focus-visible {outline:3px solid #fff;outline-offset:3px;}
+    .platform-select option {background:#fff;color:#172033;}
+    .platform-select-chevron {position:absolute;right:13px;top:50%;transform:translateY(-58%);pointer-events:none;color:#fff;font-size:19px;line-height:1;}
+    @media(max-width:640px){.platform-switch-wrap{margin-left:8px;gap:5px}.platform-switch-label{display:none}.platform-select-shell{min-width:102px}.platform-select{padding:8px 27px 8px 12px}}
+  </style>
 </head>
 <body>
   <header class="topbar">
@@ -13,11 +26,13 @@
         <button id="headerCalendarBtn" class="header-calendar-btn" title="Back to Calendar">📅</button>
       </div>
       <div class="brand">Doorks</div>
-      <div id="platformSwitchWrap" style="display:none;align-items:center;gap:8px;margin-left:12px;">
-        <label for="platformSelect" style="font-size:12px;">Platform</label>
-        <select id="platformSelect" aria-label="Select business platform" style="padding:6px;border-radius:6px;">
+      <div id="platformSwitchWrap" class="platform-switch-wrap" style="display:none;">
+        <span class="platform-switch-label">WORKSPACE</span>
+        <span class="platform-select-shell">
+        <select id="platformSelect" class="platform-select" aria-label="Select business platform">
           <option value="pds">PDS</option><option value="doorks">Doorks</option><option value="sdc">SDC</option>
-        </select>
+        </select><span class="platform-select-chevron" aria-hidden="true">⌄</span>
+        </span>
       </div>
       <div class="topbar-right">
         <span class="chip" id="activeModeChip">Calendar</span>
