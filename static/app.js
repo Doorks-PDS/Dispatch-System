@@ -2461,8 +2461,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
         <input class="input" type="file" id="ef_files" multiple accept="image/*,application/pdf" />
         <div class="hint">New uploads are attached to this saved form.</div>
         <div class="label" style="margin-top:12px">Before Saving</div>
-        <label style="display:block"><input type="checkbox" id="ef_confirm_review" /> I reviewed the form details and am ready to save.</label>
-        <label style="display:block"><input type="checkbox" id="ef_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_review" /> I uploaded the relevant images and documents.</label>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_signoff" /> Sign-off completed, or not applicable.</label>
         <label style="display:block"><input type="checkbox" id="ef_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
       card.appendChild(editExtras);
 
@@ -3628,8 +3628,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const checklist = document.createElement("div");
       checklist.style.marginTop = "12px";
       checklist.innerHTML = `<div class="label">Before Saving</div>
-        <label style="display:block;"><input type="checkbox" id="cf_confirm_review" /> I reviewed the form details and am ready to save.</label>
-        <label style="display:block;"><input type="checkbox" id="cf_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_review" /> I uploaded the relevant images and documents.</label>
+        <label style="display:block;"><input type="checkbox" id="cf_confirm_signoff" /> Sign-off completed, or not applicable.</label>
         <label style="display:block;"><input type="checkbox" id="cf_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
       card.appendChild(checklist);
 
@@ -5095,7 +5095,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Receipt Number</div><input class="input" name="receipt_number" /></div>
         </div>
         <div class="label">Notes</div><textarea class="input" name="notes" rows="2"></textarea>
-        <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required /></div>
+        <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required />
+        <div class="hint" id="receipt_scan_status">Selecting a file will attempt to read its details. Review all fields before saving.</div></div>
         <div style="margin-top:12px;"><button class="btn btn-orange" type="submit">Save Receipt</button></div>
       </form>
       <div id="receipt_feedback" class="hint" style="margin-top:8px;"></div>`;
@@ -5107,6 +5108,40 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const form = card.querySelector("#receipt_submit_form");
     form.elements.date.value = new Date().toISOString().slice(0, 10);
     form.elements.employee.value = currentUser?.name || currentUser?.username || "";
+    const receiptFileInput = form.elements.file;
+    receiptFileInput.addEventListener("change", async () => {
+      const file = receiptFileInput.files?.[0];
+      const status = card.querySelector("#receipt_scan_status");
+      if (!file) { status.textContent = "Select a receipt to read its details."; return; }
+      const selectedFile = file;
+      status.textContent = "Reading receipt…";
+      try {
+        const upload = new FormData();
+        upload.append("file", file);
+        const response = await fetch("/receipts/extract", { method: "POST", credentials: "same-origin", body: upload });
+        const result = await response.json();
+        if (receiptFileInput.files?.[0] !== selectedFile) return;
+        if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
+        const fields = result.fields || {};
+        const populated = [];
+        for (const key of ["vendor", "date", "amount", "receipt_number"]) {
+          if (fields[key] !== undefined && fields[key] !== null && String(fields[key]).trim() && !String(form.elements[key]?.value || "").trim()) {
+            form.elements[key].value = String(fields[key]);
+            populated.push(key.replace("_", " "));
+          }
+        }
+        // Date defaults to today, so replace it only when the user has not changed it.
+        if (fields.date && form.elements.date.value === new Date().toISOString().slice(0, 10)) {
+          form.elements.date.value = fields.date;
+          if (!populated.includes("date")) populated.push("date");
+        }
+        status.textContent = populated.length
+          ? `Read ${populated.join(", ")}. Please verify against the receipt before saving.`
+          : (result.message || "Could not identify fields automatically. Please enter them manually.");
+      } catch (error) {
+        if (receiptFileInput.files?.[0] === selectedFile) status.textContent = `Automatic reading unavailable: ${error.message || error}. You can still enter details manually.`;
+      }
+    });
     async function refreshReceipts() {
       try {
         const result = await fetchJSON("/receipts");
