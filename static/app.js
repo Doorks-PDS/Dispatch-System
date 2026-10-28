@@ -9203,7 +9203,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         if (prevVal) sel.value = prevVal;
       }
  
-      const pendingCount = requests.filter(item => String(item.status || '').toLowerCase() === 'pending' || !!item.emergency).length;
+      const pendingCount = requests.filter(item => isActionableTimeOffRequest(item)).length;
       const timeOffBadge = el('badgeTimeOff');
       if (timeOffBadge) {
         timeOffBadge.textContent = String(pendingCount);
@@ -10672,6 +10672,17 @@ function renderSaddlebackView() {
   if (navSaddleback) navSaddleback.addEventListener("click", renderSaddlebackView);
  
   if (navAtlas) navAtlas.addEventListener("click", () => renderChatView("tech"));
+  // Emergency is a priority flag, not an ongoing notification after resolution.
+  // Retain old requests in history without showing an endless badge.
+  function isActionableTimeOffRequest(item) {
+    if (!item || String(item.status || '').trim().toLowerCase() !== 'pending') return false;
+    const end = String(item.end_date || item.start_date || '').slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return true;
+    const today = new Date();
+    const localToday = [today.getFullYear(), String(today.getMonth() + 1).padStart(2, '0'), String(today.getDate()).padStart(2, '0')].join('-');
+    return end >= localToday;
+  }
+
   if (navMoses) navMoses.addEventListener("click", () => renderChatView("office"));
  
   if (navNotifications) {
@@ -10694,7 +10705,7 @@ function renderSaddlebackView() {
     }
     renderCalendarView();
     apiListTimeOff({ limit: 500 }).then(items => {
-      const pendingCount = (items || []).filter(item => String(item.status || '').toLowerCase() === 'pending' || !!item.emergency).length;
+      const pendingCount = (items || []).filter(item => isActionableTimeOffRequest(item)).length;
       const timeOffBadge = el('badgeTimeOff');
       if (timeOffBadge) {
         timeOffBadge.textContent = String(pendingCount);
