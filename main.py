@@ -233,6 +233,8 @@ from app.routers.platforms import router as platforms_router
 app.include_router(platforms_router)
 from app.routers.workspaces import router as workspaces_router
 app.include_router(workspaces_router)
+from app.routers.workspace_ai import router as workspace_ai_router
+app.include_router(workspace_ai_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):

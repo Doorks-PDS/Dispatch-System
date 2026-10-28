@@ -342,6 +342,25 @@
       else{input=document.createElement('input');input.type=types[field]||'text';if(input.type==='number')input.step='any';}
       input.name=field;input.className='input';input.style.cssText='width:100%;box-sizing:border-box';label.append(input);form.append(label);
     }
+    // AI reads only a draft; the user must explicitly save the record.
+    if(['orders','work_orders'].includes(kind)){
+      const ai=document.createElement('section');ai.style.cssText='grid-column:1/-1;border:1px solid #d9dee7;border-radius:12px;padding:14px;display:grid;gap:10px';
+      const heading=document.createElement('strong');heading.textContent='Read customer document with AI';ai.append(heading);
+      const hint=document.createElement('p');hint.className='hint';hint.textContent='Upload a PDF or image, or paste an email. Review extracted fields before saving. No record is created automatically.';ai.append(hint);
+      const file=document.createElement('input');file.type='file';file.accept='.pdf,.png,.jpg,.jpeg,.webp';file.className='input';ai.append(file);
+      const pasted=document.createElement('textarea');pasted.rows=3;pasted.className='input';pasted.placeholder='Or paste customer email / order text here…';ai.append(pasted);
+      const read=document.createElement('button');read.type='button';read.className='btn';read.textContent='Read with AI';ai.append(read);
+      const result=document.createElement('p');result.className='hint';result.setAttribute('role','status');ai.append(result);
+      read.onclick=async()=>{if(!file.files?.length&&!pasted.value.trim()){result.textContent='Select a document or paste an email first.';return;}
+        read.disabled=true;result.textContent='Reading document…';try{
+          const body=new FormData();if(file.files?.length)body.append('file',file.files[0]);body.append('email_text',pasted.value);
+          const response=await fetchJSON(`/workspace-ai/${platform}/${kind}/extract`,{method:'POST',body});
+          let filled=0;for(const [key,value] of Object.entries(response.fields||{})){const field=form.elements.namedItem(key);if(field&&value&&!String(field.value||'').trim()){field.value=String(value);filled++;}}
+          result.textContent=`AI suggested ${filled} fields. Review all values before saving.`;
+        }catch(err){result.textContent=`Unable to read: ${err.message||'Unknown error'}`;}finally{read.disabled=false;}
+      };
+      form.prepend(ai);
+    }
     const actions=document.createElement('div');actions.style.cssText='grid-column:1/-1;display:flex;gap:10px;flex-wrap:wrap';
     const submit=document.createElement('button');submit.type='submit';submit.className='btn btn-orange';submit.textContent='Save record';actions.append(submit);
     const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';actions.append(cancel);form.append(actions);
