@@ -224,6 +224,8 @@ app.include_router(document_approvals_router)
 app.include_router(door_logs_router)
 app.include_router(pricing_router)
 app.include_router(receipts_router)
+from app.routers.dispatch_ai import router as dispatch_ai_router
+app.include_router(dispatch_ai_router)
 app.include_router(moses_router)
 from app.routers.accounting import router as accounting_router
 app.include_router(accounting_router)

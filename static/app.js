@@ -4352,6 +4352,40 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           if (stateInput) stateInput.value = d.state || stateInput.value || "";
           if (zipInput) zipInput.value = d.zip || zipInput.value || "";
         });
+        // Optional AI intake: never creates a job or overwrites populated fields without review.
+        const aiPanel=document.createElement("div");
+        aiPanel.className="card";
+        aiPanel.style.cssText="padding:14px;margin-bottom:14px;border:1px solid #d9dfe8";
+        aiPanel.innerHTML=`<strong>Read Work Order / Estimate with AI</strong><p class="hint">Upload a PDF or image, or paste a customer email. AI suggests fields only; review everything before saving.</p><input class="input" id="nj_ai_file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" style="margin:8px 0"><textarea class="input" id="nj_ai_email" placeholder="Optional: paste work order or email text here" rows="4" style="width:100%;box-sizing:border-box"></textarea><button class="btn btn-orange" type="button" id="nj_ai_read">Read with AI</button><div id="nj_ai_status" class="hint" role="status" style="margin-top:8px"></div>`;
+        aiPanel.querySelector("#nj_ai_read").addEventListener("click",async()=>{
+          const button=aiPanel.querySelector("#nj_ai_read"),statusBox=aiPanel.querySelector("#nj_ai_status");
+          const file=aiPanel.querySelector("#nj_ai_file").files?.[0],email=aiPanel.querySelector("#nj_ai_email").value.trim();
+          if(!file&&!email){statusBox.textContent="Select a document or paste an email first.";return;}
+          const fd=new FormData();if(file)fd.append("file",file);fd.append("email_text",email);
+          button.disabled=true;statusBox.textContent="Reading document…";
+          try{
+            const response=await fetch("/dispatch-ai/extract",{method:"POST",credentials:"same-origin",body:fd});
+            const result=await response.json();if(!response.ok)throw Error(result.detail||"AI extraction failed");
+            const fields=result.fields||{};
+            const mapping={customer:"#nj_customer",address:"#nj_address",contact:"#nj_contact",phone:"#nj_phone",email:"#nj_email",po_number:"#nj_po",estimate_number:"#nj_est",invoice_number:"#nj_inv",job_number:"#nj_job_number",office_notes:"#nj_office_notes"};
+            let count=0;
+            for(const [key,selector] of Object.entries(mapping)){
+              const input=card.querySelector(selector),value=fields[key];
+              if(input&&typeof value==="string"&&value.trim()&&!input.value.trim()){
+                input.value=value.trim();input.dispatchEvent(new Event("input",{bubbles:true}));count++;
+              }
+            }
+            if(fields.job_notes&&!ta.value.trim()){ta.value=String(fields.job_notes);count++;}
+            if(fields.date&&!row0.querySelector("#nj_date").value)row0.querySelector("#nj_date").value=fields.date;
+            statusBox.textContent=`AI suggested ${count} fields. Review the entire form before saving. ${result.message||""}`;
+            // Preserve the document as a job attachment when Save is clicked.
+            if(file){const existing=row4.querySelector("#nj_files");if(existing&&(!existing.files||!existing.files.length)){
+              try{const dt=new DataTransfer();dt.items.add(file);existing.files=dt.files;}catch(_){statusBox.textContent+=" Select the document again under Upload to attach it to the saved job.";}
+            }}
+          }catch(err){statusBox.textContent=`Unable to read: ${err.message||err}. Enter details manually.`;}
+          finally{button.disabled=false;}
+        });
+        card.appendChild(aiPanel);
         card.appendChild(row0);
         card.appendChild(row1);
         card.appendChild(row1b);
@@ -5635,7 +5669,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         });
         const bar = make("div", ""); bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px";
         const search = document.createElement("input"); search.className="input"; search.placeholder="Search vendor, employee, category, receipt #"; bar.appendChild(search);
-        const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV"; bar.appendChild(exportBtn);
+        const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV";
         const list = make("div", "");
         function draw() {
           list.innerHTML="";
@@ -5689,6 +5723,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         summaryToggle.textContent="Dashboard & Reports";
         host.insertBefore(summaryDetails,bar);
         host.insertBefore(receiptActions,summaryDetails);
+        receiptActions.appendChild(exportBtn);
         const showReceiptEditor=(withUpload)=>{
           uploadBox.style.display="block";
           uploadBox.scrollIntoView({behavior:"smooth",block:"start"});
