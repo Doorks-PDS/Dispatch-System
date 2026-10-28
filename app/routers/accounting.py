@@ -106,7 +106,7 @@ def lock(request:Request,x_api_key:Optional[str]=Header(None)):
 def listing(kind:str,request:Request,x_api_key:Optional[str]=Header(None)):
     require_office(request,x_api_key)
     if kind not in ('receiving','receivables','statements'):raise HTTPException(404)
-    return {'ok':True,'items':list(reversed(read(paths(request),kind)))}
+    return {'ok':True,'items':list(reversed([i for i in read(paths(request),kind) if not i.get('deleted_at')]))}
 
 @router.post('/{kind}')
 async def create(kind:str,request:Request,x_api_key:Optional[str]=Header(None)):
@@ -128,12 +128,25 @@ async def update(kind:str,item_id:str,request:Request,x_api_key:Optional[str]=He
         item.update(clean);item['updated_at']=datetime.now(timezone.utc).isoformat();write(base,kind,items)
     return {'ok':True,'item':item}
 
+@router.delete('/{kind}/{item_id}')
+def delete_record(kind:str,item_id:str,request:Request,x_api_key:Optional[str]=Header(None)):
+    require_office(request,x_api_key)
+    if kind not in ('receiving','receivables','statements'):raise HTTPException(404)
+    with _lock:
+        base=paths(request);items=read(base,kind)
+        item=next((i for i in items if i.get('id')==item_id and not i.get('deleted_at')),None)
+        if item is None:raise HTTPException(404,'Record not found')
+        item['deleted_at']=datetime.now(timezone.utc).isoformat()
+        write(base,kind,items)
+    return {'ok':True}
+
 @router.get('/{kind}/export.csv')
 def export(kind:str,request:Request,x_api_key:Optional[str]=Header(None)):
     require_office(request,x_api_key)
     if kind not in ('receiving','receivables','statements'):raise HTTPException(404)
     rows=[]
     for item in read(paths(request),kind):
+        if item.get('deleted_at'):continue
         if kind=='receiving':
             for line in item.get('lines',[]) or [{}]:rows.append({**{k:v for k,v in item.items() if k!='lines'},**line})
         elif kind=='statements':
@@ -148,7 +161,7 @@ def export(kind:str,request:Request,x_api_key:Optional[str]=Header(None)):
 @router.post('/{kind}/extract')
 async def extract(kind:str,request:Request,file:UploadFile=File(...),x_api_key:Optional[str]=Header(None)):
     require_office(request,x_api_key)
-    if kind not in ('receiving','statements'):raise HTTPException(404)
+    if kind not in ('receiving','statements','receivables'):raise HTTPException(404)
     suffix=Path(file.filename or '').suffix.lower()
     if suffix not in EXT:raise HTTPException(400,'Upload JPG, PNG, WEBP or PDF')
     raw=await file.read(MAX+1)
@@ -178,7 +191,7 @@ async def extract(kind:str,request:Request,file:UploadFile=File(...),x_api_key:O
 @router.post('/{kind}/{item_id}/file')
 async def attach(kind:str,item_id:str,request:Request,file:UploadFile=File(...),x_api_key:Optional[str]=Header(None)):
     require_office(request,x_api_key)
-    if kind not in ('receiving','statements'):raise HTTPException(404)
+    if kind not in ('receiving','statements','receivables'):raise HTTPException(404)
     suffix=Path(file.filename or '').suffix.lower()
     if suffix not in EXT:raise HTTPException(400,'Unsupported attachment')
     raw=await file.read(MAX+1)
@@ -201,7 +214,7 @@ async def attach(kind:str,item_id:str,request:Request,file:UploadFile=File(...),
 @router.get('/{kind}/{item_id}/file')
 def original(kind:str,item_id:str,request:Request,x_api_key:Optional[str]=Header(None)):
     require_office(request,x_api_key)
-    if kind not in ('receiving','statements'):raise HTTPException(404)
+    if kind not in ('receiving','statements','receivables'):raise HTTPException(404)
     base=paths(request);item=next((i for i in read(base,kind) if i.get('id')==item_id),None)
     if not item or not item.get('attachment'):raise HTTPException(404,'Document not found')
     file=base/'attachments'/Path(item['attachment']).name

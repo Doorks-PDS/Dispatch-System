@@ -5079,7 +5079,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
   async function renderAccountingRecords(section, host) {
     const kind = section === "stock" ? "receiving" : section;
-    const titles = {receiving:"Parts / Stock Receiving",statements:"Credit Card Statements",receivables:"Accounts Receivable"};
+    const titles = {receiving:"Inventory & Intake",statements:"Credit Card Statements",receivables:"Accounts Receivable"};
     host.innerHTML="";
     const h=document.createElement("h3");h.textContent=titles[kind];host.appendChild(h);
     const note=document.createElement("p");note.className="hint";
@@ -5087,6 +5087,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     host.appendChild(note);
     const actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0";host.appendChild(actions);
     const exportLink=document.createElement("a");exportLink.className="btn";exportLink.textContent="Export CSV";exportLink.href=`/accounting/${kind}/export.csv`;actions.appendChild(exportLink);
+    if(kind==="receivables") {
+      const records=await fetchJSON("/accounting/receivables");const items=records.items||[];
+      const balance=r=>Math.max(0,Number(r.invoice_total||0)-Number(r.paid_amount||0));
+      const total=items.reduce((sum,r)=>sum+Number(r.invoice_total||0),0);
+      const paid=items.reduce((sum,r)=>sum+Number(r.paid_amount||0),0);
+      const outstanding=items.reduce((sum,r)=>sum+balance(r),0);
+      const today=new Date().toISOString().slice(0,10);
+      const overdue=items.filter(r=>r.due_date&&r.due_date<today&&balance(r)>0);
+      const stats=document.createElement("div");stats.className="grid2";
+      for(const [label,value] of [["Invoiced",total],["Payments recorded",paid],["Outstanding",outstanding],["Overdue",overdue.reduce((sum,r)=>sum+balance(r),0)]]){
+        const card=document.createElement("div");card.className="card";const cap=document.createElement("div");cap.className="hint";cap.textContent=label;const val=document.createElement("h2");val.textContent="$"+value.toFixed(2);card.append(cap,val);stats.appendChild(card);
+      }
+      host.appendChild(stats);
+      const caution=document.createElement("p");caution.className="hint";caution.textContent="These balances reflect manually entered Accounting records, not automatically reconciled Doorks invoices or bank payments.";host.appendChild(caution);
+    }
     const form=document.createElement("form");form.className="card";host.appendChild(form);
     const title=document.createElement("h4");title.textContent=`New ${kind==="receiving"?"receiving record":kind==="statements"?"statement":"receivable"}`;form.appendChild(title);
     const fields=kind==="receiving"?[["supplier","Supplier"],["date","Date"],["po_number","PO #"],["job_number","Job #"],["status","Status"],["notes","Notes"]]:kind==="statements"?[["issuer","Card issuer / account"],["period_start","Period start"],["period_end","Period end"],["notes","Notes"]]:[["customer","Customer"],["invoice_number","Invoice #"],["invoice_date","Invoice date"],["due_date","Due date"],["job_number","Job #"],["invoice_total","Invoice total"],["paid_amount","Payments received"],["notes","Notes"]];
@@ -5119,6 +5134,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         }catch(e){alert(`Document reading failed: ${e.message||e}`);}finally{scan.disabled=false;scan.textContent="Read with AI";}
       });
       form._upload=upload;
+    } else {
+      const fileLabel=document.createElement("label");fileLabel.className="label";fileLabel.textContent="Invoice / bill attachment (PDF or image)";form.appendChild(fileLabel);
+      const upload=document.createElement("input");upload.type="file";upload.accept=".jpg,.jpeg,.png,.webp,.pdf";form.appendChild(upload);form._upload=upload;
     }
     const save=document.createElement("button");save.className="btn btn-orange";save.textContent="Save Record";form.appendChild(save);
     const list=document.createElement("div");host.appendChild(list);
@@ -5129,9 +5147,24 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row=document.createElement("div");row.className="card";row.style.marginBottom="8px";
         const summary=document.createElement("strong");summary.textContent=kind==="receiving"?`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`:kind==="statements"?`${item.issuer||""} ${item.period_start||""} — ${item.period_end||""} (${(item.transactions||[]).length} transactions)`: `${item.customer||""} Invoice ${item.invoice_number||""} — $${Number(item.invoice_total||0).toFixed(2)} / Paid $${Number(item.paid_amount||0).toFixed(2)}`;
         row.appendChild(summary);
+        if(kind==="statements") {
+          const txs=item.transactions||[];
+          const total=txs.reduce((sum,t)=>sum+Number(t.amount||0),0);
+          const detail=document.createElement("details");detail.style.marginTop="10px";
+          const toggle=document.createElement("summary");toggle.textContent=`View ${txs.length} transactions — net $${total.toFixed(2)}`;detail.appendChild(toggle);
+          const wrap=document.createElement("div");wrap.style.cssText="overflow-x:auto;margin-top:8px";
+          const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse;font-size:13px";
+          const cols=[["date","Date"],["vendor","Vendor"],["employee","Employee"],["card_last4","Card last 4"],["receipt_number","Receipt #"],["category","Category"],["amount","Amount"],["notes","Notes"]];
+          const header=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:6px;border-bottom:1px solid #aaa";header.appendChild(th);}table.appendChild(header);
+          for(const tx of txs){const tr=document.createElement("tr");for(const [key] of cols){const td=document.createElement("td");td.textContent=key==="amount"?Number(tx[key]||0).toFixed(2):String(tx[key]||"");td.style.cssText="padding:6px;border-bottom:1px solid #ddd";tr.appendChild(td);}table.appendChild(tr);}
+          if(!txs.length){const p=document.createElement("p");p.className="hint";p.textContent="No transactions were saved for this statement. Select Edit to inspect the saved JSON.";wrap.appendChild(p);}
+          wrap.appendChild(table);detail.appendChild(wrap);row.appendChild(detail);
+        }
         const edit=document.createElement("button");edit.className="btn";edit.textContent="Edit";edit.style.marginLeft="12px";row.appendChild(edit);
         edit.addEventListener("click",()=>{for(const [k,input] of Object.entries(inputs))input.value=item[k]??"";if(lines)lines.value=JSON.stringify(item[kind==="receiving"?"lines":"transactions"]||[],null,2);form.dataset.editId=item.id;save.textContent="Update Record";form.scrollIntoView({behavior:"smooth",block:"start"});});
         if(item.attachment){const a=document.createElement("a");a.href=`/accounting/${kind}/${encodeURIComponent(item.id)}/file`;a.textContent=" Open original";a.target="_blank";row.appendChild(a);}
+        const del=document.createElement("button");del.type="button";del.className="btn";del.textContent="Delete";del.style.marginLeft="8px";row.appendChild(del);
+        del.addEventListener("click",async()=>{if(!confirm(`Delete this ${kind.slice(0,-1)} record from Accounting? The original document will be retained for recovery.`))return;del.disabled=true;try{await fetchJSON(`/accounting/${kind}/${encodeURIComponent(item.id)}`,{method:"DELETE"});if(form.dataset.editId===item.id){form.reset();delete form.dataset.editId;save.textContent="Save Record";}await draw();}catch(e){alert(`Delete failed: ${e.message||e}`);del.disabled=false;}});
         list.appendChild(row);
       }
     };
@@ -5168,7 +5201,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const lockButton=document.createElement("button");lockButton.className="btn";lockButton.textContent="Lock Accounting";
     lockButton.addEventListener("click",async()=>{try{await fetchJSON("/accounting/lock",{method:"POST"});workspaceBody.innerHTML="";setWorkspace("Office Flow");}catch(e){alert(e.message||e);}});
     tabs.parentElement.appendChild(lockButton);
-    for (const [id, title] of [["overview","Overview"],["receipts","Receipts"],["receivables","Receivables"],["stock","Parts / Stock"],["statements","Statements"],["categories","Categories"]]) {
+    for (const [id, title] of [["overview","Overview"],["receivables","Accounts Receivable"],["stock","Inventory"],["receipts","Receipts"],["statements","Statements"],["categories","Categories"]]) {
       const b = document.createElement("button"); b.className = "btn"; b.textContent = title;
       if (id === section) b.classList.add("btn-orange");
       b.addEventListener("click", () => renderAccountingView(id)); tabs.appendChild(b);
@@ -5252,7 +5285,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const add=document.createElement("button");add.className="btn btn-orange";add.textContent="Add Category";host.appendChild(add);
         add.addEventListener("click",async()=>{const name=input.value.trim();if(!name||categories.some(c=>c.toLowerCase()===name.toLowerCase()))return;try{await fetchJSON("/receipts/categories",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:[...categories,name]})});renderAccountingView("categories");}catch(e){alert(e.message||e);}});
       } else {
-        make("h3", section==="stock"?"Parts / Stock Receiving":"Accounts Receivable");
+        make("h3", section==="stock"?"Inventory & Intake":"Accounts Receivable");
         make("p", section==="stock"?"Coming in the next accounting phase: packing-slip scanning, quantities received, supplier and PO tracking. No inventory quantities have been inferred from receipts.":"Coming in the next accounting phase: invoice balances, payment tracking and aging. Existing invoices have not been treated as paid or unpaid without payment records.");
       }
     } catch(e) { host.textContent=`Unable to load Accounting: ${e.message||e}`; }
