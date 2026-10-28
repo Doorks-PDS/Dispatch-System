@@ -315,7 +315,7 @@
   };
   const workspaceFields = {
     customers:["name","contact","email","phone","notes"], vendors:["name","contact","email","phone","notes"],
-    work_orders:["customer","address","description","status","amount","notes"],
+    work_orders:["customer","address","scheduled_date","description","status","amount","notes"],
     orders:["customer","item","order_date","status","total","shipping","tax","notes"],
     products:["name","sku","price","description"],
     expenses:["date","vendor","category","amount","notes"],
@@ -331,7 +331,7 @@
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:6px 0 0">${platform.toUpperCase()} records only · Saved on the persistent business workspace</p></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><p class="hint">Review details before saving. Nothing is created until you press Save.</p><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
-    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date'};
+    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date'};
     const statuses=kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['New','Scheduled','In Progress','Completed','Cancelled']:null;
     let records=[],editingId=null;
     for(const field of fields){
@@ -420,12 +420,29 @@
     if(platformSelect)platformSelect.value=platform;
     const inPds=platform==='pds';
     if(platformSidebar)platformSidebar.style.display=inPds?'':'none';
+    document.querySelector('main.layout')?.classList.toggle('business-platform-layout',!inPds);
     if(headerCalendarBtn)headerCalendarBtn.style.display=inPds&&currentUser&&currentUser.role==='office_admin'?'inline-flex':'none';
     if(inPds)return;
     clearWorkspaceActions();setWorkspace(platform==='sdc'?'SDC — Saddleback Design Co.':'Doorks — Administration');
     const isSdc=platform==='sdc',name=isSdc?'Saddleback Design Co.':'Doorks Service Network';
     const items=Object.entries(workspaceKinds[platform]);
-    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><p class="hint">Independent ${platform.toUpperCase()} workspace · PDS business records remain unchanged</p><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><p class="hint">Select a section to manage its records. Existing Saddleback records remain in PDS pending verified migration.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
+    if(platform==='doorks'){
+      workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px">
+        <div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0">Doorks Productivity Dashboard</h2><p class="hint" style="margin:6px 0 0">Independent Doorks operations · PDS data stays separate</p></div><button class="btn" id="doorksCalendarToggle" type="button">View Scheduling Calendar</button></div>
+        <div id="doorksMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px"></div></div>
+        <div class="card" id="doorksCalendarPanel" hidden><h3 style="margin-top:0">Scheduling Calendar</h3><p class="hint">Work orders with a scheduled date appear here. This is an internal scheduling overview, not customer self-booking.</p><div id="doorksCalendarBody"></div></div>
+        <div class="card"><h3 style="margin-top:0">Operations</h3><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:14px"></div></div>
+        <div class="card"><h3 style="margin-top:0">Workspace</h3><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
+      const metrics=el('doorksMetrics');
+      const metricDefinitions=[['Active Work Orders','work_orders',a=>a.filter(x=>!['Completed','Cancelled'].includes(x.status)).length],['Scheduled Visits','work_orders',a=>a.filter(x=>x.scheduled_date).length],['Customers','customers',a=>a.length],['Open Receivables','receivables',a=>a.filter(x=>Number(x.amount||0)>Number(x.paid||0)).length]];
+      for(const [title,kind,calculate] of metricDefinitions){const card=document.createElement('div');card.style.cssText='padding:16px;border:1px solid #d9dee7;border-radius:12px;background:#fff';const label=document.createElement('p');label.className='hint';label.textContent=title;const value=document.createElement('h2');value.textContent='—';value.style.margin='8px 0 0';card.append(label,value);metrics.append(card);fetchJSON('/workspaces/doorks/'+kind).then(r=>{value.textContent=String(calculate(r.items||[]));}).catch(()=>{value.textContent='—';});}
+      let calMonth=new Date();calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth(),1);
+      const panel=el('doorksCalendarPanel'),body=el('doorksCalendarBody');
+      async function drawCalendar(){body.replaceChildren();const heading=document.createElement('div');heading.style.cssText='display:flex;gap:12px;align-items:center;justify-content:center;margin-bottom:14px';const prev=document.createElement('button');prev.className='btn';prev.textContent='←';const next=document.createElement('button');next.className='btn';next.textContent='→';const month=document.createElement('strong');month.textContent=calMonth.toLocaleString(undefined,{month:'long',year:'numeric'});prev.onclick=()=>{calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()-1,1);drawCalendar();};next.onclick=()=>{calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,1);drawCalendar();};heading.append(prev,month,next);body.append(heading);const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px';body.append(grid);for(const day of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']){const label=document.createElement('strong');label.style.cssText='text-align:center;font-size:12px';label.textContent=day;grid.append(label);}let jobs=[];try{jobs=(await fetchJSON('/workspaces/doorks/work_orders')).items||[];}catch{}const offset=calMonth.getDay(),days=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,0).getDate();for(let i=0;i<offset;i++)grid.append(document.createElement('span'));for(let day=1;day<=days;day++){const date=calMonth.getFullYear()+'-'+String(calMonth.getMonth()+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');const matches=jobs.filter(x=>String(x.scheduled_date||'').slice(0,10)===date);const cell=document.createElement('button');cell.type='button';cell.style.cssText='min-height:70px;min-width:0;border:1px solid #d9dee7;border-radius:9px;background:white;padding:6px;text-align:left;cursor:pointer';cell.textContent=String(day);if(matches.length){const info=document.createElement('div');info.style.cssText='font-size:11px;color:#f97316;font-weight:700;overflow-wrap:anywhere';info.textContent=matches.length+' visit'+(matches.length===1?'':'s');cell.append(info);cell.title=matches.map(x=>x.customer||x.description||'Work order').join(' • ');}cell.onclick=()=>renderBusinessCollection('doorks','work_orders');grid.append(cell);}}
+      el('doorksCalendarToggle').onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden)drawCalendar();};
+    }else{
+      workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><p class="hint">Independent ${platform.toUpperCase()} workspace · PDS business records remain unchanged</p><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><p class="hint">Select a section to manage its records. Existing Saddleback records remain in PDS pending verified migration.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
+    }
     if(platform==='doorks'){const b=document.createElement('button');b.className='btn btn-orange';b.textContent='Accounting — Doorks';b.onclick=()=>renderDoorksAccounting();el('businessNav').prepend(b);const c=document.createElement('button');c.style.cssText='text-align:left;border:1px solid #d9dee7;border-radius:12px;padding:18px;background:#fff;cursor:pointer';c.innerHTML='<strong>Accounting</strong><p class="hint">Independent Doorks receivables, inventory, receipts and statements</p>';c.onclick=()=>renderDoorksAccounting();el('businessDashboardCards').prepend(c);}
     const nav=el('businessNav'),cards=el('businessDashboardCards');
     for(const [kind,title] of items){
@@ -440,6 +457,7 @@
       if (platformSwitchWrap) platformSwitchWrap.style.display = "none";
       activePlatform = "pds";
       if (platformSidebar) platformSidebar.style.display = "";
+      document.querySelector('main.layout')?.classList.remove('business-platform-layout');
       return;
     }
     const admin = currentUser.role === "office_admin";

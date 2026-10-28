@@ -474,3 +474,9 @@ textarea:focus{
     width:min(100vw - 16px, 1600px);
   }
 }
+
+/* Doorks 2.0 Phase 2G: non-PDS workspaces occupy the full main column. */
+.layout.business-platform-layout{grid-template-columns:minmax(0,1fr) !important;}
+.layout.business-platform-layout > .workspace{min-width:0;width:100%;}
+.layout.business-platform-layout #workspaceBody > div{width:100%;max-width:1400px;margin-inline:auto;}
+@media (max-width:700px){.layout.business-platform-layout{width:calc(100vw - 16px);}}
