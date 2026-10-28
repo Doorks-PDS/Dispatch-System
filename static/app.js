@@ -5201,7 +5201,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
     let lines;
     if(kind!=="receivables"){
-      const label=document.createElement("label");label.className="label";label.textContent=kind==="receiving"?"Parts lines (JSON array: part_number, description, quantity_received)":"Line items (JSON array: date, vendor, employee, card_last4, receipt_number, category, amount, notes)";form.appendChild(label);
+      const label=document.createElement("label");label.className="label";label.textContent=kind==="receiving"?"Parts lines (JSON array: part_number, description, quantity_ordered, quantity_shipped, quantity_backordered, quantity_received)":"Line items (JSON array: date, vendor, employee, card_last4, receipt_number, category, amount, notes)";form.appendChild(label);
       lines=document.createElement("textarea");lines.className="input";lines.rows=8;lines.value="[]";form.appendChild(lines);
       const help=document.createElement("p");help.className="hint";help.textContent="AI fills these entries as editable JSON. Review and correct each line before saving.";form.appendChild(help);
       const upload=document.createElement("input");upload.type="file";upload.accept=".jpg,.jpeg,.png,.webp,.pdf";form.appendChild(upload);
@@ -5232,6 +5232,27 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row=document.createElement("div");row.className="card";row.style.marginBottom="8px";
         const summary=document.createElement("strong");summary.textContent=kind==="receiving"?`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`:kind==="statements"?`${item.document_type||"Credit Card Statement"} — ${item.issuer||""} ${item.period_start||""} — ${item.period_end||""} (${(item.transactions||[]).length} line items)`: `${item.customer||""} Invoice ${item.invoice_number||""} — $${Number(item.invoice_total||0).toFixed(2)} / Paid $${Number(item.paid_amount||0).toFixed(2)}`;
         row.appendChild(summary);
+        if(kind==="receiving") {
+          const parts=Array.isArray(item.lines)?item.lines:[];
+          const qty=(key)=>parts.reduce((s,p)=>s+Number(p[key]||0),0);
+          const info=document.createElement("div");info.style.cssText="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;color:#586477;font-size:13px";
+          for(const [label,value] of [["Supplier",item.supplier||"—"],["PO",item.po_number||"—"],["Job",item.job_number||"—"],["Date",item.date||"—"],["Status",item.status||"Pending review"]]){
+            const tag=document.createElement("span");const b=document.createElement("strong");b.textContent=label+": ";tag.append(b,document.createTextNode(value));info.appendChild(tag);
+          }
+          row.appendChild(info);
+          const summaryLine=document.createElement("p");summaryLine.style.cssText="margin:8px 0;font-size:13px";
+          summaryLine.textContent=`${parts.length} part lines · Ordered ${qty("quantity_ordered")} · Shipped ${qty("quantity_shipped")} · Backordered ${qty("quantity_backordered")} · Recorded received ${qty("quantity_received")}`;
+          row.appendChild(summaryLine);
+          const detail=document.createElement("details");detail.style.margin="8px 0";
+          const toggle=document.createElement("summary");toggle.textContent=`View ${parts.length} item lines`;detail.appendChild(toggle);
+          const wrap=document.createElement("div");wrap.style.overflowX="auto";
+          const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px";
+          const cols=[["part_number","Part #"],["description","Description"],["quantity_ordered","Ordered"],["quantity_shipped","Shipped"],["quantity_backordered","Backordered"],["quantity_received","Received"]];
+          const head=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:8px;border-bottom:1px solid #ccd3dc";head.appendChild(th);}table.appendChild(head);
+          for(const p of parts){const tr=document.createElement("tr");for(const [key] of cols){const td=document.createElement("td");td.textContent=String(p[key]??"—");td.style.cssText="padding:8px;border-bottom:1px solid #e3e7eb";tr.appendChild(td);}table.appendChild(tr);}
+          wrap.appendChild(table);detail.appendChild(wrap);row.appendChild(detail);
+          if(item.notes){const notes=document.createElement("p");notes.style.cssText="font-size:13px;white-space:pre-wrap;color:#586477";notes.textContent=item.notes;row.appendChild(notes);}
+        }
         if(kind==="statements") {
           const txs=item.transactions||[];
           const total=txs.filter(t=>!t.exclude_from_expenses).reduce((sum,t)=>sum+Number(t.amount||0),0);
