@@ -16,6 +16,10 @@
     .platform-select:focus-visible {outline:3px solid #fff;outline-offset:3px;}
     .platform-select option {background:#fff;color:#172033;}
     .platform-select-chevron {position:absolute;right:13px;top:50%;transform:translateY(-58%);pointer-events:none;color:#fff;font-size:19px;line-height:1;}
+    /* Restore a comfortable header height while keeping controls vertically centered. */
+    .topbar .topbar-inner {min-height:76px;box-sizing:border-box;padding-top:12px;padding-bottom:12px;}
+    .topbar .topbar-left,.topbar .topbar-right {top:50%;transform:translateY(-50%);}
+    @media(max-width:640px){.topbar .topbar-inner{min-height:68px;}}
     /* Brand stays geometrically centered regardless of left/right controls. */
     .topbar-inner {position:relative;}
     .topbar-inner > .brand {position:absolute;left:50%;transform:translateX(-50%);margin:0;white-space:nowrap;pointer-events:none;}
