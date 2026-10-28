@@ -3661,10 +3661,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         }catch(e){speechHint.textContent=`AI assistance failed: ${e.message||e}. Your transcript is still available.`;}
         finally{aiBtn.disabled=false;aiBtn.textContent="Fill Form with OpenAI";}
       });
-      if(currentUser && ["tech","lead"].includes(String(currentUser.role||""))){
-        const employeeName=String(currentUser.name||currentUser.full_name||currentUser.username||"").trim();
-        if(employeeName){const match=Array.from(techSel.options).find(o=>o.value.toLowerCase()===employeeName.toLowerCase());
-          if(match){techSel.value=match.value;techSel.disabled=true;techSel.title="Automatically assigned from your logged-in account";}}
+      // Identify the form author from the authenticated session; do not use AI to guess.
+      if(currentUser){
+        const candidates=[currentUser.name,currentUser.full_name,currentUser.username].map(v=>String(v||"").trim()).filter(Boolean);
+        const norm=v=>String(v||"").toLowerCase().replace(/[^a-z0-9]/g,"");
+        let match=Array.from(techSel.options).find(o=>o.value && candidates.some(c=>norm(o.value)===norm(c)));
+        if(!match && candidates.length){
+          const candidateTokens=candidates[0].toLowerCase().split(/\s+/).filter(Boolean);
+          match=Array.from(techSel.options).find(o=>o.value && candidateTokens.length>1 && candidateTokens.every(t=>o.value.toLowerCase().split(/\s+/).includes(t)));
+        }
+        if(match){techSel.value=match.value;techSel.dispatchEvent(new Event("change",{bubbles:true}));}
+        else if(candidates.length){
+          // Keep a valid employee option even when the account name isn't in the employee directory.
+          const option=document.createElement("option");option.value=candidates[0];option.textContent=candidates[0]+" (signed-in user)";techSel.appendChild(option);techSel.value=option.value;
+        }
+        if(["tech","lead"].includes(String(currentUser.role||""))){techSel.title="Technician from signed-in account";}
       }
       card.insertBefore(speechPanel,card.firstChild);
       const uploadPanel = document.createElement("div");
@@ -5156,12 +5167,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const addStat=(label,value)=>{const c=document.createElement("div");c.className="card";const t=document.createElement("div");t.className="hint";t.textContent=label;const v=document.createElement("h2");v.textContent=value;c.append(t,v);stats.appendChild(c);};
       if(kind==="statements") {
         const txs=records.flatMap(r=>(r.transactions||[]).map(t=>({...t,_statement:r.issuer||""})));
-        const amount=txs.reduce((n,t)=>n+(Number(t.amount)||0),0);
+        const amount=txs.filter(t=>!t.exclude_from_expenses).reduce((n,t)=>n+(Number(t.amount)||0),0);
         addStat("Statements",String(records.length));addStat("Extracted transactions",String(txs.length));
         addStat("Net statement activity",amount.toLocaleString(undefined,{style:"currency",currency:"USD"}));
         addStat("Uncategorized transactions",String(txs.filter(t=>!t.category||t.category==="Other").length));
         host.appendChild(stats);
-        const by=(key)=>{const totals=new Map();for(const t of txs){const k=String(t[key]||"Unassigned");totals.set(k,(totals.get(k)||0)+(Number(t.amount)||0));}return [...totals.entries()].sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));};
+        const by=(key)=>{const totals=new Map();for(const t of txs.filter(t=>!t.exclude_from_expenses)){const k=String(t[key]||"Unassigned");totals.set(k,(totals.get(k)||0)+(Number(t.amount)||0));}return [...totals.entries()].sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));};
         for(const [key,title] of [["category","Statement activity by category"],["employee","Statement activity by employee"],["card_last4","Statement activity by card"]]) {
           const h=document.createElement("h4");h.textContent=title;host.appendChild(h);
           const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse";
@@ -5204,7 +5215,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const data=await resp.json();if(!resp.ok)throw Error(data.detail||"Could not read document");
           for(const [k,v] of Object.entries(data.fields||{})){if(inputs[k])inputs[k].value=v??"";}
           lines.value=JSON.stringify(data.fields?.[kind==="receiving"?"lines":"transactions"]||[],null,2);
-          alert(data.message||"Review the extracted information before saving.");
+          if(kind==="statements" && !(data.fields?.transactions||[]).length){alert("No transaction lines were extracted. For a bill or tax notice, enter the billed amount and due date manually after reviewing the original. Do not save an empty transaction list as an extracted accounting record.");}else{alert(data.message||"Review the extracted information before saving.");}
         }catch(e){alert(`Document reading failed: ${e.message||e}`);}finally{scan.disabled=false;scan.textContent="Read with AI";}
       });
       form._upload=upload;
@@ -5223,19 +5234,22 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row.appendChild(summary);
         if(kind==="statements") {
           const txs=item.transactions||[];
-          const total=txs.reduce((sum,t)=>sum+Number(t.amount||0),0);
+          const total=txs.filter(t=>!t.exclude_from_expenses).reduce((sum,t)=>sum+Number(t.amount||0),0);
           const detail=document.createElement("details");detail.style.marginTop="10px";
           const toggle=document.createElement("summary");toggle.textContent=`View ${txs.length} transactions — net $${total.toFixed(2)}`;detail.appendChild(toggle);
           const wrap=document.createElement("div");wrap.style.cssText="overflow-x:auto;margin-top:8px";
           const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse;font-size:13px";
           const cols=[["date","Date"],["vendor","Vendor"],["employee","Employee"],["card_last4","Card last 4"],["receipt_number","Receipt #"],["category","Category"],["amount","Amount"],["notes","Notes"]];
-          const header=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:6px;border-bottom:1px solid #aaa";header.appendChild(th);}const categoryHead=document.createElement("th");categoryHead.textContent="Change category";categoryHead.style.padding="6px";header.appendChild(categoryHead);table.appendChild(header);
+          const header=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:6px;border-bottom:1px solid #aaa";header.appendChild(th);}const categoryHead=document.createElement("th");categoryHead.textContent="Change category";categoryHead.style.padding="6px";header.appendChild(categoryHead);const excludeHead=document.createElement("th");excludeHead.textContent="Exclude from totals";excludeHead.style.padding="6px";header.appendChild(excludeHead);table.appendChild(header);
           for(const [txIndex,tx] of txs.entries()){const tr=document.createElement("tr");for(const [key] of cols){const td=document.createElement("td");td.textContent=key==="amount"?Number(tx[key]||0).toFixed(2):String(tx[key]||"");td.style.cssText="padding:6px;border-bottom:1px solid #ddd";tr.appendChild(td);}
             const catCell=document.createElement("td");const dropdown=document.createElement("select");dropdown.className="input";dropdown.setAttribute("aria-label","Change transaction category");
             const options=[...new Set([tx.category||"",...(window.__doorksAcctCategories||[]),"Parts & Materials","Tools & Equipment","Fuel","Vehicle Maintenance","Office Supplies","Shipping & Freight","Meals","Travel","Stock / Inventory","Business & Licensing Fees","Other","Card Payment / Transfer","Refund / Credit","Personal / Nonbusiness","Uncategorized"])];
             for(const c of options){const o=document.createElement("option");o.value=c;o.textContent=c||"Uncategorized";dropdown.appendChild(o);}dropdown.value=tx.category||"";
             dropdown.addEventListener("change",async()=>{dropdown.disabled=true;const previous=tx.category;try{const updated=txs.map((t,i)=>i===txIndex?{...t,category:dropdown.value}:t);await fetchJSON(`/accounting/statements/${encodeURIComponent(item.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...item,transactions:updated})});tx.category=dropdown.value;txs[txIndex]={...txs[txIndex],category:dropdown.value};tr.children[5].textContent=dropdown.value;dropdown.title="Saved";}catch(e){dropdown.value=previous||"";alert(`Category update failed: ${e.message||e}`);}finally{dropdown.disabled=false;}});
-            catCell.appendChild(dropdown);tr.appendChild(catCell);table.appendChild(tr);}
+            catCell.appendChild(dropdown);tr.appendChild(catCell);
+            const excludeCell=document.createElement("td");excludeCell.style.padding="6px";const exclude=document.createElement("input");exclude.type="checkbox";exclude.checked=!!tx.exclude_from_expenses;exclude.setAttribute("aria-label","Exclude this transaction from totals");
+            exclude.addEventListener("change",async()=>{exclude.disabled=true;const previous=!!tx.exclude_from_expenses;try{const updated=txs.map((t,i)=>i===txIndex?{...t,exclude_from_expenses:exclude.checked}:t);await fetchJSON(`/accounting/statements/${encodeURIComponent(item.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...item,transactions:updated})});tx.exclude_from_expenses=exclude.checked;txs[txIndex]={...txs[txIndex],exclude_from_expenses:exclude.checked};tr.style.opacity=exclude.checked?"0.5":"1";toggle.textContent=`View ${txs.length} transactions — included net $${txs.filter(t=>!t.exclude_from_expenses).reduce((sum,t)=>sum+Number(t.amount||0),0).toFixed(2)}`;}catch(e){exclude.checked=previous;alert(`Could not save exclusion: ${e.message||e}`);}finally{exclude.disabled=false;}});
+            excludeCell.appendChild(exclude);tr.appendChild(excludeCell);if(exclude.checked)tr.style.opacity="0.5";table.appendChild(tr);}
           if(!txs.length){const p=document.createElement("p");p.className="hint";p.textContent="No transactions were saved for this statement. Select Edit to inspect the saved JSON.";wrap.appendChild(p);}
           wrap.appendChild(table);detail.appendChild(wrap);row.appendChild(detail);
         }
