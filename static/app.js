@@ -3623,6 +3623,33 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (selected.door_location) locRow.querySelector("#cf_door_loc").value = selected.door_location;
       });
  
+      // Optional on-device/browser voice dictation into existing form fields.
+      // Transcript is editable and never saved without the technician pressing Save Form.
+      const speechCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
+      const speechFields = isSalesLead
+        ? [["cf_lead_recs","Recommendations"],["cf_lead_parts","Parts Required"]]
+        : [["cf_tech_notes","Tech Notes"],["cf_parts","Parts Used"],["cf_add_recs","Recommendations"]];
+      const speechPanel=document.createElement("div");speechPanel.className="card";
+      speechPanel.style.cssText="margin-top:12px;padding:12px";
+      const speechTitle=document.createElement("strong");speechTitle.textContent="Moses Form Assistant — Voice Dictation";speechPanel.appendChild(speechTitle);
+      const speechHint=document.createElement("p");speechHint.className="hint";
+      speechHint.textContent="Dictate into a field, review the transcript, then save normally. Browser microphone permission required; speech recognition availability depends on the browser.";speechPanel.appendChild(speechHint);
+      const speechSelect=document.createElement("select");speechSelect.className="input";
+      for(const [id,label] of speechFields){if(!card.querySelector(`#${id}`))continue;const o=document.createElement("option");o.value=id;o.textContent=label;speechSelect.appendChild(o);}speechPanel.appendChild(speechSelect);
+      const speechBtn=document.createElement("button");speechBtn.type="button";speechBtn.className="btn";speechBtn.textContent="Start Dictation";speechPanel.appendChild(speechBtn);
+      if(!speechCtor){speechBtn.disabled=true;speechHint.textContent="Voice dictation is not available in this browser. You can still type into the form.";}
+      else {let recognition=null;let active=false;
+        speechBtn.addEventListener("click",()=>{
+          if(active){recognition?.stop();return;}
+          const target=card.querySelector(`#${speechSelect.value}`);if(!target)return;
+          recognition=new speechCtor();recognition.lang="en-US";recognition.continuous=false;recognition.interimResults=false;
+          recognition.onresult=(e)=>{const words=Array.from(e.results).map(r=>r[0]?.transcript||"").join(" ").trim();if(words){target.value=[target.value.trim(),words].filter(Boolean).join(" ");target.dispatchEvent(new Event("input",{bubbles:true}));}};
+          recognition.onerror=(e)=>{speechHint.textContent=`Dictation unavailable: ${e.error||"microphone error"}. Type normally or try again.`;};
+          recognition.onend=()=>{active=false;speechBtn.textContent="Start Dictation";};
+          try{recognition.start();active=true;speechBtn.textContent="Stop Dictation";}catch(e){speechHint.textContent=`Could not start dictation: ${e.message||e}`;}
+        });
+      }
+      card.appendChild(speechPanel);
       const uploadPanel = document.createElement("div");
       uploadPanel.style.cssText = "margin-top:12px;padding:12px;border:1px solid #cbd5e1;border-radius:8px";
       uploadPanel.innerHTML = `<div class="label">Photos / Files (optional)</div><input class="input" type="file" id="cf_files" multiple accept="image/*,application/pdf" /><div class="hint">Attachments are linked to this saved form.</div>`;
@@ -5101,6 +5128,34 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }
       host.appendChild(stats);
       const caution=document.createElement("p");caution.className="hint";caution.textContent="These balances reflect manually entered Accounting records, not automatically reconciled Doorks invoices or bank payments.";host.appendChild(caution);
+    }
+    // Section-specific dashboards use saved records, not unverified AI extraction previews.
+    if(kind==="statements" || kind==="receiving") {
+      const snapshot=await fetchJSON(`/accounting/${kind}`);
+      const records=snapshot.items||[];
+      const stats=document.createElement("div");stats.className="grid2";
+      const addStat=(label,value)=>{const c=document.createElement("div");c.className="card";const t=document.createElement("div");t.className="hint";t.textContent=label;const v=document.createElement("h2");v.textContent=value;c.append(t,v);stats.appendChild(c);};
+      if(kind==="statements") {
+        const txs=records.flatMap(r=>(r.transactions||[]).map(t=>({...t,_statement:r.issuer||""})));
+        const amount=txs.reduce((n,t)=>n+(Number(t.amount)||0),0);
+        addStat("Statements",String(records.length));addStat("Extracted transactions",String(txs.length));
+        addStat("Net statement activity",amount.toLocaleString(undefined,{style:"currency",currency:"USD"}));
+        addStat("Uncategorized transactions",String(txs.filter(t=>!t.category||t.category==="Other").length));
+        host.appendChild(stats);
+        const by=(key)=>{const totals=new Map();for(const t of txs){const k=String(t[key]||"Unassigned");totals.set(k,(totals.get(k)||0)+(Number(t.amount)||0));}return [...totals.entries()].sort((a,b)=>Math.abs(b[1])-Math.abs(a[1]));};
+        for(const [key,title] of [["category","Statement activity by category"],["employee","Statement activity by employee"],["card_last4","Statement activity by card"]]) {
+          const h=document.createElement("h4");h.textContent=title;host.appendChild(h);
+          const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse";
+          for(const [label,total] of by(key)){const tr=document.createElement("tr");const name=document.createElement("td");name.textContent=label;name.style.padding="5px";const amt=document.createElement("td");amt.textContent=total.toLocaleString(undefined,{style:"currency",currency:"USD"});amt.style.cssText="text-align:right;padding:5px";tr.append(name,amt);table.appendChild(tr);}host.appendChild(table);
+        }
+        const caution=document.createElement("p");caution.className="hint";caution.textContent="Statement transactions are separate from receipt expenses. They are NOT added to the Overview expense total, preventing double counting. Verify card payments, refunds, transfers, and categories before using these figures for taxes.";host.appendChild(caution);
+      } else {
+        const lines=records.flatMap(r=>r.lines||[]);
+        addStat("Receiving records",String(records.length));addStat("Recorded part lines",String(lines.length));
+        addStat("Partial deliveries",String(records.filter(r=>String(r.status||"").toLowerCase().includes("partial")).length));
+        addStat("Pending review",String(records.filter(r=>String(r.status||"").toLowerCase().includes("pending")).length));
+        host.appendChild(stats);
+      }
     }
     const form=document.createElement("form");form.className="card";host.appendChild(form);
     const title=document.createElement("h4");title.textContent=`New ${kind==="receiving"?"receiving record":kind==="statements"?"statement":"receivable"}`;form.appendChild(title);
