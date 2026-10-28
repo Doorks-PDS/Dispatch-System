@@ -5501,6 +5501,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const toMove=[...host.children].filter(el=>el!==h&&el!==note&&el!==actions&&el!==savedTop&&el!==searchWrap&&el!==list&&el!==newRecordPanel);
     for(const el of toMove)summaries.appendChild(el);
     host.insertBefore(summaries,searchWrap);
+    host.insertBefore(btns,summaries);
+    savedTop.remove();
     await draw();
   }
 
@@ -5557,6 +5559,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const make = (tag, text, parent=host) => { const node = document.createElement(tag); node.textContent = text; parent.appendChild(node); return node; };
       host.innerHTML = "";
       if (section === "overview") {
+        const overviewActions=document.createElement("div");
+        overviewActions.style.cssText="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 16px";
+        const quickNew=document.createElement("button");quickNew.type="button";quickNew.className="btn btn-orange";quickNew.textContent="+ New Input";
+        const quickLabel=document.createElement("span");quickLabel.className="hint";quickLabel.textContent="Upload a document and review the AI results before saving.";
+        overviewActions.append(quickNew,quickLabel);host.appendChild(overviewActions);
+        quickNew.addEventListener("click",()=>{
+          const chooser=document.createElement("div");chooser.className="card";chooser.style.cssText="margin:10px 0 16px;padding:16px";
+          const heading=document.createElement("strong");heading.textContent="What would you like to upload?";chooser.appendChild(heading);
+          const buttons=document.createElement("div");buttons.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px";
+          for(const [label,target] of [["New Intake","stock"],["New Receipt","receipts"],["New Statement","statements"]]){
+            const b=document.createElement("button");b.type="button";b.className="btn";b.textContent=label;
+            b.addEventListener("click",async()=>{
+              await renderAccountingView(target);
+              const content=workspaceBody;
+              const upload=[...content.querySelectorAll("button")].find(x=>/Upload Document|Upload Receipt \/ Read with AI/.test(x.textContent||""));
+              if(upload)upload.click();
+            });buttons.appendChild(b);
+          }
+          const cancel=document.createElement("button");cancel.type="button";cancel.className="btn";cancel.textContent="Cancel";cancel.addEventListener("click",()=>chooser.remove());buttons.appendChild(cancel);
+          chooser.appendChild(buttons);overviewActions.after(chooser);quickNew.disabled=true;
+          cancel.addEventListener("click",()=>{quickNew.disabled=false;});
+        });
         const stats = make("div", ""); stats.className="grid2";
         for (const [label, value] of [["Expenses in period",money(total)],["This month",money(monthTotal)],["Receipts in period",String(periodReceipts.length)],["Employees in period",String(new Set(periodReceipts.map(r=>r.employee).filter(Boolean)).size)]]) {
           const box = document.createElement("div"); box.className="card"; box.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`; stats.appendChild(box);
@@ -5664,6 +5688,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         summaryDetails.append(dashboard,categoryTitle,...breakdownNodes);
         summaryToggle.textContent="Dashboard & Reports";
         host.insertBefore(summaryDetails,bar);
+        host.insertBefore(receiptActions,summaryDetails);
         const showReceiptEditor=(withUpload)=>{
           uploadBox.style.display="block";
           uploadBox.scrollIntoView({behavior:"smooth",block:"start"});
