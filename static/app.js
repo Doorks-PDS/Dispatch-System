@@ -324,34 +324,48 @@
   };
   function safeWorkspaceText(value) { const e=document.createElement("span");e.textContent=String(value??"");return e.innerHTML; }
   async function renderBusinessCollection(platform,kind) {
-    if (activePlatform!==platform) return;
-    const labels=workspaceKinds[platform];
+    if(activePlatform!==platform)return;
+    const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==="sdc"?"SDC":"Doorks"} — ${labels[kind]}`);
-    workspaceBody.innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><h2>${labels[kind]}</h2><button class="btn" id="businessBack">← Dashboard</button></div><p>Independent ${platform.toUpperCase()} records. Existing PDS data is unchanged.</p><div id="businessRecords">Loading...</div><h3>Add record</h3><form id="businessRecordForm" style="display:grid;gap:10px;max-width:600px"></form></div>`;
-    el("businessBack").onclick=()=>showPlatformShell(platform);
-    const form=el("businessRecordForm");
-    for(const field of workspaceFields[kind]){
-      const label=document.createElement("label");label.textContent=field.replaceAll("_"," ");label.style.cssText="display:grid;gap:4px;text-transform:capitalize";
-      const input=document.createElement("input");input.name=field;input.placeholder=field.replaceAll("_"," ");input.style.cssText="padding:10px;border:1px solid #ccd2dc;border-radius:8px";
+    workspaceBody.innerHTML=`<div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>${labels[kind]}</h2><button class="btn" id="businessBack">← Dashboard</button></div><p>Records are saved to the ${platform.toUpperCase()} workspace only.</p><label style="display:grid;gap:5px;max-width:620px">Search saved records<input id="businessSearch" type="search" placeholder="Search customer, order, PO, amount, notes or any field" style="padding:12px;border:1px solid #ccd2dc;border-radius:9px"></label><div id="businessRecords" aria-live="polite">Loading...</div><h3 id="businessFormTitle">New ${labels[kind].replace(' & Production','')}</h3><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form><p id="businessSaveMessage" role="status"></p></div>`;
+    el('businessBack').onclick=()=>showPlatformShell(platform);
+    const form=el('businessRecordForm'), message=el('businessSaveMessage'), endpoint=`/workspaces/${platform}/${kind}`;
+    const fieldTypes={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date'};
+    const statuses=kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['New','Scheduled','In Progress','Completed','Cancelled']:null;
+    let records=[],editingId=null;
+    for(const field of fields){
+      const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;text-transform:capitalize;font-weight:600';label.textContent=field.replaceAll('_',' ');
+      let input;
+      if(field==='status'&&statuses){input=document.createElement('select');for(const st of statuses){const opt=document.createElement('option');opt.value=st;opt.textContent=st;input.append(opt);}}
+      else if(field==='notes'||field==='description'){input=document.createElement('textarea');input.rows=3;}
+      else{input=document.createElement('input');input.type=fieldTypes[field]||'text';if(input.type==='number'){input.step='any';}}
+      input.name=field;input.placeholder=field.replaceAll('_',' ');input.style.cssText='width:100%;box-sizing:border-box;padding:11px;border:1px solid #ccd2dc;border-radius:9px';
       label.append(input);form.append(label);
     }
-    const submit=document.createElement("button");submit.className="btn primary";submit.type="submit";submit.textContent="Save to "+platform.toUpperCase();form.append(submit);
-    const endpoint=`/workspaces/${platform}/${kind}`;
-    async function refresh(){
-      const result=await fetchJSON(endpoint);const host=el("businessRecords");host.innerHTML="";
-      if(!result.items.length){host.textContent="No records yet.";return;}
-      for(const item of result.items.slice().reverse()){
-        const row=document.createElement("div");row.style.cssText="padding:12px;margin:8px 0;border:1px solid #d9dee7;border-radius:10px";
-        const body=document.createElement("div");body.style.whiteSpace="pre-wrap";
-        body.textContent=workspaceFields[kind].filter(k=>item[k]!==undefined&&item[k]!=="").map(k=>`${k.replaceAll("_"," ")}: ${item[k]}`).join("\n")||"Empty record";
-        row.append(body);
-        const edit=document.createElement("button");edit.className="btn";edit.textContent="Edit";edit.style.marginTop="8px";
-        edit.onclick=async()=>{const key=prompt("Field to edit: "+workspaceFields[kind].join(", "));if(!key)return;if(!workspaceFields[kind].includes(key)){alert("Unknown field");return;}const value=prompt("New value",String(item[key]??""));if(value===null)return;try{await fetchJSON(endpoint+"/"+item.id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({data:{[key]:value}})});await refresh();}catch(err){alert(err.message||"Save failed");}};
-        row.append(edit);host.append(row);
+    const actions=document.createElement('div');actions.style.cssText='grid-column:1/-1;display:flex;gap:10px;align-items:center';
+    const submit=document.createElement('button');submit.className='btn primary';submit.type='submit';submit.textContent='Save '+platform.toUpperCase()+' record';actions.append(submit);
+    const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel edit';cancel.hidden=true;actions.append(cancel);form.append(actions);
+    const resetEdit=()=>{editingId=null;form.reset();cancel.hidden=true;submit.textContent='Save '+platform.toUpperCase()+' record';el('businessFormTitle').textContent='New '+labels[kind];};
+    cancel.onclick=resetEdit;
+    const search=el('businessSearch');
+    function draw(){const host=el('businessRecords');host.replaceChildren();const q=search.value.toLowerCase().trim();const filtered=records.filter(item=>!q||Object.values(item).some(v=>String(v??'').toLowerCase().includes(q)));
+      const count=document.createElement('p');count.textContent=`${filtered.length} of ${records.length} saved records`;host.append(count);
+      if(!filtered.length){const empty=document.createElement('p');empty.textContent=q?'No matching records.':'No records saved yet.';host.append(empty);return;}
+      for(const item of filtered.slice().reverse()){
+        const row=document.createElement('div');row.style.cssText='padding:14px;margin:9px 0;border:1px solid #d9dee7;border-radius:10px';
+        const title=document.createElement('strong');title.textContent=item.customer||item.name||item.item||item.description||item.part_number||'Record';row.append(title);
+        const body=document.createElement('div');body.style.cssText='white-space:pre-wrap;margin:9px 0';body.textContent=fields.filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>`${k.replaceAll('_',' ')}: ${item[k]}`).join('\n');row.append(body);
+        const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit record';edit.onclick=()=>{editingId=item.id;for(const f of fields){const inp=form.elements.namedItem(f);if(inp)inp.value=item[f]??'';}cancel.hidden=false;submit.textContent='Update record';el('businessFormTitle').textContent='Edit '+labels[kind];form.scrollIntoView({behavior:'smooth',block:'start'});};row.append(edit);host.append(row);
       }
     }
-    form.onsubmit=async e=>{e.preventDefault();const data={};for(const field of workspaceFields[kind])data[field]=form.elements[field].value.trim();submit.disabled=true;try{await fetchJSON(endpoint,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({data})});form.reset();await refresh();}catch(err){alert(err.message||"Save failed");}finally{submit.disabled=false;}};
-    try{await refresh();}catch(err){el("businessRecords").textContent=err.message||"Unable to load workspace records";}
+    search.oninput=draw;
+    async function refresh(){const result=await fetchJSON(endpoint);records=Array.isArray(result.items)?result.items:[];draw();}
+    form.onsubmit=async e=>{e.preventDefault();message.textContent='Saving…';const data={};for(const field of fields){const input=form.elements.namedItem(field);data[field]=String(input?.value??'').trim();}submit.disabled=true;
+      try{const url=editingId?endpoint+'/'+encodeURIComponent(editingId):endpoint;await fetchJSON(url,{method:editingId?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});resetEdit();await refresh();message.textContent='Saved successfully to '+platform.toUpperCase()+'.';}
+      catch(err){message.textContent='Save failed: '+(err.message||'Unknown error');console.error('Workspace save failed',err);}
+      finally{submit.disabled=false;}
+    };
+    try{await refresh();}catch(err){el('businessRecords').textContent='Unable to load records: '+(err.message||'Unknown error');}
   }
   function showPlatformShell(platform) {
     activePlatform=platform;
