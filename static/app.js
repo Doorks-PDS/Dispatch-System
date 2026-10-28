@@ -5077,7 +5077,87 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     root.append(card, controls, list); workspaceBody.innerHTML=''; workspaceBody.appendChild(root); currentView={ refresh }; refresh();
   }
 
+  async function renderAccountingRecords(section, host) {
+    const kind = section === "stock" ? "receiving" : section;
+    const titles = {receiving:"Parts / Stock Receiving",statements:"Credit Card Statements",receivables:"Accounts Receivable"};
+    host.innerHTML="";
+    const h=document.createElement("h3");h.textContent=titles[kind];host.appendChild(h);
+    const note=document.createElement("p");note.className="hint";
+    note.textContent=kind==="receiving"?"Record packing slips and partial deliveries. Stock is not automatically adjusted.":kind==="statements"?"Upload statements for AI suggestions; review every transaction before saving. Statement rows are not automatically matched to receipts.":"Track manually entered customer invoice balances. These are separate from the existing invoice builder until reconciled.";
+    host.appendChild(note);
+    const actions=document.createElement("div");actions.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0";host.appendChild(actions);
+    const exportLink=document.createElement("a");exportLink.className="btn";exportLink.textContent="Export CSV";exportLink.href=`/accounting/${kind}/export.csv`;actions.appendChild(exportLink);
+    const form=document.createElement("form");form.className="card";host.appendChild(form);
+    const title=document.createElement("h4");title.textContent=`New ${kind==="receiving"?"receiving record":kind==="statements"?"statement":"receivable"}`;form.appendChild(title);
+    const fields=kind==="receiving"?[["supplier","Supplier"],["date","Date"],["po_number","PO #"],["job_number","Job #"],["status","Status"],["notes","Notes"]]:kind==="statements"?[["issuer","Card issuer / account"],["period_start","Period start"],["period_end","Period end"],["notes","Notes"]]:[["customer","Customer"],["invoice_number","Invoice #"],["invoice_date","Invoice date"],["due_date","Due date"],["job_number","Job #"],["invoice_total","Invoice total"],["paid_amount","Payments received"],["notes","Notes"]];
+    const inputs={};
+    for(const [key,label] of fields){
+      const wrap=document.createElement("div");wrap.style.marginBottom="8px";
+      const l=document.createElement("label");l.className="label";l.textContent=label;wrap.appendChild(l);
+      let input;
+      if(key==="status") {input=document.createElement("select");for(const status of ["Pending review","Partial","Received"]){const o=document.createElement("option");o.value=status;o.textContent=status;input.appendChild(o);}}
+      else {input=document.createElement(key==="notes"?"textarea":"input");if(key.includes("date")||key==="period_start"||key==="period_end")input.type="date";if(key.includes("total")||key==="paid_amount"){input.type="number";input.step="0.01";}}
+      input.className="input";input.name=key;inputs[key]=input;wrap.appendChild(input);form.appendChild(wrap);
+    }
+    let lines;
+    if(kind!=="receivables"){
+      const label=document.createElement("label");label.className="label";label.textContent=kind==="receiving"?"Parts lines (JSON array: part_number, description, quantity_received)":"Transactions (JSON array: date, vendor, employee, card_last4, receipt_number, category, amount, notes)";form.appendChild(label);
+      lines=document.createElement("textarea");lines.className="input";lines.rows=8;lines.value="[]";form.appendChild(lines);
+      const help=document.createElement("p");help.className="hint";help.textContent="AI fills these entries as editable JSON. Review and correct each line before saving.";form.appendChild(help);
+      const upload=document.createElement("input");upload.type="file";upload.accept=".jpg,.jpeg,.png,.webp,.pdf";form.appendChild(upload);
+      const scan=document.createElement("button");scan.type="button";scan.className="btn";scan.textContent="Read with AI";form.appendChild(scan);
+      scan.addEventListener("click",async()=>{
+        if(!upload.files?.length){alert("Select a document first");return;}
+        scan.disabled=true;scan.textContent="Reading…";
+        try{
+          const body=new FormData();body.append("file",upload.files[0]);
+          const resp=await fetch(`/accounting/${kind}/extract`,{method:"POST",credentials:"same-origin",body});
+          const data=await resp.json();if(!resp.ok)throw Error(data.detail||"Could not read document");
+          for(const [k,v] of Object.entries(data.fields||{})){if(inputs[k])inputs[k].value=v??"";}
+          lines.value=JSON.stringify(data.fields?.[kind==="receiving"?"lines":"transactions"]||[],null,2);
+          alert(data.message||"Review the extracted information before saving.");
+        }catch(e){alert(`Document reading failed: ${e.message||e}`);}finally{scan.disabled=false;scan.textContent="Read with AI";}
+      });
+      form._upload=upload;
+    }
+    const save=document.createElement("button");save.className="btn btn-orange";save.textContent="Save Record";form.appendChild(save);
+    const list=document.createElement("div");host.appendChild(list);
+    const draw=async()=>{
+      const res=await fetchJSON(`/accounting/${kind}`);list.innerHTML="";
+      const heading=document.createElement("h4");heading.textContent=`Saved ${titles[kind]}`;list.appendChild(heading);
+      for(const item of res.items||[]){
+        const row=document.createElement("div");row.className="card";row.style.marginBottom="8px";
+        const summary=document.createElement("strong");summary.textContent=kind==="receiving"?`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`:kind==="statements"?`${item.issuer||""} ${item.period_start||""} — ${item.period_end||""} (${(item.transactions||[]).length} transactions)`: `${item.customer||""} Invoice ${item.invoice_number||""} — $${Number(item.invoice_total||0).toFixed(2)} / Paid $${Number(item.paid_amount||0).toFixed(2)}`;
+        row.appendChild(summary);
+        const edit=document.createElement("button");edit.className="btn";edit.textContent="Edit";edit.style.marginLeft="12px";row.appendChild(edit);
+        edit.addEventListener("click",()=>{for(const [k,input] of Object.entries(inputs))input.value=item[k]??"";if(lines)lines.value=JSON.stringify(item[kind==="receiving"?"lines":"transactions"]||[],null,2);form.dataset.editId=item.id;save.textContent="Update Record";form.scrollIntoView({behavior:"smooth",block:"start"});});
+        if(item.attachment){const a=document.createElement("a");a.href=`/accounting/${kind}/${encodeURIComponent(item.id)}/file`;a.textContent=" Open original";a.target="_blank";row.appendChild(a);}
+        list.appendChild(row);
+      }
+    };
+    form.addEventListener("submit",async event=>{
+      event.preventDefault();save.disabled=true;
+      try{
+        const payload=Object.fromEntries(Object.entries(inputs).map(([k,input])=>[k,input.value]));
+        if(lines)payload[kind==="receiving"?"lines":"transactions"]=JSON.parse(lines.value||"[]");
+        const id=form.dataset.editId;const url=id?`/accounting/${kind}/${encodeURIComponent(id)}`:`/accounting/${kind}`;
+        const result=await fetchJSON(url,{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        if(form._upload?.files?.length){const body=new FormData();body.append("file",form._upload.files[0]);const resp=await fetch(`/accounting/${kind}/${encodeURIComponent(result.item.id)}/file`,{method:"POST",credentials:"same-origin",body});if(!resp.ok)throw Error("Record saved, but original attachment upload failed");}
+        form.reset();if(lines)lines.value="[]";delete form.dataset.editId;save.textContent="Save Record";await draw();
+      }catch(e){alert(`Could not save: ${e.message||e}`);}finally{save.disabled=false;}
+    });
+    await draw();
+  }
+
   async function renderAccountingView(section = "overview") {
+    try {
+      const access = await fetchJSON("/accounting/access");
+      if (!access.unlocked) {
+        const pin = prompt("Accounting — enter office PIN:");
+        if (pin === null) return;
+        await fetchJSON("/accounting/unlock", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({pin})});
+      }
+    } catch (err) { alert(`Accounting access denied: ${err.message || err}`); return; }
     setNavActive(navAccounting);
     setActiveChip("Office Flow");
     setWorkspace("Accounting");
@@ -5085,14 +5165,22 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     workspaceBody.innerHTML = `<div class="card"><h3>Accounting</h3><div class="hint">Expenses and document tracking. Amounts are based on saved receipts, not bank balances.</div><div id="acct_tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;"></div></div><div id="acct_content" class="card">Loading accounting data…</div>`;
     const host = workspaceBody.querySelector("#acct_content");
     const tabs = workspaceBody.querySelector("#acct_tabs");
-    for (const [id, title] of [["overview","Overview"],["receipts","Receipts"],["receivables","Receivables"],["stock","Parts / Stock"],["categories","Categories"]]) {
+    const lockButton=document.createElement("button");lockButton.className="btn";lockButton.textContent="Lock Accounting";
+    lockButton.addEventListener("click",async()=>{try{await fetchJSON("/accounting/lock",{method:"POST"});workspaceBody.innerHTML="";setWorkspace("Office Flow");}catch(e){alert(e.message||e);}});
+    tabs.parentElement.appendChild(lockButton);
+    for (const [id, title] of [["overview","Overview"],["receipts","Receipts"],["receivables","Receivables"],["stock","Parts / Stock"],["statements","Statements"],["categories","Categories"]]) {
       const b = document.createElement("button"); b.className = "btn"; b.textContent = title;
       if (id === section) b.classList.add("btn-orange");
       b.addEventListener("click", () => renderAccountingView(id)); tabs.appendChild(b);
     }
     try {
+      if (["stock","statements","receivables"].includes(section)) {
+        await renderAccountingRecords(section, host);
+        currentView={refresh:()=>renderAccountingView(section)};
+        return;
+      }
       const [res, cat] = await Promise.all([fetchJSON("/receipts"), fetchJSON("/receipts/categories")]);
-      const items = res.items || []; const categories = cat.items || [];
+      const items = (res.items || []).filter(r => !r.deleted_at); const categories = cat.items || [];
       const money = n => "$" + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
       const total = items.reduce((sum, r) => sum + Number(r.amount || 0), 0);
       const month = new Date().toISOString().slice(0,7);
@@ -5105,6 +5193,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         for (const [label, value] of [["Total recorded expenses",money(total)],["This month",money(monthTotal)],["Saved receipts",String(items.length)],["Employees with receipts",String(new Set(items.map(r=>r.employee).filter(Boolean)).size)]]) {
           const box = document.createElement("div"); box.className="card"; box.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`; stats.appendChild(box);
         }
+        try {
+          const [recv, ar, statements] = await Promise.all([fetchJSON("/accounting/receiving"),fetchJSON("/accounting/receivables"),fetchJSON("/accounting/statements")]);
+          const receivables=ar.items||[];
+          const outstanding=receivables.reduce((sum,r)=>sum+Math.max(0,Number(r.invoice_total||0)-Number(r.paid_amount||0)),0);
+          const extra=make("div", "");extra.className="grid2";
+          for(const [label,value] of [["Receiving records",String((recv.items||[]).length)],["Statements uploaded",String((statements.items||[]).length)],["Tracked receivables",String(receivables.length)],["Outstanding A/R (manual)",money(outstanding)]]){
+            const card=document.createElement("div");card.className="card";card.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`;extra.appendChild(card);
+          }
+        }catch(error){make("p",`Accounting summaries unavailable: ${error.message||error}`);}
         make("h3", "Spending by category");
         const grouped = {}; items.forEach(r => { const k = r.category || "Other"; grouped[k] = (grouped[k]||0)+Number(r.amount||0); });
         Object.entries(grouped).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
@@ -5138,7 +5235,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               line.appendChild(editor);
             });
             const view=document.createElement("a");view.href=`/receipts/${encodeURIComponent(r.id)}/file`;view.target="_blank";view.rel="noopener";view.textContent="Open original";view.style.marginLeft="12px";
-            line.append(name,edit,view);list.appendChild(line);
+            const del=document.createElement("button");del.className="btn";del.textContent="Delete";del.style.marginLeft="12px";
+            del.addEventListener("click",async()=>{
+              if(!confirm(`Remove receipt ${r.receipt_number||r.vendor||r.id} from Accounting? The original will be retained for recovery.`))return;
+              try{await fetchJSON(`/receipts/${encodeURIComponent(r.id)}`,{method:"DELETE"});await renderAccountingView("receipts");}
+              catch(err){alert(`Delete failed: ${err.message||err}`);}
+            });
+            line.append(name,edit,view,del);list.appendChild(line);
           });
         }
         search.addEventListener("input",draw);draw();
@@ -10323,7 +10426,7 @@ function renderSaddlebackView() {
 
   if (navDataCenter)
   if (navDataCenter) navDataCenter.addEventListener("click", renderDataCenterView);
-  if (navAccounting) navAccounting.addEventListener("click", () => renderAccountingView());
+  if (navAccounting) navAccounting.addEventListener("click", async () => { try { await fetchJSON("/accounting/lock", {method:"POST"}); } catch (e) { console.warn("Accounting lock",e); } await renderAccountingView(); });
   if (navPayroll) navPayroll.addEventListener("click", renderPayrollView);
   if (navEmployees) navEmployees.addEventListener("click", renderEmployeesView);
   if (navDataUpload) navDataUpload.addEventListener("click", renderDataUploadView);

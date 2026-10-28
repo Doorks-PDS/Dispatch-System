@@ -223,6 +223,8 @@ app.include_router(document_approvals_router)
 app.include_router(door_logs_router)
 app.include_router(pricing_router)
 app.include_router(receipts_router)
+from app.routers.accounting import router as accounting_router
+app.include_router(accounting_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
