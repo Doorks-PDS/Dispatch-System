@@ -5497,10 +5497,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     // Edit buttons in saved cards already use the existing form; reveal it first.
     list.addEventListener("click",event=>{if(event.target?.textContent==="Edit")newRecordPanel.open=true;},true);
     const summaries=document.createElement("details");summaries.style.cssText="margin:10px 0";
-    const sumLabel=document.createElement("summary");sumLabel.textContent="Dashboard breakdown & reporting details";sumLabel.style.cssText="cursor:pointer;font-weight:700;padding:10px";summaries.appendChild(sumLabel);
+    const sumLabel=document.createElement("summary");sumLabel.textContent="Dashboard & Reports";sumLabel.style.cssText="cursor:pointer;font-weight:700;padding:10px";summaries.appendChild(sumLabel);
     const toMove=[...host.children].filter(el=>el!==h&&el!==note&&el!==actions&&el!==savedTop&&el!==searchWrap&&el!==list&&el!==newRecordPanel);
     for(const el of toMove)summaries.appendChild(el);
-    host.appendChild(summaries);
+    host.insertBefore(summaries,searchWrap);
     await draw();
   }
 
@@ -5583,8 +5583,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const categoryTitle=make("h4","Spending by category");
         for(const [name,value] of Object.entries(byCategory).sort((a,b)=>b[1]-a[1]))make("div",`${name}: ${money(value)}`);
         // Office receipt submission uses the same /receipts storage and AI extraction as Forms.
-        const uploadBox=document.createElement("details");uploadBox.className="card";uploadBox.style.margin="12px 0";
-        const uploadTitle=document.createElement("summary");uploadTitle.textContent="Upload new receipt (AI assisted)";uploadTitle.style.cssText="font-weight:700;cursor:pointer";uploadBox.appendChild(uploadTitle);
+        const uploadBox=document.createElement("div");uploadBox.className="card";uploadBox.style.margin="12px 0";uploadBox.style.display="none";
+        
         const uploadForm=document.createElement("form");uploadForm.style.marginTop="12px";
         uploadForm.innerHTML=`<div class="grid2"><label>Date<input class="input" type="date" name="date" required></label><label>Employee<input class="input" name="employee" required></label><label>Vendor<input class="input" name="vendor" required></label><label>Amount ($)<input class="input" type="number" min="0" step="0.01" name="amount" required></label><label>Card last 4<input class="input" name="card_last4" maxlength="4" pattern="[0-9]{4}"></label><label>Receipt #<input class="input" name="receipt_number"></label><label>Category<select class="input" name="category"></select></label></div><label>Notes<textarea class="input" name="notes" rows="2"></textarea></label><label>Photo / PDF<input class="input" type="file" name="file" accept="image/*,application/pdf" required></label><p class="hint" data-receipt-status>Select a file for AI reading. Review before saving.</p><button class="btn btn-orange" type="submit">Save Receipt</button>`;
         uploadBox.appendChild(uploadForm);host.appendChild(uploadBox);
@@ -5656,15 +5656,22 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         host.insertBefore(receiptActions,bar);
         host.insertBefore(bar,dashboard);
         host.insertBefore(list,dashboard);
+        host.appendChild(uploadBox);
         const summaryDetails=document.createElement("details");summaryDetails.style.margin="12px 0";
         const summaryToggle=document.createElement("summary");summaryToggle.textContent="Receipt dashboard & category breakdown";summaryToggle.style.cssText="cursor:pointer;font-weight:700;padding:10px";summaryDetails.appendChild(summaryToggle);
         const breakdownNodes=[];let next=categoryTitle.nextSibling;
         while(next&&next!==uploadBox){const following=next.nextSibling;breakdownNodes.push(next);next=following;}
         summaryDetails.append(dashboard,categoryTitle,...breakdownNodes);
-        host.appendChild(summaryDetails);
-        uploadBox.open=false;uploadTitle.textContent="Receipt editor / AI upload";
-        newReceipt.addEventListener("click",()=>{uploadBox.open=true;uploadBox.scrollIntoView({behavior:"smooth",block:"start"});uploadForm.elements.vendor.focus();});
-        uploadReceipt.addEventListener("click",()=>{uploadBox.open=true;uploadBox.scrollIntoView({behavior:"smooth",block:"start"});uploadForm.elements.file.click();});
+        summaryToggle.textContent="Dashboard & Reports";
+        host.insertBefore(summaryDetails,bar);
+        const showReceiptEditor=(withUpload)=>{
+          uploadBox.style.display="block";
+          uploadBox.scrollIntoView({behavior:"smooth",block:"start"});
+          if(withUpload)uploadForm.elements.file.click();
+          else uploadForm.elements.vendor.focus();
+        };
+        newReceipt.addEventListener("click",()=>showReceiptEditor(false));
+        uploadReceipt.addEventListener("click",()=>showReceiptEditor(true));
         search.placeholder="Search saved receipts: vendor, date, employee, amount, card, category, notes…";
         search.addEventListener("input",draw);draw();
       } else if (section === "categories") {
