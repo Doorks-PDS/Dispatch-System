@@ -56,6 +56,7 @@
   let navDoorLogs = el("navDoorLogs");
  
   const navDataCenter = el("navDataCenter");
+  const navAccounting = el("navAccounting");
   const navPayroll = el("navPayroll");
   const navEmployees = el("navEmployees");
   const navDataUpload = el("navDataUpload");
@@ -262,7 +263,7 @@
     [
       navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff, navFormsReceipts,
       navJobFlow, navToDoList, navAllJobs, navPartsList, navDoorLogs, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
-      navDataCenter, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
+      navDataCenter, navAccounting, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
       navNotifications, navAtlas, navMoses
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
   }
@@ -1461,6 +1462,7 @@ async function apiListForms() {
     setVisible(notificationsPanel, !!role && perms.notifications);
     if (headerCalendarBtn) headerCalendarBtn.style.display = role && perms.calendar ? "inline-flex" : "none";
     setVisible(navDataCenter, !!role && perms.dataCenter);
+    setVisible(navAccounting, role === "office" || role === "office_admin");
     setVisible(navPayroll, !!role && perms.payroll);
     setVisible(navEmployees, !!role && perms.employees);
     setVisible(navDataUpload, role === "office_admin" && !!perms.dataUpload);
@@ -5075,6 +5077,85 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     root.append(card, controls, list); workspaceBody.innerHTML=''; workspaceBody.appendChild(root); currentView={ refresh }; refresh();
   }
 
+  async function renderAccountingView(section = "overview") {
+    setNavActive(navAccounting);
+    setActiveChip("Office Flow");
+    setWorkspace("Accounting");
+    clearWorkspaceActions();
+    workspaceBody.innerHTML = `<div class="card"><h3>Accounting</h3><div class="hint">Expenses and document tracking. Amounts are based on saved receipts, not bank balances.</div><div id="acct_tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;"></div></div><div id="acct_content" class="card">Loading accounting data…</div>`;
+    const host = workspaceBody.querySelector("#acct_content");
+    const tabs = workspaceBody.querySelector("#acct_tabs");
+    for (const [id, title] of [["overview","Overview"],["receipts","Receipts"],["receivables","Receivables"],["stock","Parts / Stock"],["categories","Categories"]]) {
+      const b = document.createElement("button"); b.className = "btn"; b.textContent = title;
+      if (id === section) b.classList.add("btn-orange");
+      b.addEventListener("click", () => renderAccountingView(id)); tabs.appendChild(b);
+    }
+    try {
+      const [res, cat] = await Promise.all([fetchJSON("/receipts"), fetchJSON("/receipts/categories")]);
+      const items = res.items || []; const categories = cat.items || [];
+      const money = n => "$" + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+      const total = items.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      const month = new Date().toISOString().slice(0,7);
+      const monthly = items.filter(r => String(r.date || "").startsWith(month));
+      const monthTotal = monthly.reduce((sum,r) => sum + Number(r.amount || 0),0);
+      const make = (tag, text, parent=host) => { const node = document.createElement(tag); node.textContent = text; parent.appendChild(node); return node; };
+      host.innerHTML = "";
+      if (section === "overview") {
+        const stats = make("div", ""); stats.className="grid2";
+        for (const [label, value] of [["Total recorded expenses",money(total)],["This month",money(monthTotal)],["Saved receipts",String(items.length)],["Employees with receipts",String(new Set(items.map(r=>r.employee).filter(Boolean)).size)]]) {
+          const box = document.createElement("div"); box.className="card"; box.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`; stats.appendChild(box);
+        }
+        make("h3", "Spending by category");
+        const grouped = {}; items.forEach(r => { const k = r.category || "Other"; grouped[k] = (grouped[k]||0)+Number(r.amount||0); });
+        Object.entries(grouped).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
+        make("h3", "Spending by employee");
+        const employees = {}; items.forEach(r => { const k = r.employee || "Unassigned"; employees[k] = (employees[k]||0)+Number(r.amount||0); });
+        Object.entries(employees).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
+      } else if (section === "receipts") {
+        const bar = make("div", ""); bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px";
+        const search = document.createElement("input"); search.className="input"; search.placeholder="Search vendor, employee, category, receipt #"; bar.appendChild(search);
+        const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV"; bar.appendChild(exportBtn);
+        const list = make("div", "");
+        function draw() {
+          list.innerHTML="";
+          const q=search.value.trim().toLowerCase();
+          items.filter(r=>[r.vendor,r.employee,r.category,r.receipt_number,r.date].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
+            const line=document.createElement("div"); line.style.cssText="padding:10px 0;border-bottom:1px solid #ccc";
+            const name=document.createElement("strong"); name.textContent=`${r.date||""} — ${r.vendor||""} — ${money(r.amount)} — ${r.employee||""} (${r.category||"Other"})`;
+            const edit=document.createElement("button"); edit.className="btn"; edit.textContent="Edit"; edit.style.marginLeft="12px";
+            edit.addEventListener("click",()=>{
+              const editor=document.createElement("form"); editor.className="card";
+              for(const [key,label] of [["date","Date"],["employee","Employee"],["vendor","Vendor"],["amount","Amount"],["category","Category"],["card_last4","Card last 4"],["receipt_number","Receipt #"],["notes","Notes"]]){
+                const wrap=document.createElement("div"); const lbl=document.createElement("label"); lbl.className="label"; lbl.textContent=label; wrap.appendChild(lbl);
+                let input;
+                if(key==="category") { input=document.createElement("select"); [...new Set([...categories,r.category||"Other"])].forEach(c=>{const o=document.createElement("option");o.value=c;o.textContent=c;input.appendChild(o);}); }
+                else {input=document.createElement("input");input.type=key==="amount"?"number":key==="date"?"date":"text";if(key==="amount")input.step="0.01";}
+                input.className="input"; input.name=key; input.value=r[key]??"";wrap.appendChild(input);editor.appendChild(wrap);
+              }
+              const save=document.createElement("button");save.className="btn btn-orange";save.textContent="Save Changes";editor.appendChild(save);
+              const cancel=document.createElement("button");cancel.type="button";cancel.className="btn";cancel.textContent="Cancel";cancel.addEventListener("click",()=>editor.remove());editor.appendChild(cancel);
+              editor.addEventListener("submit",async e=>{e.preventDefault();save.disabled=true;try{const values=Object.fromEntries(new FormData(editor).entries());await fetchJSON(`/receipts/${encodeURIComponent(r.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(values)});await renderAccountingView("receipts");}catch(err){alert(`Could not save: ${err.message||err}`);save.disabled=false;}});
+              line.appendChild(editor);
+            });
+            const view=document.createElement("a");view.href=`/receipts/${encodeURIComponent(r.id)}/file`;view.target="_blank";view.rel="noopener";view.textContent="Open original";view.style.marginLeft="12px";
+            line.append(name,edit,view);list.appendChild(line);
+          });
+        }
+        search.addEventListener("input",draw);draw();
+      } else if (section === "categories") {
+        make("h3", "Expense categories");make("p", "Add categories here. Existing receipts retain their saved category.");
+        const list=make("div",categories.join(" • "));list.style.marginBottom="12px";
+        const input=document.createElement("input");input.className="input";input.placeholder="New category";host.appendChild(input);
+        const add=document.createElement("button");add.className="btn btn-orange";add.textContent="Add Category";host.appendChild(add);
+        add.addEventListener("click",async()=>{const name=input.value.trim();if(!name||categories.some(c=>c.toLowerCase()===name.toLowerCase()))return;try{await fetchJSON("/receipts/categories",{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({items:[...categories,name]})});renderAccountingView("categories");}catch(e){alert(e.message||e);}});
+      } else {
+        make("h3", section==="stock"?"Parts / Stock Receiving":"Accounts Receivable");
+        make("p", section==="stock"?"Coming in the next accounting phase: packing-slip scanning, quantities received, supplier and PO tracking. No inventory quantities have been inferred from receipts.":"Coming in the next accounting phase: invoice balances, payment tracking and aging. Existing invoices have not been treated as paid or unpaid without payment records.");
+      }
+    } catch(e) { host.textContent=`Unable to load Accounting: ${e.message||e}`; }
+    currentView={refresh:()=>renderAccountingView(section)};
+  }
+
   async function renderReceiptsView() {
     setNavActive(navFormsReceipts);
     setActiveChip("Receipts");
@@ -5093,6 +5174,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Amount ($)</div><input class="input" type="number" min="0" step="0.01" name="amount" required /></div>
           <div><div class="label">Card last 4 digits</div><input class="input" name="card_last4" maxlength="4" inputmode="numeric" pattern="[0-9]{4}" placeholder="1234" /></div>
           <div><div class="label">Receipt Number</div><input class="input" name="receipt_number" /></div>
+          <div><div class="label">Expense Category</div><select class="input" name="category" id="receipt_category"><option>Other</option></select></div>
         </div>
         <div class="label">Notes</div><textarea class="input" name="notes" rows="2"></textarea>
         <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required />
@@ -5108,6 +5190,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const form = card.querySelector("#receipt_submit_form");
     form.elements.date.value = new Date().toISOString().slice(0, 10);
     form.elements.employee.value = currentUser?.name || currentUser?.username || "";
+    try { const cats = await fetchJSON("/receipts/categories"); form.elements.category.innerHTML = ""; (cats.items || ["Other"]).forEach(c => { const o = document.createElement("option"); o.value = c; o.textContent = c; form.elements.category.appendChild(o); }); form.elements.category.value = "Other"; } catch(e) { console.warn("Receipt categories unavailable", e); }
     const receiptFileInput = form.elements.file;
     receiptFileInput.addEventListener("change", async () => {
       const file = receiptFileInput.files?.[0];
@@ -5124,7 +5207,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
         const fields = result.fields || {};
         const populated = [];
-        for (const key of ["vendor", "date", "amount", "receipt_number"]) {
+        for (const key of ["vendor", "date", "amount", "receipt_number", "card_last4"]) {
           if (fields[key] !== undefined && fields[key] !== null && String(fields[key]).trim() && !String(form.elements[key]?.value || "").trim()) {
             form.elements[key].value = String(fields[key]);
             populated.push(key.replace("_", " "));
@@ -5155,7 +5238,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           heading.textContent = `${item.date || ""} — ${item.vendor || ""} — $${Number(item.amount || 0).toFixed(2)} — ${item.employee || ""}`;
           const detail = document.createElement("div");
           detail.className = "hint";
-          detail.textContent = `Card •••• ${item.card_last4 || "N/A"} | Receipt # ${item.receipt_number || "N/A"} | ${item.notes || ""}`;
+          detail.textContent = `${item.category || "Other"} | Card •••• ${item.card_last4 || "N/A"} | Receipt # ${item.receipt_number || "N/A"} | ${item.notes || ""}`;
           const link = document.createElement("a");
           link.href = `/receipts/${encodeURIComponent(item.id)}/file`;
           link.target = "_blank";
@@ -10240,6 +10323,7 @@ function renderSaddlebackView() {
 
   if (navDataCenter)
   if (navDataCenter) navDataCenter.addEventListener("click", renderDataCenterView);
+  if (navAccounting) navAccounting.addEventListener("click", () => renderAccountingView());
   if (navPayroll) navPayroll.addEventListener("click", renderPayrollView);
   if (navEmployees) navEmployees.addEventListener("click", renderEmployeesView);
   if (navDataUpload) navDataUpload.addEventListener("click", renderDataUploadView);

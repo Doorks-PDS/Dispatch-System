@@ -11,11 +11,14 @@ from threading import Lock
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, Header, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+import csv
+import io
 
 router = APIRouter(prefix="/receipts", tags=["receipts"])
 _lock = Lock()
 MAX_SIZE = 12 * 1024 * 1024
+DEFAULT_CATEGORIES = ["Parts & Materials", "Tools & Equipment", "Fuel", "Vehicle Maintenance", "Office Supplies", "Shipping & Freight", "Meals", "Travel", "Stock / Inventory", "Business & Licensing Fees", "Other"]
 ALLOWED = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".pdf"}
 
 
@@ -55,7 +58,7 @@ async def create_receipt(
     request: Request,
     date: str = Form(...), employee: str = Form(...), vendor: str = Form(...),
     amount: float = Form(...), card_last4: str = Form(""), receipt_number: str = Form(""),
-    notes: str = Form(""), file: UploadFile = File(...),
+    notes: str = Form(""), category: str = Form("Other"), file: UploadFile = File(...),
     x_api_key: Optional[str] = Header(default=None),
 ):
     _require(request, x_api_key)
@@ -81,7 +84,7 @@ async def create_receipt(
         "id": item_id, "date": date.strip(), "employee": employee.strip(),
         "vendor": vendor.strip(), "amount": round(amount, 2),
         "card_last4": card_last4, "receipt_number": receipt_number.strip()[:120],
-        "notes": notes.strip()[:2000], "filename": original,
+        "notes": notes.strip()[:2000], "category": category.strip()[:100] or "Other", "filename": original,
         "stored_file": filename, "created_at": datetime.now(timezone.utc).isoformat(),
     }
     with _lock:
@@ -97,6 +100,96 @@ async def create_receipt(
             target.unlink(missing_ok=True)
             raise
     return {"ok": True, "item": record}
+
+
+def _office_only(request: Request):
+    role = str(getattr(request.state, "auth_role", "") or "")
+    if role not in {"office", "office_admin"}:
+        raise HTTPException(403, "Accounting is restricted to office users")
+
+
+def _categories_path(request: Request):
+    base, _ = _paths(request)
+    return base / "categories.json"
+
+
+@router.get("/categories")
+def get_categories(request: Request, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    path = _categories_path(request)
+    if not path.exists():
+        return {"ok": True, "items": DEFAULT_CATEGORIES}
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return {"ok": True, "items": data if isinstance(data, list) else DEFAULT_CATEGORIES}
+
+
+@router.put("/categories")
+async def update_categories(request: Request, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    _office_only(request)
+    body = await request.json()
+    values = body.get("items", [])
+    if not isinstance(values, list) or len(values) > 100:
+        raise HTTPException(400, "Invalid categories")
+    items = list(dict.fromkeys(str(x).strip()[:100] for x in values if str(x).strip()))
+    if not items:
+        raise HTTPException(400, "At least one category is required")
+    path = _categories_path(request)
+    with _lock:
+        temp = path.with_suffix(".tmp")
+        temp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+        temp.replace(path)
+    return {"ok": True, "items": items}
+
+
+@router.patch("/{receipt_id}")
+async def edit_receipt(request: Request, receipt_id: str, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    _office_only(request)
+    changes = await request.json()
+    allowed = {"date", "employee", "vendor", "amount", "card_last4", "receipt_number", "notes", "category"}
+    if not isinstance(changes, dict) or any(k not in allowed for k in changes):
+        raise HTTPException(400, "Invalid receipt fields")
+    base, index = _paths(request)
+    with _lock:
+        items = _load(index)
+        item = next((x for x in items if x.get("id") == receipt_id), None)
+        if item is None:
+            raise HTTPException(404, "Receipt not found")
+        for key, value in changes.items():
+            if key == "amount":
+                try:
+                    value = round(float(value), 2)
+                except (ValueError, TypeError):
+                    raise HTTPException(400, "Invalid amount")
+                if value < 0 or value > 10000000:
+                    raise HTTPException(400, "Invalid amount")
+            else:
+                value = str(value or "").strip()[:2000 if key == "notes" else 120]
+            if key == "card_last4" and value and not re.fullmatch(r"\d{4}", value):
+                raise HTTPException(400, "Card must be last four digits only")
+            if key in {"date", "employee", "vendor"} and not value:
+                raise HTTPException(400, f"{key} is required")
+            item[key] = value
+        item["updated_at"] = datetime.now(timezone.utc).isoformat()
+        tmp = index.with_suffix(".tmp")
+        tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+        tmp.replace(index)
+    return {"ok": True, "item": item}
+
+
+@router.get("/export.csv")
+def export_receipts(request: Request, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    _office_only(request)
+    _, index = _paths(request)
+    fields = ["date", "employee", "vendor", "category", "amount", "card_last4", "receipt_number", "notes", "created_at", "updated_at", "id"]
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
+    writer.writeheader()
+    for item in _load(index):
+        writer.writerow({k: ("'" + str(item.get(k, "")) if str(item.get(k, "")).startswith(("=", "+", "-", "@")) and k != "amount" else item.get(k, "")) for k in fields})
+    return Response(content=output.getvalue(), media_type="text/csv", headers={"Content-Disposition": "attachment; filename=doorks_receipts.csv"})
 
 
 @router.get("/{receipt_id}/file")
