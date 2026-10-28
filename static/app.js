@@ -5258,7 +5258,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
   async function renderAccountingRecords(section, host) {
     const kind = section === "stock" ? "receiving" : section;
     if(section==="statements")fetchJSON("/receipts/categories").then(d=>{window.__doorksAcctCategories=d.items||[];}).catch(()=>{});
-    const titles = {receiving:"Inventory & Intake",statements:"Credit Card Statements",receivables:"Accounts Receivable"};
+    const titles = {receiving:"Inventory & Intake",statements:"Statements",receivables:"Accounts Receivable"};
     host.innerHTML="";
     const h=document.createElement("h3");h.textContent=titles[kind];host.appendChild(h);
     const note=document.createElement("p");note.className="hint";
@@ -5347,11 +5347,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const upload=document.createElement("input");upload.type="file";upload.accept=".jpg,.jpeg,.png,.webp,.pdf";form.appendChild(upload);form._upload=upload;
     }
     const save=document.createElement("button");save.className="btn btn-orange";save.textContent="Save Record";form.appendChild(save);
+    const searchWrap=document.createElement("label");searchWrap.className="label";searchWrap.style.cssText="display:grid;gap:7px;margin:20px 0 12px";
+    searchWrap.textContent=`Search saved ${titles[kind]}`;
+    const savedSearch=document.createElement("input");savedSearch.type="search";savedSearch.className="input";
+    savedSearch.placeholder=kind==="receiving"?"Supplier, PO, job, part number, description, status…":kind==="statements"?"Issuer, vendor, card, amount, transaction, category…":"Customer, invoice, job, date, amount, notes…";
+    searchWrap.appendChild(savedSearch);host.appendChild(searchWrap);
     const list=document.createElement("div");host.appendChild(list);
-    const draw=async()=>{
-      const res=await fetchJSON(`/accounting/${kind}`);list.innerHTML="";
-      const heading=document.createElement("h4");heading.textContent=`Saved ${titles[kind]}`;list.appendChild(heading);
-      for(const item of res.items||[]){
+    let cachedItems=[];
+    const drawSaved=()=>{list.innerHTML="";
+      // The saved section heading sits above the search field.
+      const q=savedSearch.value.trim().toLowerCase();
+      const matching=cachedItems.filter(item=>!q||JSON.stringify(item).toLowerCase().includes(q));
+      const count=document.createElement("p");count.className="hint";count.textContent=`Showing ${matching.length} of ${cachedItems.length} saved records`;
+      list.appendChild(count);
+      if(!matching.length){const empty=document.createElement("p");empty.className="hint";empty.textContent="No matching saved records.";list.appendChild(empty);}
+      for(const item of matching){
         const row=document.createElement("div");row.className="card";row.style.marginBottom="8px";
         const summary=document.createElement("strong");summary.textContent=kind==="receiving"?`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`:kind==="statements"?`${item.document_type||"Credit Card Statement"} — ${item.issuer||""} ${item.period_start||""} — ${item.period_end||""} (${(item.transactions||[]).length} line items)`: `${item.customer||""} Invoice ${item.invoice_number||""} — $${Number(item.invoice_total||0).toFixed(2)} / Paid $${Number(item.paid_amount||0).toFixed(2)}`;
         row.appendChild(summary);
@@ -5448,6 +5458,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         list.appendChild(row);
       }
     };
+    const draw=async()=>{const res=await fetchJSON(`/accounting/${kind}`);cachedItems=Array.isArray(res.items)?res.items:[];drawSaved();};
+    savedSearch.addEventListener("input",drawSaved);
     form.addEventListener("submit",async event=>{
       event.preventDefault();save.disabled=true;
       try{
@@ -5459,6 +5471,36 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         form.reset();if(lines)lines.value="[]";delete form.dataset.editId;save.textContent="Save Record";await draw();
       }catch(e){alert(`Could not save: ${e.message||e}`);}finally{save.disabled=false;}
     });
+    // 2.0: saved records and search come first; new entry stays collapsed until requested.
+    const newRecordPanel=document.createElement("details");
+    newRecordPanel.style.cssText="margin:12px 0";
+    const newRecordTitle=document.createElement("summary");newRecordTitle.textContent="Record editor";
+    newRecordTitle.style.display="none";newRecordPanel.appendChild(newRecordTitle);
+    form.parentNode.insertBefore(newRecordPanel,form);newRecordPanel.appendChild(form);
+    const savedTop=document.createElement("div");savedTop.style.cssText="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin:12px 0";
+    const savedHeading=document.createElement("h4");savedHeading.textContent=`Saved ${titles[kind]}`;savedHeading.style.margin="0";savedTop.appendChild(savedHeading);
+    const newBtn=document.createElement("button");newBtn.type="button";newBtn.className="btn btn-orange";newBtn.textContent=kind==="receiving"?"+ New Intake":kind==="statements"?"+ New Statement":"+ New Receivable";
+    const uploadBtn=document.createElement("button");uploadBtn.type="button";uploadBtn.className="btn";uploadBtn.textContent="Upload Document";
+    const btns=document.createElement("div");btns.style.cssText="display:flex;gap:8px;flex-wrap:wrap";btns.append(newBtn,uploadBtn);savedTop.appendChild(btns);
+    host.insertBefore(savedTop,searchWrap);
+    host.insertBefore(searchWrap,newRecordPanel);
+    host.insertBefore(list,newRecordPanel);
+    const openEditor=(uploadMode=false)=>{
+      newRecordPanel.open=true;
+      if(!form.dataset.editId){form.reset();if(lines)lines.value="[]";save.textContent="Save Record";}
+      form._upload?.parentElement?.scrollIntoView?.({behavior:"smooth",block:"center"});
+      if(uploadMode){form._upload?.focus();form._upload?.click();}
+      else newRecordPanel.scrollIntoView({behavior:"smooth",block:"start"});
+    };
+    newBtn.addEventListener("click",()=>openEditor(false));
+    uploadBtn.addEventListener("click",()=>openEditor(true));
+    // Edit buttons in saved cards already use the existing form; reveal it first.
+    list.addEventListener("click",event=>{if(event.target?.textContent==="Edit")newRecordPanel.open=true;},true);
+    const summaries=document.createElement("details");summaries.style.cssText="margin:10px 0";
+    const sumLabel=document.createElement("summary");sumLabel.textContent="Dashboard breakdown & reporting details";sumLabel.style.cssText="cursor:pointer;font-weight:700;padding:10px";summaries.appendChild(sumLabel);
+    const toMove=[...host.children].filter(el=>el!==h&&el!==note&&el!==actions&&el!==savedTop&&el!==searchWrap&&el!==list&&el!==newRecordPanel);
+    for(const el of toMove)summaries.appendChild(el);
+    host.appendChild(summaries);
     await draw();
   }
 
@@ -5606,6 +5648,24 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             controls.append(edit,view,del);line.append(name,controls);list.appendChild(line);
           });
         }
+        // Receipts: saved records first, compact action buttons, optional summaries.
+        const receiptActions=document.createElement("div");receiptActions.style.cssText="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0";
+        const newReceipt=document.createElement("button");newReceipt.type="button";newReceipt.className="btn btn-orange";newReceipt.textContent="+ New Receipt";
+        const uploadReceipt=document.createElement("button");uploadReceipt.type="button";uploadReceipt.className="btn";uploadReceipt.textContent="Upload Receipt / Read with AI";
+        receiptActions.append(newReceipt,uploadReceipt);
+        host.insertBefore(receiptActions,bar);
+        host.insertBefore(bar,dashboard);
+        host.insertBefore(list,dashboard);
+        const summaryDetails=document.createElement("details");summaryDetails.style.margin="12px 0";
+        const summaryToggle=document.createElement("summary");summaryToggle.textContent="Receipt dashboard & category breakdown";summaryToggle.style.cssText="cursor:pointer;font-weight:700;padding:10px";summaryDetails.appendChild(summaryToggle);
+        const breakdownNodes=[];let next=categoryTitle.nextSibling;
+        while(next&&next!==uploadBox){const following=next.nextSibling;breakdownNodes.push(next);next=following;}
+        summaryDetails.append(dashboard,categoryTitle,...breakdownNodes);
+        host.appendChild(summaryDetails);
+        uploadBox.open=false;uploadTitle.textContent="Receipt editor / AI upload";
+        newReceipt.addEventListener("click",()=>{uploadBox.open=true;uploadBox.scrollIntoView({behavior:"smooth",block:"start"});uploadForm.elements.vendor.focus();});
+        uploadReceipt.addEventListener("click",()=>{uploadBox.open=true;uploadBox.scrollIntoView({behavior:"smooth",block:"start"});uploadForm.elements.file.click();});
+        search.placeholder="Search saved receipts: vendor, date, employee, amount, card, category, notes…";
         search.addEventListener("input",draw);draw();
       } else if (section === "categories") {
         make("h3", "Expense categories");make("p", "Add categories here. Existing receipts retain their saved category.");
