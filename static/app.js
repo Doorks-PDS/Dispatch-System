@@ -5237,7 +5237,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const qty=(key)=>parts.reduce((s,p)=>s+Number(p[key]||0),0);
           const info=document.createElement("div");info.style.cssText="display:flex;gap:12px;flex-wrap:wrap;margin:10px 0;color:#586477;font-size:13px";
           for(const [label,value] of [["Supplier",item.supplier||"—"],["PO",item.po_number||"—"],["Job",item.job_number||"—"],["Date",item.date||"—"],["Status",item.status||"Pending review"]]){
-            const tag=document.createElement("span");const b=document.createElement("strong");b.textContent=label+": ";tag.append(b,document.createTextNode(value));info.appendChild(tag);
+            const tag=document.createElement("span");const b=document.createElement("strong");b.textContent=label+": ";tag.append(b,document.createTextNode(value));if(label==="Status")tag.dataset.receivingStatus="1";info.appendChild(tag);
           }
           row.appendChild(info);
           const summaryLine=document.createElement("p");summaryLine.style.cssText="margin:8px 0;font-size:13px";
@@ -5249,7 +5249,50 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse;font-size:13px;margin-top:8px";
           const cols=[["part_number","Part #"],["description","Description"],["quantity_ordered","Ordered"],["quantity_shipped","Shipped"],["quantity_backordered","Backordered"],["quantity_received","Received"]];
           const head=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:8px;border-bottom:1px solid #ccd3dc";head.appendChild(th);}table.appendChild(head);
-          for(const p of parts){const tr=document.createElement("tr");for(const [key] of cols){const td=document.createElement("td");td.textContent=String(p[key]??"—");td.style.cssText="padding:8px;border-bottom:1px solid #e3e7eb";tr.appendChild(td);}table.appendChild(tr);}
+          // Inline receiving controls persist through the existing accounting PATCH endpoint.
+          // Checkboxes are quick toggles; numeric inputs support multi-unit/partial deliveries.
+          let savingLine=false;
+          const saveReceiving=async(changedLine, key, value, control)=>{
+            if(savingLine)return;
+            const previous=Number(changedLine[key]||0);
+            changedLine[key]=value;
+            const allReceived=parts.length>0&&parts.every(p=>Number(p.quantity_ordered||0)>0&&Number(p.quantity_received||0)>=Number(p.quantity_ordered||0));
+            const anyActivity=parts.some(p=>Number(p.quantity_received||0)>0||Number(p.quantity_shipped||0)>0||Number(p.quantity_backordered||0)>0);
+            const nextStatus=allReceived?"Received":anyActivity?"Partial":"Pending review";
+            savingLine=true;control.disabled=true;
+            try{
+              const result=await fetchJSON(`/accounting/receiving/${encodeURIComponent(item.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...item,lines:parts,status:nextStatus})});
+              item.lines=result.item.lines;item.status=result.item.status;
+              summary.textContent=`${item.date||""} ${item.supplier||""} PO ${item.po_number||""} (${item.status||""})`;
+              summaryLine.textContent=`${parts.length} part lines · Ordered ${qty("quantity_ordered")} · Shipped ${qty("quantity_shipped")} · Backordered ${qty("quantity_backordered")} · Recorded received ${qty("quantity_received")}`;
+              info.querySelector('[data-receiving-status]')?.replaceChildren(document.createTextNode(`Status: ${item.status}`));
+              control.title="Saved to Render";
+            }catch(e){changedLine[key]=previous;alert(`Could not save quantity: ${e.message||e}`);}
+            finally{savingLine=false;control.disabled=false;}
+          };
+          for(const p of parts){
+            const tr=document.createElement("tr");
+            for(const [key] of cols){
+              const td=document.createElement("td");td.style.cssText="padding:8px;border-bottom:1px solid #e3e7eb";
+              if(["quantity_shipped","quantity_backordered","quantity_received"].includes(key)){
+                const holder=document.createElement("label");holder.style.cssText="display:flex;align-items:center;gap:5px;white-space:nowrap";
+                const cb=document.createElement("input");cb.type="checkbox";cb.checked=Number(p[key]||0)>0;cb.setAttribute("aria-label",`${key.replace('quantity_','')} ${p.part_number||p.description||'part'}`);
+                const count=document.createElement("input");count.type="number";count.min="0";count.step="1";count.className="input";count.style.cssText="width:68px;padding:4px";count.value=String(p[key]||0);count.setAttribute("aria-label",`${key.replace('quantity_','')} quantity`);
+                cb.addEventListener("change",async()=>{
+                  const amount=cb.checked?Math.max(1,Math.min(Number(p.quantity_ordered||1),Number(p[key]||1))):0;
+                  await saveReceiving(p,key,amount,cb);cb.checked=Number(p[key]||0)>0;count.value=String(p[key]||0);
+                });
+                count.addEventListener("change",async()=>{
+                  const amount=Number(count.value);
+                  if(!Number.isFinite(amount)||amount<0){count.value=String(p[key]||0);return;}
+                  await saveReceiving(p,key,amount,count);cb.checked=Number(p[key]||0)>0;count.value=String(p[key]||0);
+                });
+                holder.append(cb,count);td.appendChild(holder);
+              }else td.textContent=String(p[key]??"—");
+              tr.appendChild(td);
+            }
+            table.appendChild(tr);
+          }
           wrap.appendChild(table);detail.appendChild(wrap);row.appendChild(detail);
           if(item.notes){const notes=document.createElement("p");notes.style.cssText="font-size:13px;white-space:pre-wrap;color:#586477";notes.textContent=item.notes;row.appendChild(notes);}
         }
@@ -5374,6 +5417,33 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         for(const [label,value] of [["Receipts in period",String(periodReceipts.length)],["Expenses in period",money(total)],["Employees",String(new Set(periodReceipts.map(r=>r.employee).filter(Boolean)).size)],["Categories",String(Object.keys(byCategory).length)]]){const c=document.createElement("div");c.className="card";c.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`;dashboard.appendChild(c);}
         const categoryTitle=make("h4","Spending by category");
         for(const [name,value] of Object.entries(byCategory).sort((a,b)=>b[1]-a[1]))make("div",`${name}: ${money(value)}`);
+        // Office receipt submission uses the same /receipts storage and AI extraction as Forms.
+        const uploadBox=document.createElement("details");uploadBox.className="card";uploadBox.style.margin="12px 0";
+        const uploadTitle=document.createElement("summary");uploadTitle.textContent="Upload new receipt (AI assisted)";uploadTitle.style.cssText="font-weight:700;cursor:pointer";uploadBox.appendChild(uploadTitle);
+        const uploadForm=document.createElement("form");uploadForm.style.marginTop="12px";
+        uploadForm.innerHTML=`<div class="grid2"><label>Date<input class="input" type="date" name="date" required></label><label>Employee<input class="input" name="employee" required></label><label>Vendor<input class="input" name="vendor" required></label><label>Amount ($)<input class="input" type="number" min="0" step="0.01" name="amount" required></label><label>Card last 4<input class="input" name="card_last4" maxlength="4" pattern="[0-9]{4}"></label><label>Receipt #<input class="input" name="receipt_number"></label><label>Category<select class="input" name="category"></select></label></div><label>Notes<textarea class="input" name="notes" rows="2"></textarea></label><label>Photo / PDF<input class="input" type="file" name="file" accept="image/*,application/pdf" required></label><p class="hint" data-receipt-status>Select a file for AI reading. Review before saving.</p><button class="btn btn-orange" type="submit">Save Receipt</button>`;
+        uploadBox.appendChild(uploadForm);host.appendChild(uploadBox);
+        const receiptStatus=uploadForm.querySelector('[data-receipt-status]');
+        uploadForm.elements.date.value=new Date().toISOString().slice(0,10);
+        uploadForm.elements.employee.value=currentUser?.name||currentUser?.username||"";
+        const receiptCategories=uploadForm.elements.category;
+        for(const c of categories||["Other"]){const o=document.createElement("option");o.value=c;o.textContent=c;receiptCategories.appendChild(o);}
+        uploadForm.elements.file.addEventListener("change",async()=>{
+          const file=uploadForm.elements.file.files?.[0];if(!file)return;
+          receiptStatus.textContent="Reading receipt with AI…";
+          try{const fd=new FormData();fd.append("file",file);const response=await fetch("/receipts/extract",{method:"POST",credentials:"same-origin",body:fd});const data=await response.json();if(!response.ok)throw Error(data.detail||"Could not read receipt");
+            if(uploadForm.elements.file.files?.[0]!==file)return;
+            const fields=data.fields||{};
+            for(const k of ["vendor","amount","receipt_number","card_last4"]){if(fields[k]&&!uploadForm.elements[k].value)uploadForm.elements[k].value=String(fields[k]);}
+            if(fields.date&&uploadForm.elements.date.value===new Date().toISOString().slice(0,10))uploadForm.elements.date.value=fields.date;
+            receiptStatus.textContent="AI extraction complete. Check all values against the receipt before saving.";
+          }catch(e){receiptStatus.textContent=`AI unavailable: ${e.message||e}. Enter details manually.`;}
+        });
+        uploadForm.addEventListener("submit",async(e)=>{
+          e.preventDefault();const btn=uploadForm.querySelector('button[type="submit"]');btn.disabled=true;receiptStatus.textContent="Saving receipt…";
+          try{const response=await fetch("/receipts",{method:"POST",credentials:"same-origin",body:new FormData(uploadForm)});const data=await response.json();if(!response.ok)throw Error(data.detail||"Save failed");await renderAccountingView("receipts");}
+          catch(err){receiptStatus.textContent=`Could not save: ${err.message||err}`;}finally{btn.disabled=false;}
+        });
         const bar = make("div", ""); bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px";
         const search = document.createElement("input"); search.className="input"; search.placeholder="Search vendor, employee, category, receipt #"; bar.appendChild(search);
         const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV"; bar.appendChild(exportBtn);
