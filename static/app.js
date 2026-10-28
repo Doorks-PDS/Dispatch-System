@@ -25,18 +25,7 @@
   const navTakeoffs = el("navTakeoffs");
   let navFormsSignOff = el("navFormsSignOff");
   let navFormsReceipts = el("navFormsReceipts");
-  // Bind the static Forms navigation immediately, not after all other startup work.
-  // Function declarations are hoisted, so the view is available here.
-  if (navFormsReceipts) {
-    navFormsReceipts.addEventListener("click", (event) => {
-      event.preventDefault();
-      renderReceiptsView().catch(err => {
-        console.error("Receipts view failed", err);
-        alert(`Unable to open Receipts: ${err.message || err}`);
-      });
-    });
-  }
- 
+
   const navJobFlow = el("navJobFlow");
   let navToDoList = el("navToDoList");
   const navEstimatePage = el("navEstimatePage");
@@ -76,19 +65,6 @@
     }
   }
  
-  if (!navFormsReceipts) {
-    const formsNavCol = document.querySelector("#formsBody .navcol");
-    if (formsNavCol) {
-      const btn = document.createElement("button");
-      btn.className = "navbtn";
-      btn.id = "navFormsReceipts";
-      btn.innerHTML = `<span>Receipts</span><small>Upload / History</small>`;
-      if (navFormsTimeCard && navFormsTimeCard.nextSibling) formsNavCol.insertBefore(btn, navFormsTimeCard.nextSibling);
-      else formsNavCol.appendChild(btn);
-      navFormsReceipts = btn;
-    }
-  }
-
   if (!navToDoList) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
     if (jobsNavCol) {
@@ -418,8 +394,17 @@
     localStorage.setItem("doorks_billing_terms", JSON.stringify(BILLING_TERMS_OPTIONS));
   }
   function applyPricingBillingSettings(pricing = {}) {
-    if (Array.isArray(pricing.tax_cities) && pricing.tax_cities.length) saveBillingTaxOptions(pricing.tax_cities);
-    if (Array.isArray(pricing.billing_terms) && pricing.billing_terms.length) saveBillingTermsOptions(pricing.billing_terms);
+    if (Array.isArray(pricing.tax_cities) && pricing.tax_cities.length) {
+      const incoming = pricing.tax_cities.map(x => ({ city: String(x.city || "").trim(), rate: Number(x.rate || 0) })).filter(x => x.city);
+      const legacyCities = ["No Sales Tax", "Default / San Diego", "San Diego", "Escondido"];
+      const isLegacySubset = incoming.length === 4 && incoming.every((x, i) => x.city === legacyCities[i]);
+      // The original backend seeded only four cities; never let that old default
+      // replace the complete preexisting city/rate list from Doorks.
+      SALES_TAX_OPTIONS = isLegacySubset ? DEFAULT_SALES_TAX_OPTIONS.map(x => ({ ...x })) : incoming;
+    }
+    if (Array.isArray(pricing.billing_terms) && pricing.billing_terms.length) {
+      BILLING_TERMS_OPTIONS = pricing.billing_terms.map(String).filter(Boolean);
+    }
   }
   function inferTaxCityFromAddress(address) {
     const text = String(address || "").toLowerCase();
@@ -606,19 +591,6 @@
         </div>
         <div class="hint" style="margin-top:10px;">This creates a live dispatch from the legacy job so it appears on the calendar and can be edited like a normal dispatch.</div>
       `;
-
-      // Existing saved forms use a separate editor from new forms.
-      // Give both workflows the same attachment and save-review controls.
-      const editExtras = document.createElement("div");
-      editExtras.style.marginTop = "12px";
-      editExtras.innerHTML = `<div class="label">Add Photos / Files (optional)</div>
-        <input class="input" type="file" id="ef_files" multiple accept="image/*,application/pdf" />
-        <div class="hint">New uploads are attached to this saved form.</div>
-        <div class="label" style="margin-top:12px">Before Saving</div>
-        <label style="display:block"><input type="checkbox" id="ef_confirm_review" /> I reviewed the form details and am ready to save.</label>
-        <label style="display:block"><input type="checkbox" id="ef_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
-        <label style="display:block"><input type="checkbox" id="ef_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
-      card.appendChild(editExtras);
 
       const actions = document.createElement("div");
       actions.style.display = "flex";
@@ -2448,6 +2420,19 @@ function renderAttachmentSection(titleText, items, options = {}) {
       syncEditTimeOnsite();
       updateRollupLunchVisibility();
  
+      // Existing saved forms use a separate editor from new forms.
+      // Give both workflows the same attachment and save-review controls.
+      const editExtras = document.createElement("div");
+      editExtras.style.marginTop = "12px";
+      editExtras.innerHTML = `<div class="label">Add Photos / Files (optional)</div>
+        <input class="input" type="file" id="ef_files" multiple accept="image/*,application/pdf" />
+        <div class="hint">New uploads are attached to this saved form.</div>
+        <div class="label" style="margin-top:12px">Before Saving</div>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_review" /> I reviewed the form details and am ready to save.</label>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_signoff" /> Required customer sign-off completed, or not applicable.</label>
+        <label style="display:block"><input type="checkbox" id="ef_confirm_checkin" /> Check-in / check-out completed, or not applicable.</label>`;
+      card.appendChild(editExtras);
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
@@ -5077,7 +5062,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Receipt Number</div><input class="input" name="receipt_number" /></div>
         </div>
         <div class="label">Notes</div><textarea class="input" name="notes" rows="2"></textarea>
-        <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required />
+        <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required /></div>
         <div style="margin-top:12px;"><button class="btn btn-orange" type="submit">Save Receipt</button></div>
       </form>
       <div id="receipt_feedback" class="hint" style="margin-top:8px;"></div>`;
@@ -9319,6 +9304,14 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
   if (navTakeoffs) navTakeoffs.addEventListener("click", renderTakeoffsView);
+  // Receipts is a static Forms tab in templates/ui.html; wire it beside the other tabs.
+  if (navFormsReceipts) navFormsReceipts.addEventListener("click", (event) => {
+    event.preventDefault();
+    Promise.resolve().then(() => renderReceiptsView()).catch(err => {
+      console.error("Receipts view failed", err);
+      alert(`Unable to open Receipts: ${err.message || err}`);
+    });
+  });
   if (navFormsSignOff) navFormsSignOff.addEventListener("click", renderSignOffLibraryView);
  
   if (navDataCenter) {
