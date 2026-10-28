@@ -3633,15 +3633,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       speechPanel.style.cssText="margin-top:12px;padding:12px";
       const speechTitle=document.createElement("strong");speechTitle.textContent="Moses Form Assistant — Voice Dictation";speechPanel.appendChild(speechTitle);
       const speechHint=document.createElement("p");speechHint.className="hint";
-      speechHint.textContent="Dictate into a field, review the transcript, then save normally. Browser microphone permission required; speech recognition availability depends on the browser.";speechPanel.appendChild(speechHint);
+      speechHint.textContent="Speak naturally about work performed, parts used, and recommendations. Review the form before saving.";speechPanel.appendChild(speechHint);
       const speechSelect=document.createElement("select");speechSelect.className="input";
-      for(const [id,label] of speechFields){if(!card.querySelector(`#${id}`))continue;const o=document.createElement("option");o.value=id;o.textContent=label;speechSelect.appendChild(o);}speechPanel.appendChild(speechSelect);
+      for(const [id,label] of speechFields){if(!card.querySelector(`#${id}`))continue;const o=document.createElement("option");o.value=id;o.textContent=label;speechSelect.appendChild(o);}// Single voice input; no field selector for technicians.
+      speechSelect.style.display="none";
       const speechBtn=document.createElement("button");speechBtn.type="button";speechBtn.className="btn";speechBtn.textContent="Start Dictation";speechPanel.appendChild(speechBtn);
       if(!speechCtor){speechBtn.disabled=true;speechHint.textContent="Voice dictation is not available in this browser. You can still type into the form.";}
       else {let recognition=null;let active=false;
         speechBtn.addEventListener("click",()=>{
           if(active){recognition?.stop();return;}
-          const target=card.querySelector(`#${speechSelect.value}`);if(!target)return;
+          const target=card.querySelector(isSalesLead?"#cf_lead_recs":"#cf_tech_notes");if(!target)return;
           recognition=new speechCtor();recognition.lang="en-US";recognition.continuous=false;recognition.interimResults=false;
           recognition.onresult=(e)=>{const words=Array.from(e.results).map(r=>r[0]?.transcript||"").join(" ").trim();if(words){target.value=[target.value.trim(),words].filter(Boolean).join(" ");target.dispatchEvent(new Event("input",{bubbles:true}));}};
           recognition.onerror=(e)=>{speechHint.textContent=`Dictation unavailable: ${e.error||"microphone error"}. Type normally or try again.`;};
@@ -3649,7 +3650,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           try{recognition.start();active=true;speechBtn.textContent="Stop Dictation";}catch(e){speechHint.textContent=`Could not start dictation: ${e.message||e}`;}
         });
       }
-      card.appendChild(speechPanel);
+      card.insertBefore(speechPanel,card.firstChild);
       const uploadPanel = document.createElement("div");
       uploadPanel.style.cssText = "margin-top:12px;padding:12px;border:1px solid #cbd5e1;border-radius:8px";
       uploadPanel.innerHTML = `<div class="label">Photos / Files (optional)</div><input class="input" type="file" id="cf_files" multiple accept="image/*,application/pdf" /><div class="hint">Attachments are linked to this saved form.</div>`;
@@ -5106,6 +5107,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
   async function renderAccountingRecords(section, host) {
     const kind = section === "stock" ? "receiving" : section;
+    if(section==="statements")fetchJSON("/receipts/categories").then(d=>{window.__doorksAcctCategories=d.items||[];}).catch(()=>{});
     const titles = {receiving:"Inventory & Intake",statements:"Credit Card Statements",receivables:"Accounts Receivable"};
     host.innerHTML="";
     const h=document.createElement("h3");h.textContent=titles[kind];host.appendChild(h);
@@ -5117,11 +5119,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     if(kind==="receivables") {
       const records=await fetchJSON("/accounting/receivables");const items=records.items||[];
       const balance=r=>Math.max(0,Number(r.invoice_total||0)-Number(r.paid_amount||0));
-      const total=items.reduce((sum,r)=>sum+Number(r.invoice_total||0),0);
-      const paid=items.reduce((sum,r)=>sum+Number(r.paid_amount||0),0);
-      const outstanding=items.reduce((sum,r)=>sum+balance(r),0);
+      const periodItems=items.filter(r=>window.__doorksAcctInPeriod?.(r.invoice_date||r.due_date));
+      const total=periodItems.reduce((sum,r)=>sum+Number(r.invoice_total||0),0);
+      const paid=periodItems.reduce((sum,r)=>sum+Number(r.paid_amount||0),0);
+      const outstanding=periodItems.reduce((sum,r)=>sum+balance(r),0);
       const today=new Date().toISOString().slice(0,10);
-      const overdue=items.filter(r=>r.due_date&&r.due_date<today&&balance(r)>0);
+      const overdue=periodItems.filter(r=>r.due_date&&r.due_date<today&&balance(r)>0);
       const stats=document.createElement("div");stats.className="grid2";
       for(const [label,value] of [["Invoiced",total],["Payments recorded",paid],["Outstanding",outstanding],["Overdue",overdue.reduce((sum,r)=>sum+balance(r),0)]]){
         const card=document.createElement("div");card.className="card";const cap=document.createElement("div");cap.className="hint";cap.textContent=label;const val=document.createElement("h2");val.textContent="$"+value.toFixed(2);card.append(cap,val);stats.appendChild(card);
@@ -5132,7 +5135,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     // Section-specific dashboards use saved records, not unverified AI extraction previews.
     if(kind==="statements" || kind==="receiving") {
       const snapshot=await fetchJSON(`/accounting/${kind}`);
-      const records=snapshot.items||[];
+      const records=(snapshot.items||[]).filter(r=>window.__doorksAcctInPeriod?.(kind==="statements"?(r.period_end||r.period_start):r.date));
       const stats=document.createElement("div");stats.className="grid2";
       const addStat=(label,value)=>{const c=document.createElement("div");c.className="card";const t=document.createElement("div");t.className="hint";t.textContent=label;const v=document.createElement("h2");v.textContent=value;c.append(t,v);stats.appendChild(c);};
       if(kind==="statements") {
@@ -5210,8 +5213,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const wrap=document.createElement("div");wrap.style.cssText="overflow-x:auto;margin-top:8px";
           const table=document.createElement("table");table.style.cssText="width:100%;border-collapse:collapse;font-size:13px";
           const cols=[["date","Date"],["vendor","Vendor"],["employee","Employee"],["card_last4","Card last 4"],["receipt_number","Receipt #"],["category","Category"],["amount","Amount"],["notes","Notes"]];
-          const header=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:6px;border-bottom:1px solid #aaa";header.appendChild(th);}table.appendChild(header);
-          for(const tx of txs){const tr=document.createElement("tr");for(const [key] of cols){const td=document.createElement("td");td.textContent=key==="amount"?Number(tx[key]||0).toFixed(2):String(tx[key]||"");td.style.cssText="padding:6px;border-bottom:1px solid #ddd";tr.appendChild(td);}table.appendChild(tr);}
+          const header=document.createElement("tr");for(const [,label] of cols){const th=document.createElement("th");th.textContent=label;th.style.cssText="text-align:left;padding:6px;border-bottom:1px solid #aaa";header.appendChild(th);}const categoryHead=document.createElement("th");categoryHead.textContent="Change category";categoryHead.style.padding="6px";header.appendChild(categoryHead);table.appendChild(header);
+          for(const [txIndex,tx] of txs.entries()){const tr=document.createElement("tr");for(const [key] of cols){const td=document.createElement("td");td.textContent=key==="amount"?Number(tx[key]||0).toFixed(2):String(tx[key]||"");td.style.cssText="padding:6px;border-bottom:1px solid #ddd";tr.appendChild(td);}
+            const catCell=document.createElement("td");const dropdown=document.createElement("select");dropdown.className="input";dropdown.setAttribute("aria-label","Change transaction category");
+            const options=[...new Set([tx.category||"",...(window.__doorksAcctCategories||[]),"Parts & Materials","Tools & Equipment","Fuel","Vehicle Maintenance","Office Supplies","Shipping & Freight","Meals","Travel","Stock / Inventory","Business & Licensing Fees","Other","Card Payment / Transfer","Refund / Credit","Personal / Nonbusiness","Uncategorized"])];
+            for(const c of options){const o=document.createElement("option");o.value=c;o.textContent=c||"Uncategorized";dropdown.appendChild(o);}dropdown.value=tx.category||"";
+            dropdown.addEventListener("change",async()=>{dropdown.disabled=true;const previous=tx.category;try{const updated=txs.map((t,i)=>i===txIndex?{...t,category:dropdown.value}:t);await fetchJSON(`/accounting/statements/${encodeURIComponent(item.id)}`,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({...item,transactions:updated})});tx.category=dropdown.value;await renderAccountingView("statements");}catch(e){dropdown.value=previous||"";alert(`Category update failed: ${e.message||e}`);}finally{dropdown.disabled=false;}});
+            catCell.appendChild(dropdown);tr.appendChild(catCell);table.appendChild(tr);}
           if(!txs.length){const p=document.createElement("p");p.className="hint";p.textContent="No transactions were saved for this statement. Select Edit to inspect the saved JSON.";wrap.appendChild(p);}
           wrap.appendChild(table);detail.appendChild(wrap);row.appendChild(detail);
         }
@@ -5251,6 +5259,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     setWorkspace("Accounting");
     clearWorkspaceActions();
     workspaceBody.innerHTML = `<div class="card"><h3>Accounting</h3><div class="hint">Expenses and document tracking. Amounts are based on saved receipts, not bank balances.</div><div id="acct_tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;"></div></div><div id="acct_content" class="card">Loading accounting data…</div>`;
+    const periodState = window.__doorksAcctPeriod || (window.__doorksAcctPeriod={mode:"month",month:new Date().toLocaleDateString("en-CA").slice(0,7),start:"",end:""});
+    const inPeriod = (date) => { const d=String(date||"").slice(0,10); if(periodState.mode==="all")return true; if(!d)return false; if(periodState.mode==="month")return d.startsWith(periodState.month); return (!periodState.start||d>=periodState.start)&&(!periodState.end||d<=periodState.end); };
+    window.__doorksAcctInPeriod=inPeriod;
+    const periodBar=document.createElement("div");periodBar.className="card";periodBar.style.cssText="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0";
+    periodBar.innerHTML='<strong>Reporting period</strong><select class="input" id="acct_period_mode"><option value="month">Month</option><option value="custom">Custom period</option><option value="all">All time</option></select><input class="input" id="acct_period_month" type="month"/><input class="input" id="acct_period_start" type="date"/><span>to</span><input class="input" id="acct_period_end" type="date"/>';
+    workspaceBody.appendChild(periodBar);
+    const pm=periodBar.querySelector("#acct_period_mode"),mm=periodBar.querySelector("#acct_period_month"),ps=periodBar.querySelector("#acct_period_start"),pe=periodBar.querySelector("#acct_period_end");
+    pm.value=periodState.mode;mm.value=periodState.month;ps.value=periodState.start;pe.value=periodState.end;
+    const periodUpdate=()=>{periodState.mode=pm.value;periodState.month=mm.value;periodState.start=ps.value;periodState.end=pe.value;renderAccountingView(section);};
+    [pm,mm,ps,pe].forEach(el=>el.addEventListener("change",periodUpdate));
+    mm.style.display=periodState.mode==="month"?"":"none";ps.style.display=pe.style.display=periodState.mode==="custom"?"":"none";
+    periodBar.querySelector("span").style.display=periodState.mode==="custom"?"":"none";
     const host = workspaceBody.querySelector("#acct_content");
     const tabs = workspaceBody.querySelector("#acct_tabs");
     const lockButton=document.createElement("button");lockButton.className="btn";lockButton.textContent="Lock Accounting";
@@ -5269,8 +5289,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }
       const [res, cat] = await Promise.all([fetchJSON("/receipts"), fetchJSON("/receipts/categories")]);
       const items = (res.items || []).filter(r => !r.deleted_at); const categories = cat.items || [];
+      const periodReceipts=items.filter(r=>inPeriod(r.date));
       const money = n => "$" + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-      const total = items.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      const total = periodReceipts.reduce((sum, r) => sum + Number(r.amount || 0), 0);
       const month = new Date().toISOString().slice(0,7);
       const monthly = items.filter(r => String(r.date || "").startsWith(month));
       const monthTotal = monthly.reduce((sum,r) => sum + Number(r.amount || 0),0);
@@ -5278,7 +5299,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       host.innerHTML = "";
       if (section === "overview") {
         const stats = make("div", ""); stats.className="grid2";
-        for (const [label, value] of [["Total recorded expenses",money(total)],["This month",money(monthTotal)],["Saved receipts",String(items.length)],["Employees with receipts",String(new Set(items.map(r=>r.employee).filter(Boolean)).size)]]) {
+        for (const [label, value] of [["Expenses in period",money(total)],["This month",money(monthTotal)],["Receipts in period",String(periodReceipts.length)],["Employees in period",String(new Set(periodReceipts.map(r=>r.employee).filter(Boolean)).size)]]) {
           const box = document.createElement("div"); box.className="card"; box.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`; stats.appendChild(box);
         }
         try {
@@ -5291,12 +5312,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           }
         }catch(error){make("p",`Accounting summaries unavailable: ${error.message||error}`);}
         make("h3", "Spending by category");
-        const grouped = {}; items.forEach(r => { const k = r.category || "Other"; grouped[k] = (grouped[k]||0)+Number(r.amount||0); });
+        const grouped = {}; periodReceipts.forEach(r => { const k = r.category || "Other"; grouped[k] = (grouped[k]||0)+Number(r.amount||0); });
         Object.entries(grouped).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
         make("h3", "Spending by employee");
-        const employees = {}; items.forEach(r => { const k = r.employee || "Unassigned"; employees[k] = (employees[k]||0)+Number(r.amount||0); });
+        const employees = {}; periodReceipts.forEach(r => { const k = r.employee || "Unassigned"; employees[k] = (employees[k]||0)+Number(r.amount||0); });
         Object.entries(employees).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
       } else if (section === "receipts") {
+        const dashboard=document.createElement("div");dashboard.className="grid2";host.appendChild(dashboard);
+        const byCategory={};periodReceipts.forEach(r=>{const k=r.category||"Uncategorized";byCategory[k]=(byCategory[k]||0)+Number(r.amount||0);});
+        for(const [label,value] of [["Receipts in period",String(periodReceipts.length)],["Expenses in period",money(total)],["Employees",String(new Set(periodReceipts.map(r=>r.employee).filter(Boolean)).size)],["Categories",String(Object.keys(byCategory).length)]]){const c=document.createElement("div");c.className="card";c.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`;dashboard.appendChild(c);}
+        const categoryTitle=make("h4","Spending by category");
+        for(const [name,value] of Object.entries(byCategory).sort((a,b)=>b[1]-a[1]))make("div",`${name}: ${money(value)}`);
         const bar = make("div", ""); bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px";
         const search = document.createElement("input"); search.className="input"; search.placeholder="Search vendor, employee, category, receipt #"; bar.appendChild(search);
         const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV"; bar.appendChild(exportBtn);
@@ -5304,9 +5330,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         function draw() {
           list.innerHTML="";
           const q=search.value.trim().toLowerCase();
-          items.filter(r=>[r.vendor,r.employee,r.category,r.receipt_number,r.date].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
-            const line=document.createElement("div"); line.style.cssText="padding:10px 0;border-bottom:1px solid #ccc";
-            const name=document.createElement("strong"); name.textContent=`${r.date||""} — ${r.vendor||""} — ${money(r.amount)} — ${r.employee||""} (${r.category||"Other"})`;
+          periodReceipts.filter(r=>[r.vendor,r.employee,r.category,r.receipt_number,r.date].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
+            const line=document.createElement("div"); line.className="card";line.style.cssText="padding:14px;margin:10px 0;border:1px solid #d9dfe8;border-radius:12px";
+            const name=document.createElement("div");name.style.cssText="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center";
+            const info=document.createElement("div");const heading=document.createElement("strong");heading.textContent=r.vendor||"Unknown vendor";info.appendChild(heading);
+            const meta=document.createElement("div");meta.className="hint";meta.textContent=[r.date,r.employee,r.category,r.receipt_number?`Receipt # ${r.receipt_number}`:"",r.card_last4?`Card •••• ${r.card_last4}`:""].filter(Boolean).join(" · ");info.appendChild(meta);
+            const amount=document.createElement("strong");amount.textContent=money(r.amount);amount.style.fontSize="18px";name.append(info,amount);
+            const controls=document.createElement("div");controls.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px";
             const edit=document.createElement("button"); edit.className="btn"; edit.textContent="Edit"; edit.style.marginLeft="12px";
             edit.addEventListener("click",()=>{
               const editor=document.createElement("form"); editor.className="card";
@@ -5329,7 +5359,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               try{await fetchJSON(`/receipts/${encodeURIComponent(r.id)}`,{method:"DELETE"});await renderAccountingView("receipts");}
               catch(err){alert(`Delete failed: ${err.message||err}`);}
             });
-            line.append(name,edit,view,del);list.appendChild(line);
+            controls.append(edit,view,del);line.append(name,controls);list.appendChild(line);
           });
         }
         search.addEventListener("input",draw);draw();
