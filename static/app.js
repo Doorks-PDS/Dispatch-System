@@ -306,12 +306,14 @@
   // Non-PDS screens intentionally do not invoke PDS data APIs.
   const platformSwitchWrap = el("platformSwitchWrap");
   const platformSelect = el("platformSelect");
+  const platformCurrentLabel = el("platformCurrentLabel");
   const platformSidebar = document.querySelector("main.layout > aside.sidebar");
   let activePlatform = "pds";
   let switchingPlatform = false;
   function showPlatformShell(platform) {
     activePlatform = platform;
     if (platformSelect) platformSelect.value = platform;
+    if (platformCurrentLabel) platformCurrentLabel.textContent = platform === "sdc" ? "SDC" : platform === "doorks" ? "Doorks" : "PDS";
     const inPds = platform === "pds";
     if (platformSidebar) platformSidebar.style.display = inPds ? "" : "none";
     if (headerCalendarBtn) headerCalendarBtn.style.display = inPds && currentUser && currentUser.role === "office_admin" ? "inline-flex" : "none";
@@ -324,12 +326,14 @@
   async function initializePlatform() {
     if (!currentUser) {
       if (platformSwitchWrap) platformSwitchWrap.style.display = "none";
+      if (platformCurrentLabel) platformCurrentLabel.style.display = "none";
       activePlatform = "pds";
       if (platformSidebar) platformSidebar.style.display = "";
       return;
     }
     const admin = currentUser.role === "office_admin";
     if (platformSwitchWrap) platformSwitchWrap.style.display = admin ? "flex" : "none";
+    if (platformCurrentLabel) platformCurrentLabel.style.display = admin ? "none" : "inline-flex";
     if (!admin) { showPlatformShell("pds"); return; }
     try {
       const state = await fetchJSON("/platforms/current");
