@@ -3888,9 +3888,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
       // Moses: one transcript, then OpenAI proposes structured form fields for review.
       const speechCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
-      const speechPanel=document.createElement("div");speechPanel.className="card";
+      const speechPanel=document.createElement("details");speechPanel.className="card";
       speechPanel.style.cssText="margin:12px 0;padding:14px";
-      const speechTitle=document.createElement("strong");speechTitle.textContent="Moses — Voice Form Assistant";speechPanel.appendChild(speechTitle);
+      const speechTitle=document.createElement("summary");speechTitle.style.cssText="cursor:pointer;font-weight:700";speechTitle.textContent="Moses Assistant (optional)";speechPanel.appendChild(speechTitle);
       const speechHint=document.createElement("p");speechHint.className="hint";
       speechHint.textContent="Describe the work, parts, and recommendations in one recording. Review the transcript, then let AI fill the form. Nothing saves automatically.";speechPanel.appendChild(speechHint);
       const transcript=document.createElement("textarea");transcript.className="input";transcript.rows=4;transcript.placeholder="Speak or type your full job description here...";transcript.setAttribute("aria-label","Voice transcript");speechPanel.appendChild(transcript);
