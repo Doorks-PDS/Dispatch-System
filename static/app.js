@@ -440,8 +440,8 @@
     const dacPeriodState=window.__doorksAccountingPeriod||(window.__doorksAccountingPeriod={mode:'month',month:new Date().toISOString().slice(0,7),start:'',end:''});
     const periodMode=el('dacPeriod'),periodMonth=el('dacMonth'),periodStart=el('dacStart'),periodEnd=el('dacEnd');
     periodMode.value=dacPeriodState.mode;periodMonth.value=dacPeriodState.month;periodStart.value=dacPeriodState.start;periodEnd.value=dacPeriodState.end;
-    function updatePeriodInputs(){periodMonth.style.display=periodMode.value==='month'?'':'none';periodStart.style.display=periodEnd.style.display=periodMode.value==='custom'?'':'none';}
-    function applyPeriod(){dacPeriodState.mode=periodMode.value;dacPeriodState.month=periodMonth.value;dacPeriodState.start=periodStart.value;dacPeriodState.end=periodEnd.value;updatePeriodInputs();draw();}
+    function updatePeriodInputs(){const mode=periodMode.value;periodMonth.parentElement.style.display=mode==='month'?'grid':'none';periodStart.parentElement.style.display=mode==='custom'?'grid':'none';periodEnd.parentElement.style.display=mode==='custom'?'grid':'none';}
+    function applyPeriod(){if(periodMode.value==='custom'&&!periodStart.value&&!periodEnd.value){const month=periodMonth.value||new Date().toISOString().slice(0,7);periodStart.value=month+'-01';const [year,m]=month.split('-').map(Number);periodEnd.value=year+'-'+String(m).padStart(2,'0')+'-'+String(new Date(year,m,0).getDate()).padStart(2,'0');}dacPeriodState.mode=periodMode.value;dacPeriodState.month=periodMonth.value;dacPeriodState.start=periodStart.value;dacPeriodState.end=periodEnd.value;updatePeriodInputs();draw();}
     for(const input of [periodMode,periodMonth,periodStart,periodEnd])input.addEventListener('change',applyPeriod);updatePeriodInputs();
     function dateForRecord(item){return String(item.date||item.invoice_date||item.period_end||item.period_start||item.created_at||'').slice(0,10);}
     function periodRecords(){return records.filter(item=>{if(dacPeriodState.mode==='all')return true;const date=dateForRecord(item);if(!date)return false;if(dacPeriodState.mode==='month')return date.slice(0,7)===dacPeriodState.month;return (!dacPeriodState.start||date>=dacPeriodState.start)&&(!dacPeriodState.end||date<=dacPeriodState.end);});}
@@ -4493,10 +4493,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           if (zipInput) zipInput.value = d.zip || zipInput.value || "";
         });
         // Optional AI intake: never creates a job or overwrites populated fields without review.
-        const aiPanel=document.createElement("div");
+        const aiPanel=document.createElement("details");
         aiPanel.className="card";
         aiPanel.style.cssText="padding:14px;margin-bottom:14px;border:1px solid #d9dfe8";
-        aiPanel.innerHTML=`<strong>Read Work Order / Estimate with AI</strong><p class="hint">Upload a PDF or image, or paste a customer email. AI suggests fields only; review everything before saving.</p><input class="input" id="nj_ai_file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" style="margin:8px 0"><textarea class="input" id="nj_ai_email" placeholder="Optional: paste work order or email text here" rows="4" style="width:100%;box-sizing:border-box"></textarea><button class="btn btn-orange" type="button" id="nj_ai_read">Read with AI</button><div id="nj_ai_status" class="hint" role="status" style="margin-top:8px"></div>`;
+        aiPanel.innerHTML=`<summary style="font-weight:700;cursor:pointer">Read document with AI (optional)</summary><div style="margin-top:12px"><p class="hint">Upload a work order, estimate, or email. Review suggested fields before saving.</p><input class="input" id="nj_ai_file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp" style="margin:8px 0"><textarea class="input" id="nj_ai_email" placeholder="Optional: paste work order or email text here" rows="4" style="width:100%;box-sizing:border-box"></textarea><button class="btn btn-orange" type="button" id="nj_ai_read">Read with AI</button><div id="nj_ai_status" class="hint" role="status" style="margin-top:8px"></div></div>`;
         aiPanel.querySelector("#nj_ai_read").addEventListener("click",async()=>{
           const button=aiPanel.querySelector("#nj_ai_read"),statusBox=aiPanel.querySelector("#nj_ai_status");
           const file=aiPanel.querySelector("#nj_ai_file").files?.[0],email=aiPanel.querySelector("#nj_ai_email").value.trim();
