@@ -10,6 +10,12 @@ router=APIRouter(prefix="/workspace-ai",tags=["workspace-ai"])
 ALLOWED={".pdf":"application/pdf",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp"}
 FIELDS={
   ("sdc","orders"):("customer","item","order_date","status","total","shipping","tax","notes"),
+  ("doorks","customers"):("name","contact","email","phone","address","notes"),
+  ("doorks","vendors"):("name","contact","email","phone","service_area","trade","notes"),
+  ("doorks","customer_inquiries"):("customer","contact","email","phone","address","service_type","preferred_date","visit_type","description","status","notes"),
+  ("doorks","vendor_assignments"):("vendor","work_order_number","customer","scheduled_date","status","scope","notes"),
+  ("doorks","estimates_invoices"):("customer","work_order_number","document_type","document_number","date","amount","status","description","notes"),
+  ("sdc","software_leads"):("company","contact","email","phone","package","setup_assistance","status","notes"),
   ("doorks","work_orders"):("customer","address","description","status","amount","notes")
 }
 @router.post("/{platform}/{kind}/extract")

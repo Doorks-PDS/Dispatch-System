@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 router=APIRouter(prefix="/workspaces",tags=["workspaces"])
 _lock=RLock()
-KINDS={"doorks":("customers","vendors","work_orders","expenses","receivables","inventory"),"sdc":("customers","orders","products","expenses","receivables","inventory")}
+KINDS={"doorks":("customers","vendors","work_orders","estimates_invoices","customer_inquiries","vendor_assignments","expenses","receivables","inventory"),"sdc":("customers","orders","software_leads","products","expenses","receivables","inventory")}
 class Record(BaseModel):
     data:dict
 
