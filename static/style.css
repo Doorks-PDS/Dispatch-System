@@ -480,3 +480,13 @@ textarea:focus{
 .layout.business-platform-layout > .workspace{min-width:0;width:100%;}
 .layout.business-platform-layout #workspaceBody > div{width:100%;max-width:1400px;margin-inline:auto;}
 @media (max-width:700px){.layout.business-platform-layout{width:calc(100vw - 16px);}}
+
+/* Doorks 2.0 Phase 2H: independent workspace branding and PDS-style navigation */
+body[data-platform="doorks"]{--orange:#405a3b;--orange2:#637b4e;}
+body[data-platform="sdc"]{--orange:#2797c9;--orange2:#65bce8;}
+body[data-platform="doorks"] .layout{grid-template-columns:380px minmax(0,1fr);}
+body[data-platform="doorks"] .layout > .workspace{min-width:0;}
+.doorks-side-link{display:block;width:100%;margin:0 0 9px;padding:13px 15px;text-align:left;font-weight:750;background:#fff;border:1px solid var(--line);border-radius:12px;cursor:pointer;color:var(--text);}
+.doorks-side-link:hover,.doorks-side-link:focus-visible{border-color:var(--orange);outline:2px solid color-mix(in srgb,var(--orange) 24%,transparent);}
+body[data-platform="doorks"] .btn-orange,body[data-platform="sdc"] .btn-orange{color:white;}
+@media(max-width:900px){body[data-platform="doorks"] .layout{grid-template-columns:1fr;}body[data-platform="doorks"] #doorksBusinessSidebar{display:flex;}}

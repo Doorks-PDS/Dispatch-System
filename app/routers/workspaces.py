@@ -1,6 +1,6 @@
 """Isolated Doorks/SDC workspace records. PDS stores are never read or written."""
 from __future__ import annotations
-import json, os, uuid
+import json, os, uuid, re
 from datetime import datetime, timezone
 from pathlib import Path
 from threading import RLock
@@ -59,7 +59,26 @@ def create(platform:str,kind:str,payload:Record,request:Request):
     guard(request,platform,kind)
     with _lock:
         path=location(request,platform,kind);items=load(path)
-        item={"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**clean(payload.data)}
+        data=clean(payload.data)
+        if platform=="doorks" and kind=="work_orders":
+            # Monotonic counter on persistent storage, never derived from list length.
+            # Keep the counter even if work orders are deleted.
+            counter_path=path.parent/"work_order_sequence.json"
+            current=0
+            if counter_path.exists():
+                current=int(json.loads(counter_path.read_text(encoding="utf-8")).get("last",0))
+            for existing in items:
+                match=re.fullmatch(r"WO-(\d+)",str(existing.get("work_order_number", "")))
+                if match:current=max(current,int(match.group(1)))
+            data.pop("work_order_number",None)
+            data["work_order_number"]=f"WO-{current+1:04d}"
+            # Write the reservation before saving the work order; skipped numbers
+            # are preferable to reusing a number after a failed write.
+            save_counter=counter_path.with_suffix(".tmp")
+            with save_counter.open("w",encoding="utf-8") as f:
+                json.dump({"last":current+1},f);f.flush();os.fsync(f.fileno())
+            os.replace(save_counter,counter_path)
+        item={"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**data}
         items.append(item);save(path,items)
     return {"item":item}
 
@@ -70,7 +89,12 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
         path=location(request,platform,kind);items=load(path)
         for item in items:
             if item.get("id")==record_id:
-                item.update(clean(payload.data));item["updated_at"]=datetime.now(timezone.utc).isoformat()
+                data=clean(payload.data)
+                if platform=="doorks" and kind=="work_orders":
+                    data.pop("work_order_number",None)
+                    data.pop("id",None)
+                    data.pop("created_at",None)
+                item.update(data);item["updated_at"]=datetime.now(timezone.utc).isoformat()
                 save(path,items);return {"item":item}
     raise HTTPException(404,"Record not found")
 

@@ -315,7 +315,7 @@
   };
   const workspaceFields = {
     customers:["name","contact","email","phone","notes"], vendors:["name","contact","email","phone","notes"],
-    work_orders:["customer","address","scheduled_date","description","status","amount","notes"],
+    work_orders:["customer","contact","phone","email","address","service_type","request_source","vendor","scheduled_date","scheduled_time","description","status","priority","po_number","nte","amount","notes"],
     orders:["customer","item","order_date","status","total","shipping","tax","notes"],
     products:["name","sku","price","description"],
     expenses:["date","vendor","category","amount","notes"],
@@ -324,14 +324,14 @@
   };
   function safeWorkspaceText(value) { const e=document.createElement("span");e.textContent=String(value??"");return e.innerHTML; }
   // Phase 2D: business-specific dashboard and record editor. Never uses PDS data endpoints.
-  async function renderBusinessCollection(platform,kind) {
+  async function renderBusinessCollection(platform,kind,openNew=false) {
     if(activePlatform!==platform)return;
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:6px 0 0">${platform.toUpperCase()} records only · Saved on the persistent business workspace</p></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><p class="hint">Review details before saving. Nothing is created until you press Save.</p><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
-    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date'};
+    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date',scheduled_time:'time'};
     const statuses=kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['New','Scheduled','In Progress','Completed','Cancelled']:null;
     let records=[],editingId=null;
     for(const field of fields){
@@ -375,7 +375,7 @@
       if(!filtered.length){const empty=document.createElement('p');empty.className='hint';empty.textContent=q?'No matching records.':'No records saved yet. Select New to create the first one.';host.append(empty);return;}
       for(const item of filtered.slice().reverse()){
         const row=document.createElement('div');row.style.cssText='padding:16px;margin:10px 0;border:1px solid #d9dee7;border-radius:12px;background:#fff';
-        const title=document.createElement('strong');title.textContent=item.customer||item.name||item.item||item.description||item.part_number||'Record';row.append(title);
+        const title=document.createElement('strong');title.textContent=(kind==='work_orders'&&item.work_order_number?item.work_order_number+' · ':'')+(item.customer||item.name||item.item||item.description||item.part_number||'Record');row.append(title);
         const details=document.createElement('div');details.style.cssText='white-space:pre-wrap;margin:10px 0;color:#526071';details.textContent=fields.filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>`${k.replaceAll('_',' ')}: ${item[k]}`).join('\n');row.append(details);
         const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>open(item);row.append(edit);host.append(row);
       }
@@ -387,7 +387,7 @@
       catch(err){message.textContent=`Save failed: ${err.message||'Unknown error'}`;console.error('Workspace save failed',err);}
       finally{submit.disabled=false;}
     };
-    try{await refresh();}catch(err){el('businessRecords').textContent=`Unable to load records: ${err.message||'Unknown error'}`;}
+    try{await refresh();if(openNew)open();}catch(err){el('businessRecords').textContent=`Unable to load records: ${err.message||'Unknown error'}`;}
   }
   // Phase 2F: Doorks-only accounting pilot. No PDS accounting endpoints are used.
   async function renderDoorksAccounting(kind='receivables') {
@@ -415,12 +415,17 @@
     form.onsubmit=async e=>{e.preventDefault();save.disabled=true;message.textContent='Saving…';try{const data={};for(const field of fields[kind])data[field]=String(form.elements.namedItem(field)?.value??'').trim();const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});const id=response.item.id;const original=fileInput.files?.[0]||uploadFile;if(original){const body=new FormData();body.append('file',original);try{await fetchJSON(endpoint+'/'+encodeURIComponent(id)+'/file',{method:'POST',body});}catch(err){message.textContent='Record saved, but original upload failed: '+err.message;await refresh();return;}}await refresh();editor.hidden=true;}catch(err){message.textContent='Save failed: '+(err.message||err);}finally{save.disabled=false;}};
     try{await refresh();}catch(err){el('dacRecords').textContent='Could not load records: '+(err.message||err);}
   }
-  function showPlatformShell(platform) {
+  function showPlatformShell(platform,initialView='overview') {
     activePlatform=platform;
     if(platformSelect)platformSelect.value=platform;
     const inPds=platform==='pds';
     if(platformSidebar)platformSidebar.style.display=inPds?'':'none';
-    document.querySelector('main.layout')?.classList.toggle('business-platform-layout',!inPds);
+    document.body.dataset.platform=platform;
+    let businessSide=document.getElementById('doorksBusinessSidebar');
+    if(!businessSide){businessSide=document.createElement('aside');businessSide.id='doorksBusinessSidebar';businessSide.className='sidebar';platformSidebar?.parentElement?.insertBefore(businessSide,platformSidebar.nextSibling);}
+    businessSide.style.display=platform==='doorks'?'flex':'none';
+    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Overview',()=>showPlatformShell('doorks'));add('dbJobNav','Calendar',()=>showPlatformShell('doorks','calendar'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Customers',()=>renderBusinessCollection('doorks','customers'));add('dbOfficeNav','Vendors',()=>renderBusinessCollection('doorks','vendors'));add('dbOfficeNav','Estimates / Invoices',()=>renderDoorksAccounting('receivables'));add('dbOfficeNav','Accounting',()=>renderDoorksAccounting());add('dbOfficeNav','Inventory',()=>renderDoorksAccounting('inventory'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','work_orders'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendors'));}
+    document.querySelector('main.layout')?.classList.toggle('business-platform-layout',platform==='sdc');
     if(headerCalendarBtn)headerCalendarBtn.style.display=inPds&&currentUser&&currentUser.role==='office_admin'?'inline-flex':'none';
     if(inPds)return;
     clearWorkspaceActions();setWorkspace(platform==='sdc'?'SDC — Saddleback Design Co.':'Doorks — Administration');
@@ -439,7 +444,7 @@
       let calMonth=new Date();calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth(),1);
       const panel=el('doorksCalendarPanel'),body=el('doorksCalendarBody');
       async function drawCalendar(){body.replaceChildren();const heading=document.createElement('div');heading.style.cssText='display:flex;gap:12px;align-items:center;justify-content:center;margin-bottom:14px';const prev=document.createElement('button');prev.className='btn';prev.textContent='←';const next=document.createElement('button');next.className='btn';next.textContent='→';const month=document.createElement('strong');month.textContent=calMonth.toLocaleString(undefined,{month:'long',year:'numeric'});prev.onclick=()=>{calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()-1,1);drawCalendar();};next.onclick=()=>{calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,1);drawCalendar();};heading.append(prev,month,next);body.append(heading);const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px';body.append(grid);for(const day of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']){const label=document.createElement('strong');label.style.cssText='text-align:center;font-size:12px';label.textContent=day;grid.append(label);}let jobs=[];try{jobs=(await fetchJSON('/workspaces/doorks/work_orders')).items||[];}catch{}const offset=calMonth.getDay(),days=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,0).getDate();for(let i=0;i<offset;i++)grid.append(document.createElement('span'));for(let day=1;day<=days;day++){const date=calMonth.getFullYear()+'-'+String(calMonth.getMonth()+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');const matches=jobs.filter(x=>String(x.scheduled_date||'').slice(0,10)===date);const cell=document.createElement('button');cell.type='button';cell.style.cssText='min-height:70px;min-width:0;border:1px solid #d9dee7;border-radius:9px;background:white;padding:6px;text-align:left;cursor:pointer';cell.textContent=String(day);if(matches.length){const info=document.createElement('div');info.style.cssText='font-size:11px;color:#f97316;font-weight:700;overflow-wrap:anywhere';info.textContent=matches.length+' visit'+(matches.length===1?'':'s');cell.append(info);cell.title=matches.map(x=>x.customer||x.description||'Work order').join(' • ');}cell.onclick=()=>renderBusinessCollection('doorks','work_orders');grid.append(cell);}}
-      el('doorksCalendarToggle').onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden)drawCalendar();};
+      el('doorksCalendarToggle').onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden)drawCalendar();};if(initialView==='calendar'){panel.hidden=false;drawCalendar();panel.scrollIntoView({block:'start'});}
     }else{
       workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><p class="hint">Independent ${platform.toUpperCase()} workspace · PDS business records remain unchanged</p><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><p class="hint">Select a section to manage its records. Existing Saddleback records remain in PDS pending verified migration.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
     }
@@ -456,6 +461,8 @@
     if (!currentUser) {
       if (platformSwitchWrap) platformSwitchWrap.style.display = "none";
       activePlatform = "pds";
+      document.body.dataset.platform="pds";
+      document.getElementById("doorksBusinessSidebar")?.remove();
       if (platformSidebar) platformSidebar.style.display = "";
       document.querySelector('main.layout')?.classList.remove('business-platform-layout');
       return;
