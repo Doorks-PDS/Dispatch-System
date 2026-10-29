@@ -315,8 +315,8 @@
   };
   const workspaceFields = {
     customers:["name","contact","email","phone","address","notes"], vendors:["name","contact","email","phone","service_area","trade","notes"],
-    customer_inquiries:["customer","contact","email","phone","address","service_type","preferred_date","visit_type","description","status","notes"],
-    vendor_assignments:["vendor","work_order_number","customer","scheduled_date","status","scope","notes"],
+    customer_inquiries:["customer","contact","email","phone","address","service_type","preferred_date","preferred_time","visit_type","description","status","work_order_number","notes"],
+    vendor_assignments:["vendor","vendor_email","work_order_number","customer","address","scheduled_date","scheduled_time","status","scope","nte","completion_notes","notes"],
     estimates_invoices:["customer","work_order_number","document_type","document_number","date","amount","status","description","notes"],
     software_leads:["company","contact","email","phone","package","setup_assistance","status","notes"],
     work_orders:["customer","contact","phone","email","address","service_type","request_source","vendor","scheduled_date","scheduled_time","description","status","priority","po_number","nte","amount","notes"],
@@ -335,8 +335,8 @@
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:6px 0 0">${platform.toUpperCase()} records only · Saved on the persistent business workspace</p></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><p class="hint">Review details before saving. Nothing is created until you press Save.</p><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
-    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date',scheduled_time:'time'};
-    const statuses=kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['New','Scheduled','In Progress','Completed','Cancelled']:null;
+    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date',scheduled_time:'time',preferred_date:'date',preferred_time:'time'};
+    const statuses=kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['New','Scheduled','In Progress','Completed','Cancelled']:kind==='customer_inquiries'?['New','Contacted','Visit Requested','Scheduled','Converted','Closed']:kind==='vendor_assignments'?['Pending','Offered','Accepted','Declined','Scheduled','In Progress','Completed','Cancelled']:null;
     let records=[],editingId=null;
     for(const field of fields){
       const label=document.createElement('label');label.style.cssText='display:grid;gap:6px;font-weight:600';label.textContent=field.replaceAll('_',' ');
@@ -381,7 +381,29 @@
         const row=document.createElement('div');row.style.cssText='padding:16px;margin:10px 0;border:1px solid #d9dee7;border-radius:12px;background:#fff';
         const title=document.createElement('strong');title.textContent=(kind==='work_orders'&&item.work_order_number?item.work_order_number+' · ':'')+(item.customer||item.name||item.item||item.description||item.part_number||'Record');row.append(title);
         const details=document.createElement('div');details.style.cssText='white-space:pre-wrap;margin:10px 0;color:#526071';details.textContent=fields.filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>`${k.replaceAll('_',' ')}: ${item[k]}`).join('\n');row.append(details);
-        const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>open(item);row.append(edit);host.append(row);
+        const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>open(item);row.append(edit);
+        if(platform==='doorks'&&kind==='customer_inquiries'){
+          const convert=document.createElement('button');convert.className='btn';convert.style.marginLeft='8px';convert.textContent=item.work_order_number?'View linked WO':'Create Work Order';
+          convert.onclick=async()=>{
+            if(item.work_order_number){renderBusinessCollection('doorks','work_orders');return;}
+            if(!confirm('Create a new work order from this inquiry? A unique WO number will be assigned.'))return;
+            convert.disabled=true;
+            try{
+              const data={customer:item.customer||'',contact:item.contact||'',email:item.email||'',phone:item.phone||'',address:item.address||'',service_type:item.service_type||'',request_source:'Customer Inquiry',scheduled_date:item.preferred_date||'',scheduled_time:item.preferred_time||'',description:item.description||'',status:'New',notes:'Created from customer inquiry '+item.id};
+              const created=await fetchJSON('/workspaces/doorks/work_orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
+              await fetchJSON(endpoint+'/'+encodeURIComponent(item.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Converted',work_order_number:created.item.work_order_number}})});
+              await refresh();alert('Created '+created.item.work_order_number+'. Find it under All Work Orders.');
+            }catch(err){alert('Work order creation may have partially completed. Check All Work Orders before retrying. '+(err.message||err));}finally{convert.disabled=false;}
+          };row.append(convert);
+        }
+        if(platform==='doorks'&&kind==='work_orders'){
+          const assign=document.createElement('button');assign.className='btn';assign.style.marginLeft='8px';assign.textContent='Prepare Vendor Assignment';
+          assign.onclick=()=>{
+            const draft={work_order_number:item.work_order_number||'',customer:item.customer||'',address:item.address||'',scheduled_date:item.scheduled_date||'',scheduled_time:item.scheduled_time||'',scope:item.description||'',nte:item.nte||'',vendor:item.vendor||'',status:'Pending'};
+            renderBusinessCollection('doorks','vendor_assignments',true).then(()=>{const f=el('businessRecordForm');if(f)for(const [key,value] of Object.entries(draft)){const field=f.elements.namedItem(key);if(field)field.value=value;}});
+          };row.append(assign);
+        }
+        host.append(row);
       }
     }
     search.oninput=draw;

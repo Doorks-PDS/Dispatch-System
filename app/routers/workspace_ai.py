@@ -12,8 +12,8 @@ FIELDS={
   ("sdc","orders"):("customer","item","order_date","status","total","shipping","tax","notes"),
   ("doorks","customers"):("name","contact","email","phone","address","notes"),
   ("doorks","vendors"):("name","contact","email","phone","service_area","trade","notes"),
-  ("doorks","customer_inquiries"):("customer","contact","email","phone","address","service_type","preferred_date","visit_type","description","status","notes"),
-  ("doorks","vendor_assignments"):("vendor","work_order_number","customer","scheduled_date","status","scope","notes"),
+  ("doorks","customer_inquiries"):("customer","contact","email","phone","address","service_type","preferred_date","preferred_time","visit_type","description","status","work_order_number","notes"),
+  ("doorks","vendor_assignments"):("vendor","vendor_email","work_order_number","customer","address","scheduled_date","scheduled_time","status","scope","nte","completion_notes","notes"),
   ("doorks","estimates_invoices"):("customer","work_order_number","document_type","document_number","date","amount","status","description","notes"),
   ("sdc","software_leads"):("company","contact","email","phone","package","setup_assistance","status","notes"),
   ("doorks","work_orders"):("customer","address","description","status","amount","notes")
