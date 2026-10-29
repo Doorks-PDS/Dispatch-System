@@ -83,6 +83,19 @@ def update(kind:str,item_id:str,payload:Record,request:Request):
                 return {"item":item}
     raise HTTPException(404,"Record not found")
 
+@router.delete("/{kind}/{item_id}")
+def delete_record(kind:str,item_id:str,request:Request):
+    guard(request,kind)
+    with _lock:
+        path=base(request)/(kind+".json")
+        items=read(path)
+        remaining=[item for item in items if item.get("id")!=item_id]
+        if len(remaining)==len(items):raise HTTPException(404,"Record not found")
+        # Original attachments are deliberately retained on disk to avoid irreversible
+        # document loss; only the requested accounting record is removed.
+        write(path,remaining)
+    return {"ok":True}
+
 @router.post("/receipts/{item_id}/authorization")
 def authorize_receipt(item_id:str,payload:dict,request:Request):
     guard(request,"receipts")
