@@ -60,6 +60,7 @@ def create(platform:str,kind:str,payload:Record,request:Request):
     with _lock:
         path=location(request,platform,kind);items=load(path)
         data=clean(payload.data)
+        for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
         if platform=="doorks" and kind=="work_orders":
             # Monotonic counter on persistent storage, never derived from list length.
             # Keep the counter even if work orders are deleted.
@@ -79,6 +80,8 @@ def create(platform:str,kind:str,payload:Record,request:Request):
                 json.dump({"last":current+1},f);f.flush();os.fsync(f.fileno())
             os.replace(save_counter,counter_path)
         item={"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**data}
+        
+        if kind=="expenses":item["authorization_status"]="Pending Authorization"
         items.append(item);save(path,items)
     return {"item":item}
 
@@ -90,11 +93,37 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
         for item in items:
             if item.get("id")==record_id:
                 data=clean(payload.data)
+                for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
                 if platform=="doorks" and kind=="work_orders":
                     data.pop("work_order_number",None)
                     data.pop("id",None)
                     data.pop("created_at",None)
-                item.update(data);item["updated_at"]=datetime.now(timezone.utc).isoformat()
+                item.update(data);
+                if kind=="expenses":
+                    item["authorization_status"]="Pending Authorization"
+                    item.pop("authorized_by",None);item.pop("authorized_at",None)
+                item["updated_at"]=datetime.now(timezone.utc).isoformat()
+                save(path,items);return {"item":item}
+    raise HTTPException(404,"Record not found")
+
+@router.post("/{platform}/expenses/{record_id}/authorization")
+def authorize_expense(platform:str,record_id:str,payload:dict,request:Request):
+    guard(request,platform,"expenses")
+    if not isinstance(payload.get("authorized"),bool):raise HTTPException(400,"authorized must be boolean")
+    with _lock:
+        path=location(request,platform,"expenses");items=load(path)
+        for item in items:
+            if item.get("id")==record_id:
+                user=getattr(request.state,"auth_user",None)
+                actor=str(user.get("name") or user.get("username") or user.get("id") or "office_admin") if isinstance(user,dict) else "office_admin"
+                item["authorization_status"]="Authorized" if payload["authorized"] else "Pending Authorization"
+                if payload["authorized"]:
+                    item["authorized_by"]=actor
+                    item["authorized_at"]=datetime.now(timezone.utc).isoformat()
+                else:
+                    item.pop("authorized_by",None);item.pop("authorized_at",None)
+                    item["unauthorized_by"]=actor
+                    item["unauthorized_at"]=datetime.now(timezone.utc).isoformat()
                 save(path,items);return {"item":item}
     raise HTTPException(404,"Record not found")
 

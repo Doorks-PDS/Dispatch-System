@@ -59,7 +59,10 @@ def create(kind:str,payload:Record,request:Request):
     guard(request,kind)
     with _lock:
         path=base(request)/(kind+".json");items=read(path)
-        item={**clean(payload.data),"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat()}
+        data=clean(payload.data)
+        for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
+        item={**data,"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat()}
+        if kind=="receipts":item["authorization_status"]="Pending Authorization"
         items.append(item);write(path,items)
     return {"item":item}
 
@@ -70,9 +73,37 @@ def update(kind:str,item_id:str,payload:Record,request:Request):
         path=base(request)/(kind+".json");items=read(path)
         for item in items:
             if item.get("id")==item_id:
-                item.update(clean(payload.data));item["updated_at"]=datetime.now(timezone.utc).isoformat();write(path,items)
+                data=clean(payload.data)
+                for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
+                item.update(data);
+                if kind=="receipts":
+                    item["authorization_status"]="Pending Authorization"
+                    item.pop("authorized_by",None);item.pop("authorized_at",None)
+                item["updated_at"]=datetime.now(timezone.utc).isoformat();write(path,items)
                 return {"item":item}
     raise HTTPException(404,"Record not found")
+
+@router.post("/receipts/{item_id}/authorization")
+def authorize_receipt(item_id:str,payload:dict,request:Request):
+    guard(request,"receipts")
+    if not isinstance(payload.get("authorized"),bool):raise HTTPException(400,"authorized must be boolean")
+    with _lock:
+        path=base(request)/"receipts.json";items=read(path)
+        for item in items:
+            if item.get("id")==item_id:
+                user=getattr(request.state,"auth_user",None)
+                actor=str(user.get("name") or user.get("username") or user.get("id") or "office_admin") if isinstance(user,dict) else "office_admin"
+                if payload["authorized"]:
+                    item["authorization_status"]="Authorized"
+                    item["authorized_by"]=actor
+                    item["authorized_at"]=datetime.now(timezone.utc).isoformat()
+                else:
+                    item["authorization_status"]="Pending Authorization"
+                    item.pop("authorized_by",None);item.pop("authorized_at",None)
+                    item["unauthorized_by"]=actor
+                    item["unauthorized_at"]=datetime.now(timezone.utc).isoformat()
+                write(path,items);return {"item":item}
+    raise HTTPException(404,"Receipt not found")
 
 @router.post("/{kind}/extract")
 async def extract(kind:str,request:Request,file:UploadFile=File(...)):

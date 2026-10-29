@@ -172,6 +172,30 @@ def authorize_receipt(request: Request, receipt_id: str, x_api_key: Optional[str
     return {"ok": True, "item": item}
 
 
+@router.post("/{receipt_id}/unauthorize")
+def unauthorize_receipt(request: Request, receipt_id: str, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    _office_only(request)
+    from app.routers.accounting import require_office
+    require_office(request, x_api_key)
+    _, index = _paths(request)
+    with _lock:
+        items = _load(index)
+        item = next((x for x in items if x.get("id") == receipt_id and not x.get("deleted_at")), None)
+        if item is None:
+            raise HTTPException(404, "Receipt not found")
+        item["authorization_status"] = "Pending Authorization"
+        item.pop("authorized_by", None)
+        item.pop("authorized_at", None)
+        user = getattr(request.state, "auth_user", None) or {}
+        item["unauthorized_by"] = str(user.get("name") or user.get("username") or user.get("id") or "office")
+        item["unauthorized_at"] = datetime.now(timezone.utc).isoformat()
+        tmp = index.with_suffix(".tmp")
+        tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+        tmp.replace(index)
+    return {"ok": True, "item": item}
+
+
 @router.patch("/{receipt_id}")
 async def edit_receipt(request: Request, receipt_id: str, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
