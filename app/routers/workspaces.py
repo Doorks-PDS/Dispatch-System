@@ -98,11 +98,37 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
                 save(path,items);return {"item":item}
     raise HTTPException(404,"Record not found")
 
+@router.patch("/{platform}/{kind}/{record_id}/status")
+def set_status(platform:str,kind:str,record_id:str,payload:dict,request:Request):
+    guard(request,platform,kind)
+    if kind not in ("customers","vendors"):raise HTTPException(400,"Status applies to customers and vendors")
+    if not isinstance(payload.get("active"),bool):raise HTTPException(400,"active must be boolean")
+    with _lock:
+        path=location(request,platform,kind);items=load(path)
+        for item in items:
+            if item.get("id")==record_id:
+                if payload["active"]:item.pop("deactivated_at",None)
+                else:item["deactivated_at"]=datetime.now(timezone.utc).isoformat()
+                item["updated_at"]=datetime.now(timezone.utc).isoformat()
+                save(path,items);return {"item":item}
+    raise HTTPException(404,"Record not found")
+
 @router.delete("/{platform}/{kind}/{record_id}")
 def delete(platform:str,kind:str,record_id:str,request:Request):
     guard(request,platform,kind)
     with _lock:
         path=location(request,platform,kind);items=load(path)
+        if kind in ("customers","vendors"):
+            target=next((x for x in items if x.get("id")==record_id),None)
+            if target:
+                name=str(target.get("name") or "").strip().casefold()
+                # Conservative link check: do not delete if referenced by another collection.
+                for other_kind in KINDS[platform]:
+                    if other_kind==kind:continue
+                    for linked in load(location(request,platform,other_kind)):
+                        for key in (("customer","customer_name") if kind=="customers" else ("vendor","supplier")):
+                            if name and str(linked.get(key) or "").strip().casefold()==name:
+                                raise HTTPException(409,"Record is linked to existing work. Deactivate it instead.")
         remaining=[item for item in items if item.get("id")!=record_id]
         if len(items)==len(remaining):raise HTTPException(404,"Record not found")
         save(path,remaining)

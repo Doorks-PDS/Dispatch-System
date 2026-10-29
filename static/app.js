@@ -332,7 +332,7 @@
     if(activePlatform!==platform)return;
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
-    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:6px 0 0">${platform.toUpperCase()} records only · Saved on the persistent business workspace</p></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><p class="hint">Review details before saving. Nothing is created until you press Save.</p><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
+    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
     const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date',scheduled_time:'time',preferred_date:'date',preferred_time:'time'};
@@ -403,6 +403,13 @@
             renderBusinessCollection('doorks','vendor_assignments',true).then(()=>{const f=el('businessRecordForm');if(f)for(const [key,value] of Object.entries(draft)){const field=f.elements.namedItem(key);if(field)field.value=value;}});
           };row.append(assign);
         }
+        if(['customers','vendors'].includes(kind)){
+          const inactive=!!item.deactivated_at;
+          if(inactive){const status=document.createElement('span');status.className='hint';status.textContent=' · Inactive';title.append(status);}
+          const toggle=document.createElement('button');toggle.type='button';toggle.className='btn';toggle.style.marginLeft='8px';toggle.textContent=inactive?'Reactivate':'Deactivate';
+          toggle.onclick=async()=>{if(!confirm(`${inactive?'Reactivate':'Deactivate'} this ${kind.slice(0,-1)}?`))return;try{await fetchJSON(`${endpoint}/${encodeURIComponent(item.id)}/status`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:inactive})});await refresh();}catch(e){alert(e.message||e);}};row.append(toggle);
+          const remove=document.createElement('button');remove.type='button';remove.className='btn';remove.style.marginLeft='8px';remove.textContent='Delete';remove.onclick=async()=>{if(!confirm('Permanently delete this record? Linked records will prevent deletion.'))return;try{await fetchJSON(`${endpoint}/${encodeURIComponent(item.id)}`,{method:'DELETE'});await refresh();}catch(e){alert(e.message||e);}};row.append(remove);
+        }
         host.append(row);
       }
     }
@@ -460,19 +467,19 @@
     const items=Object.entries(workspaceKinds[platform]);
     if(platform==='doorks'){
       workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px">
-        <div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0">Doorks Productivity Dashboard</h2><p class="hint" style="margin:6px 0 0">Independent Doorks operations · PDS data stays separate</p></div><button class="btn btn-orange" id="doorksNewDispatch" type="button">+ New Dispatch</button></div>
+        <div class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0">Doorks Productivity Dashboard</h2></div><button class="btn btn-orange" id="doorksNewDispatch" type="button">+ New Dispatch</button></div>
         <div id="doorksMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:18px"></div></div>
-        <div class="card" id="doorksCalendarPanel"><h3 style="margin-top:0">Scheduling Calendar</h3><p class="hint">Work orders with a scheduled date appear here. This is an internal scheduling overview, not customer self-booking.</p><div id="doorksCalendarBody"></div></div>
+        <div class="card" id="doorksCalendarPanel"><h3 style="margin-top:0">Scheduling Calendar</h3><div id="doorksCalendarBody"></div></div>
         </div>`;
       const metrics=el('doorksMetrics');
-      const metricDefinitions=[['Active Work Orders','work_orders',a=>a.filter(x=>!['Completed','Cancelled'].includes(x.status)).length],['Scheduled Visits','work_orders',a=>a.filter(x=>x.scheduled_date).length],['Customers','customers',a=>a.length],['Open Receivables','receivables',a=>a.filter(x=>Number(x.amount||0)>Number(x.paid||0)).length]];
+      const metricDefinitions=[['Active Work Orders','work_orders',a=>a.filter(x=>!['Completed','Cancelled'].includes(x.status)).length],['Scheduled Visits','work_orders',a=>{const visits=a.filter(x=>x.scheduled_date&&!['Cancelled'].includes(x.status));const remote=visits.filter(x=>/remote|video|virtual/i.test(x.visit_type||x.service_type||'')).length;return `${visits.length} (Remote ${remote} / In-Person ${visits.length-remote})`;}],['Open Estimates','estimates_invoices',a=>a.filter(x=>/estimate|quote/i.test(x.document_type||'')&&!/approved|rejected|declined|closed|cancelled/i.test(x.status||'')).length],['Open Invoices','estimates_invoices',a=>a.filter(x=>/invoice/i.test(x.document_type||'')&&!/paid|void|cancelled/i.test(x.status||'')).length]];
       for(const [title,kind,calculate] of metricDefinitions){const card=document.createElement('div');card.style.cssText='padding:16px;border:1px solid #d9dee7;border-radius:12px;background:#fff';const label=document.createElement('p');label.className='hint';label.textContent=title;const value=document.createElement('h2');value.textContent='—';value.style.margin='8px 0 0';card.append(label,value);metrics.append(card);fetchJSON('/workspaces/doorks/'+kind).then(r=>{value.textContent=String(calculate(r.items||[]));}).catch(()=>{value.textContent='—';});}
       let calMonth=new Date();calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth(),1);
       const panel=el('doorksCalendarPanel'),body=el('doorksCalendarBody');
       async function drawCalendar(){body.replaceChildren();const heading=document.createElement('div');heading.style.cssText='display:flex;gap:12px;align-items:center;justify-content:center;margin-bottom:14px';const prev=document.createElement('button');prev.className='btn';prev.textContent='←';const next=document.createElement('button');next.className='btn';next.textContent='→';const month=document.createElement('strong');month.textContent=calMonth.toLocaleString(undefined,{month:'long',year:'numeric'});prev.onclick=()=>{calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()-1,1);drawCalendar();};next.onclick=()=>{calMonth=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,1);drawCalendar();};heading.append(prev,month,next);body.append(heading);const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px';body.append(grid);for(const day of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']){const label=document.createElement('strong');label.style.cssText='text-align:center;font-size:12px';label.textContent=day;grid.append(label);}let jobs=[];try{jobs=(await fetchJSON('/workspaces/doorks/work_orders')).items||[];}catch{}const offset=calMonth.getDay(),days=new Date(calMonth.getFullYear(),calMonth.getMonth()+1,0).getDate();for(let i=0;i<offset;i++)grid.append(document.createElement('span'));for(let day=1;day<=days;day++){const date=calMonth.getFullYear()+'-'+String(calMonth.getMonth()+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');const matches=jobs.filter(x=>String(x.scheduled_date||'').slice(0,10)===date);const cell=document.createElement('button');cell.type='button';cell.style.cssText='min-height:70px;min-width:0;border:1px solid #d9dee7;border-radius:9px;background:white;padding:6px;text-align:left;cursor:pointer';cell.textContent=String(day);if(matches.length){const info=document.createElement('div');info.style.cssText='font-size:11px;color:#f97316;font-weight:700;overflow-wrap:anywhere';info.textContent=matches.length+' visit'+(matches.length===1?'':'s');cell.append(info);cell.title=matches.map(x=>x.customer||x.description||'Work order').join(' • ');}cell.onclick=()=>renderBusinessCollection('doorks','work_orders');grid.append(cell);}}
       el('doorksNewDispatch').onclick=()=>renderBusinessCollection('doorks','work_orders',true);drawCalendar();
     }else{
-      workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><p class="hint">Independent ${platform.toUpperCase()} workspace · PDS business records remain unchanged</p><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><p class="hint">Select a section to manage its records. Existing Saddleback records remain in PDS pending verified migration.</p><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
+      workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
     }
     if(platform==='doorks' && el('businessNav')){const b=document.createElement('button');b.className='btn btn-orange';b.textContent='Accounting — Doorks';b.onclick=()=>renderDoorksAccounting();el('businessNav').prepend(b);const c=document.createElement('button');c.style.cssText='text-align:left;border:1px solid #d9dee7;border-radius:12px;padding:18px;background:#fff;cursor:pointer';c.innerHTML='<strong>Accounting</strong><p class="hint">Independent Doorks receivables, inventory, receipts and statements</p>';c.onclick=()=>renderDoorksAccounting();el('businessDashboardCards').prepend(c);}
     const nav=el('businessNav'),cards=el('businessDashboardCards');
@@ -1706,6 +1713,8 @@ async function apiListForms() {
 
   function updateLoginUi(message = "") {
     const loggedIn = !!currentUser;
+    document.body.classList.toggle("doorks-logged-out",!loggedIn);
+    if(loggedIn){const aside=document.querySelector("main.layout > aside.sidebar");if(aside)for(const panel of aside.querySelectorAll(".panel"))panel.style.removeProperty("display");}
     const awaitingPin = !loggedIn && !!pendingPinUser;
     if (usernameInput) usernameInput.disabled = loggedIn || awaitingPin;
     if (passwordInput) passwordInput.disabled = loggedIn || awaitingPin;
@@ -1735,6 +1744,9 @@ async function apiListForms() {
     workspaceBody.innerHTML = `<div class="card"><h3>Doorks Login</h3><div class="hint">${escapeHtml(message)}</div><div class="hint" style="margin-top:8px;">Use your seeded admin login to continue.</div></div>`;
     currentView = { refresh: async () => {} };
     if (loginBody) loginBody.style.display = "block";
+    document.body.classList.add("doorks-logged-out");
+    const aside=document.querySelector("main.layout > aside.sidebar");
+    if(aside){for(const panel of aside.querySelectorAll(".panel")){if(!panel.contains(loginBody))panel.style.display="none";}}
   }
 
   async function handleLogin() {
@@ -5693,10 +5705,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const items = (res.items || []).filter(r => !r.deleted_at); const categories = cat.items || [];
       const periodReceipts=items.filter(r=>inPeriod(r.date));
       const money = n => "$" + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
-      const total = periodReceipts.reduce((sum, r) => sum + Number(r.amount || 0), 0);
+      const total = periodReceipts.filter(r=>r.authorization_status==="Authorized").reduce((sum, r) => sum + Number(r.amount || 0), 0);
       const month = new Date().toISOString().slice(0,7);
       const monthly = items.filter(r => String(r.date || "").startsWith(month));
-      const monthTotal = monthly.reduce((sum,r) => sum + Number(r.amount || 0),0);
+      const monthTotal = monthly.filter(r=>r.authorization_status==="Authorized").reduce((sum,r) => sum + Number(r.amount || 0),0);
       const make = (tag, text, parent=host) => { const node = document.createElement(tag); node.textContent = text; parent.appendChild(node); return node; };
       host.innerHTML = "";
       if (section === "overview") {
@@ -5736,14 +5748,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           }
         }catch(error){make("p",`Accounting summaries unavailable: ${error.message||error}`);}
         make("h3", "Spending by category");
-        const grouped = {}; periodReceipts.forEach(r => { const k = r.category || "Other"; grouped[k] = (grouped[k]||0)+Number(r.amount||0); });
+        const grouped = {}; periodReceipts.filter(r=>r.authorization_status==="Authorized").forEach(r => { const k = r.category || "Other"; grouped[k] = (grouped[k]||0)+Number(r.amount||0); });
         Object.entries(grouped).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
         make("h3", "Spending by employee");
-        const employees = {}; periodReceipts.forEach(r => { const k = r.employee || "Unassigned"; employees[k] = (employees[k]||0)+Number(r.amount||0); });
+        const employees = {}; periodReceipts.filter(r=>r.authorization_status==="Authorized").forEach(r => { const k = r.employee || "Unassigned"; employees[k] = (employees[k]||0)+Number(r.amount||0); });
         Object.entries(employees).sort((a,b)=>b[1]-a[1]).forEach(([name,amount]) => make("div", `${name}: ${money(amount)}`));
       } else if (section === "receipts") {
         const dashboard=document.createElement("div");dashboard.className="grid2";host.appendChild(dashboard);
-        const byCategory={};periodReceipts.forEach(r=>{const k=r.category||"Uncategorized";byCategory[k]=(byCategory[k]||0)+Number(r.amount||0);});
+        const byCategory={};periodReceipts.filter(r=>r.authorization_status==="Authorized").forEach(r=>{const k=r.category||"Uncategorized";byCategory[k]=(byCategory[k]||0)+Number(r.amount||0);});
         for(const [label,value] of [["Receipts in period",String(periodReceipts.length)],["Expenses in period",money(total)],["Employees",String(new Set(periodReceipts.map(r=>r.employee).filter(Boolean)).size)],["Categories",String(Object.keys(byCategory).length)]]){const c=document.createElement("div");c.className="card";c.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`;dashboard.appendChild(c);}
         const categoryTitle=make("h4","Spending by category");
         for(const [name,value] of Object.entries(byCategory).sort((a,b)=>b[1]-a[1]))make("div",`${name}: ${money(value)}`);
@@ -5810,6 +5822,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               try{await fetchJSON(`/receipts/${encodeURIComponent(r.id)}`,{method:"DELETE"});await renderAccountingView("receipts");}
               catch(err){alert(`Delete failed: ${err.message||err}`);}
             });
+            const approval=document.createElement('span');approval.className='hint';approval.textContent=r.authorization_status==='Authorized'?`Authorized by ${r.authorized_by||'office'} ${r.authorized_at||''}`:'Pending Authorization';controls.append(approval);
+            if(r.authorization_status!=='Authorized'){const authorize=document.createElement('button');authorize.className='btn btn-orange';authorize.textContent='Authorize';authorize.onclick=async()=>{if(!confirm('Authorize this receipt for financial reporting?'))return;try{await fetchJSON(`/receipts/${encodeURIComponent(r.id)}/authorize`,{method:'POST'});await renderAccountingView('receipts');}catch(e){alert(e.message||e);}};controls.append(authorize);}
             controls.append(edit,view,del);line.append(name,controls);list.appendChild(line);
           });
         }

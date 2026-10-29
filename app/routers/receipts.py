@@ -89,6 +89,7 @@ async def create_receipt(
         "card_last4": card_last4, "receipt_number": receipt_number.strip()[:120],
         "notes": notes.strip()[:2000], "category": category.strip()[:100] or "Other", "filename": original,
         "stored_file": filename, "created_at": datetime.now(timezone.utc).isoformat(),
+        "authorization_status": "Pending Authorization",
     }
     with _lock:
         target = base / filename
@@ -147,6 +148,30 @@ async def update_categories(request: Request, x_api_key: Optional[str] = Header(
     return {"ok": True, "items": items}
 
 
+@router.post("/{receipt_id}/authorize")
+def authorize_receipt(request: Request, receipt_id: str, x_api_key: Optional[str] = Header(default=None)):
+    _require(request, x_api_key)
+    _office_only(request)
+    from app.routers.accounting import require_office
+    require_office(request, x_api_key)
+    _, index = _paths(request)
+    with _lock:
+        items = _load(index)
+        item = next((x for x in items if x.get("id") == receipt_id and not x.get("deleted_at")), None)
+        if item is None:
+            raise HTTPException(404, "Receipt not found")
+        if item.get("authorization_status") == "Authorized":
+            return {"ok": True, "item": item}
+        user = getattr(request.state, "auth_user", None) or {}
+        item["authorization_status"] = "Authorized"
+        item["authorized_by"] = str(user.get("name") or user.get("username") or user.get("id") or "office")
+        item["authorized_at"] = datetime.now(timezone.utc).isoformat()
+        tmp = index.with_suffix(".tmp")
+        tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
+        tmp.replace(index)
+    return {"ok": True, "item": item}
+
+
 @router.patch("/{receipt_id}")
 async def edit_receipt(request: Request, receipt_id: str, x_api_key: Optional[str] = Header(default=None)):
     _require(request, x_api_key)
@@ -178,6 +203,10 @@ async def edit_receipt(request: Request, receipt_id: str, x_api_key: Optional[st
             if key in {"date", "employee", "vendor"} and not value:
                 raise HTTPException(400, f"{key} is required")
             item[key] = value
+        if changes and any(k in changes for k in ("amount", "vendor", "date", "employee", "category")):
+            item["authorization_status"] = "Pending Authorization"
+            item.pop("authorized_by", None)
+            item.pop("authorized_at", None)
         item["updated_at"] = datetime.now(timezone.utc).isoformat()
         tmp = index.with_suffix(".tmp")
         tmp.write_text(json.dumps(items, indent=2), encoding="utf-8")
@@ -192,7 +221,7 @@ def export_receipts(request: Request, x_api_key: Optional[str] = Header(default=
     from app.routers.accounting import require_office
     require_office(request, x_api_key)
     _, index = _paths(request)
-    fields = ["date", "employee", "vendor", "category", "amount", "card_last4", "receipt_number", "notes", "created_at", "updated_at", "id"]
+    fields = ["date", "employee", "vendor", "category", "amount", "card_last4", "receipt_number", "notes", "created_at", "updated_at", "authorization_status", "authorized_by", "authorized_at", "id"]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()

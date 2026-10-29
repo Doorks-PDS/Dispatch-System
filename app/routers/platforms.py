@@ -38,7 +38,7 @@ def switch(request: Request, payload: Selection):
     if target not in PLATFORMS: raise HTTPException(400, "Unknown platform")
     if target != "pds":
         env_name = "DOORKS_PLATFORM_PIN" if target == "doorks" else "SDC_PLATFORM_PIN"
-        expected = os.getenv(env_name, "0803" if target == "doorks" else "0404")
+        expected = os.getenv(env_name, "0404")
         if not hmac.compare_digest(payload.pin, expected):
             raise HTTPException(403, "Incorrect platform PIN")
     request.session["active_platform"] = target
