@@ -208,8 +208,15 @@
 
   const jobsNavCol = (navJobFlow && navJobFlow.parentElement) || (navEstimateInvoice && navEstimateInvoice.parentElement) || (navEstimatePage && navEstimatePage.parentElement);
   if (jobsNavCol) {
-    const estimateBtn = navEstimateInvoice || navEstimatePage;
-    [navJobFlow, navToDoList, navAllJobs, navDoorLogs, navCustomers, navContacts, estimateBtn, navPartsList].forEach((node) => {
+    const businessHubBtn = navEstimateInvoice || navEstimatePage;
+    if (businessHubBtn) {
+      const labels = businessHubBtn.querySelectorAll("span, small");
+      if (labels[0]) labels[0].textContent = "Business Hub";
+      if (labels[1]) labels[1].textContent = "Estimates / Invoices / POs";
+    }
+    // PDS Job Flow: Job Flow, To-Do List, All Jobs, Business Hub,
+    // Customers, Door Records, Parts List.
+    [navJobFlow, navToDoList, navAllJobs, businessHubBtn, navCustomers, navDoorLogs, navPartsList, navContacts].forEach((node) => {
       if (node && node.parentElement === jobsNavCol) jobsNavCol.appendChild(node);
     });
   }
