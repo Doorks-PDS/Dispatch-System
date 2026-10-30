@@ -61,7 +61,7 @@ async def create_receipt(
     request: Request,
     date: str = Form(...), employee: str = Form(...), vendor: str = Form(...),
     amount: float = Form(...), card_last4: str = Form(""), receipt_number: str = Form(""),
-    notes: str = Form(""), category: str = Form("Other"), document_type: str = Form("Receipt"),
+    notes: str = Form(""), category: str = Form("Other"), document_type: str = Form(""),
     job_number: str = Form(""), customer: str = Form(""), file: UploadFile = File(...),
     x_api_key: Optional[str] = Header(default=None),
 ):
@@ -334,7 +334,9 @@ async def extract_receipt(request: Request, file: UploadFile = File(...), x_api_
 
     instructions = (
         "Read this purchase receipt or supplier packing slip. Return ONLY a JSON object with keys vendor, date, amount, "
-        "receipt_number, card_last4, job_number, customer. Each value must be a string or null. "
+        "receipt_number, card_last4, job_number, customer, document_type. Each value must be a string or null. "
+        "Set document_type to Receipt only for a purchase/payment receipt or Packing Slip only for a supplier shipment/delivery packing slip. "
+        "If the type is unclear return null; do not guess. "
         "Date must be YYYY-MM-DD; amount must be the final amount actually paid, "
         "formatted as digits with two decimal places and no currency symbol. "
         "Card last4 is only the last four digits when explicitly printed. "
@@ -367,6 +369,9 @@ async def extract_receipt(request: Request, file: UploadFile = File(...), x_api_
         return {"ok": True, "fields": {}, "message": "AI could not read this receipt. Please enter the details manually."}
 
     fields = {}
+    document_type = extracted.get("document_type")
+    if document_type in ("Receipt", "Packing Slip"):
+        fields["document_type"] = document_type
     for key in ("vendor", "receipt_number", "job_number", "customer"):
         value = extracted.get(key)
         if isinstance(value, str) and value.strip():
