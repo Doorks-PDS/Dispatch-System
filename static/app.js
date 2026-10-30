@@ -466,6 +466,39 @@
     }
   }
   function renderSdcLegacyNotice(){clearWorkspaceActions();setWorkspace('SDC — Legacy Records');workspaceBody.innerHTML='<div class="card"><h2>Legacy Saddleback Records</h2><p class="hint">The original PDS Saddleback orders and taxes records have not been migrated into SDC. They remain stored in PDS and are not overwritten. Use the PDS workspace to access the original records until a safe migration is available.</p><button class="btn" id="legacySdcBack">← Dashboard</button></div>';el('legacySdcBack').onclick=()=>showPlatformShell('sdc');}
+  // Phase 2R-D: cross-workspace Accounts Payable visibility, derived from existing POs.
+  // This is a purchasing exposure report, NOT a ledger of approved vendor bills.
+  async function renderAccountsPayable(platform){
+    if(activePlatform!==platform)return;
+    const back=platform==='pds'?()=>renderAccountingView('hub'):platform==='sdc'?renderSdcAccounting:renderDoorksAccountingHub;
+    clearWorkspaceActions();
+    setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Accounts Payable');
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Accounts Payable</h2><p class="hint">Purchase order commitments and payment status. These amounts are NOT verified supplier bills or accounting liabilities.</p></div><button class="btn" id="apBack">← Accounting Hub</button></div><div id="apMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:18px 0"></div><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><input class="input" id="apSearch" placeholder="Search supplier, PO or status…" style="flex:1;min-width:200px"><button class="btn" id="apNewPO">+ Purchase Order</button></div><div id="apRows" style="margin-top:14px">Loading purchase orders…</div></div>';
+    el('apBack').onclick=back;
+    el('apNewPO').onclick=()=>platform==='pds'?renderEstimatePage('purchase_orders'):renderBusinessCollection(platform,'purchase_orders',true,back);
+    const endpoint=platform==='pds'?'/pds-purchase-orders':'/workspaces/'+platform+'/purchase_orders';
+    let orders=[];
+    try{
+      const response=await fetchJSON(endpoint);
+      orders=Array.isArray(response)?response:Array.isArray(response.items)?response.items:Array.isArray(response.orders)?response.orders:Array.isArray(response.records)?response.records:[];
+    }catch(e){el('apRows').textContent='Could not load purchase orders: '+(e.message||e);return;}
+    const money=n=>'$'+Number(n||0).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    const getData=o=>o.data&&typeof o.data==='object'?o.data:o;
+    const getAmount=o=>{const d=getData(o);return Number(d.amount||d.total||d.total_amount||0)||0;};
+    const isPaid=o=>{const d=getData(o);return String(d.payment_status||'').toLowerCase()==='paid'||String(d.status||'').toLowerCase()==='paid';};
+    const relevant=orders.filter(o=>!['cancelled','canceled'].includes(String(getData(o).status||'').toLowerCase()));
+    const unpaid=relevant.filter(o=>!isPaid(o));
+    const metrics=[['Purchase Orders',relevant.length],['Unpaid / Unconfirmed POs',unpaid.length],['PO Value Not Marked Paid',money(unpaid.reduce((n,o)=>n+getAmount(o),0))]];
+    const metricHost=el('apMetrics');
+    for(const [label,value] of metrics){const card=document.createElement('div');card.className='card';const t=document.createElement('div');t.className='hint';t.textContent=label;const v=document.createElement('h2');v.textContent=String(value);card.append(t,v);metricHost.append(card);}
+    const render=()=>{
+      const needle=el('apSearch').value.trim().toLowerCase(), host=el('apRows');host.replaceChildren();
+      const shown=relevant.filter(o=>{const d=getData(o);return [d.vendor,d.supplier,d.po_number,d.status,d.payment_status].some(x=>String(x||'').toLowerCase().includes(needle));});
+      if(!shown.length){host.textContent='No matching purchase orders.';return;}
+      for(const item of shown){const d=getData(item),row=document.createElement('div');row.className='card';row.style.marginBottom='10px';const heading=document.createElement('strong');heading.textContent=(d.po_number||'Purchase order')+' — '+(d.vendor||d.supplier||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent='PO value: '+money(getAmount(item))+'  |  Status: '+(d.status||'Not set')+'  |  Payment: '+(d.payment_status||'Not confirmed');row.append(heading,info);host.append(row);}
+    };
+    el('apSearch').oninput=render;render();
+  }
   function renderSdcAccounting(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting Hub');
@@ -479,12 +512,13 @@
       {label:'Overview & Reports',kind:'__overview',icon:'📊',description:'Summary of expenses, receivables, inventory and purchasing.'},
       {label:'Receipts & Expenses',kind:'expenses',icon:'🧾',description:'Record business purchases, expenses and receipt details.'},
       {label:'Accounts Receivable',kind:'receivables',icon:'💳',description:'Review customer balances and payments due.'},
+      {label:'Accounts Payable',kind:'__payable',icon:'💸',description:'Review purchase orders and supplier payment status.'},
       {label:'Inventory & Receiving',kind:'inventory',icon:'📦',description:'View materials, stock and receiving records.'},
       {label:'Purchase Orders',kind:'purchase_orders',icon:'📋',description:'Manage supplier purchase orders and statuses.'},
       {label:'Vendors',kind:'vendors',icon:'🏢',description:'Access supplier information and contact records.'}
     ];
     el('sdcQuickNew').onclick=()=>renderAccountingQuickMenu('sdc','sdcQuickOptions');
-    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
+    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():e.kind==='__payable'?renderAccountsPayable('sdc'):renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
   }
   function showAccountingMetrics(platform,title,entries,back){
     clearWorkspaceActions();setWorkspace(title);
@@ -665,6 +699,7 @@
     makeHubCards(el('doorksAcctHubCards'),[
       {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
       {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
+      {icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.',open:()=>renderAccountsPayable('doorks')},
       {icon:'📦',label:'Inventory & Intake',description:'Review received and outstanding materials.',open:()=>renderDoorksAccounting('inventory')},
       {icon:'🧾',label:'Receipts',description:'Review expense and receipt entries.',open:()=>renderDoorksAccounting('receipts')},
       {icon:'🏦',label:'Statements',description:'Review financial statement records.',open:()=>renderDoorksAccounting('statements')}
@@ -6034,6 +6069,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const sections=[
       {id:'overview',icon:'📊',label:'Overview & Reports',description:'Financial summary and reporting.'},
       {id:'receivables',icon:'💳',label:'Accounts Receivable',description:'Customer payments and invoice balances.'},
+      {id:'payables',icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.'},
       {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
       {id:'receipts',icon:'🧾',label:'Receipts & Packing Slips',description:'Review uploaded expense and supplier documents.'},
       {id:'statements',icon:'🏦',label:'Statements',description:'Statements and document records.'},
@@ -6041,7 +6077,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'}
     ];
     if(isHub){
-      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():renderAccountingView(x.id)})));
+      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():x.id==='payables'?renderAccountsPayable('pds'):renderAccountingView(x.id)})));
     }else{
       workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
       workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('hub');
