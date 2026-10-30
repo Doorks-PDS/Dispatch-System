@@ -9,12 +9,9 @@ from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 router=APIRouter(prefix="/workspace-ai",tags=["workspace-ai"])
 ALLOWED={".pdf":"application/pdf",".jpg":"image/jpeg",".jpeg":"image/jpeg",".png":"image/png",".webp":"image/webp"}
 FIELDS={
+  ("sdc","purchase_orders"):("po_number","vendor","vendor_id","customer","order_number","date","expected_date","category","description","quantity","unit_cost","tax","shipping","amount","status","received_quantity","payment_status","notes"),
+  ("doorks","purchase_orders"):("po_number","vendor","vendor_id","customer","work_order_number","date","expected_date","category","description","quantity","unit_cost","tax","shipping","amount","status","received_quantity","payment_status","notes"),
   ("sdc","orders"):("customer","item","order_date","status","total","shipping","tax","notes"),
-  ("sdc","customers"):("name","contact","email","phone","address","notes"),
-  ("sdc","vendors"):("name","contact","email","phone","service_area","trade","notes"),
-  ("sdc","products"):("sku","name","description","price","notes"),
-  ("sdc","inventory"):("part_number","description","quantity","unit_cost","supplier","notes"),
-  ("doorks","inventory"):("part_number","description","quantity","unit_cost","supplier","notes"),
   ("doorks","customers"):("name","contact","email","phone","address","notes"),
   ("doorks","vendors"):("name","contact","email","phone","service_area","trade","notes"),
   ("doorks","customer_inquiries"):("customer","contact","email","phone","address","service_type","preferred_date","preferred_time","visit_type","description","status","work_order_number","notes"),
@@ -55,7 +52,7 @@ async def extract(platform:str,kind:str,request:Request,file:Optional[UploadFile
     try:
         async with httpx.AsyncClient(timeout=65.0) as client:
             response=await client.post("https://api.openai.com/v1/responses",headers={"Authorization":f"Bearer {key}"},json={
-                "model":os.getenv("DOORKS_RECEIPT_VISION_MODEL","gpt-4.1-mini"),"store":False,"max_output_tokens":1000,
+                "model":os.getenv("DOORKS_RECEIPT_VISION_MODEL","gpt-4.1-mini"),"store":False,"max_output_tokens":2200,
                 "input":[{"role":"user","content":content}]
             })
             response.raise_for_status()

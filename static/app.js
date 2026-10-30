@@ -346,7 +346,7 @@
       ? [['customers','Customers & Contacts'],['vendors','Vendors'],['orders','Orders (preview only)'],['products','Products'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']]
       : [['customers','Customers & Contacts'],['vendors','Vendors'],['work_orders','Legacy Work Orders (preview only)'],['estimates_invoices','Estimates & Invoices (preview only)'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']];
     workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><h2>Data Import Center</h2>
-      <p class="hint">Phase 2Q-C: review-first CSV and AI document importer. Upload CSV for multiple records or PDF/image for an AI-extracted draft. AI document extraction currently proposes one record per file. Review every field before approval. No existing records are overwritten. Numbered jobs, estimates, invoices and POs are preview-only until their mapping rules are completed.</p>
+      <p class="hint">Phase 2Q-C: review-first CSV and AI document importer. Upload CSV for multiple records or PDF/image for an AI-extracted draft. AI document extraction currently proposes one record per file. Review every field before approval. No existing records are overwritten. Purchase orders and other numbered documents can be analyzed and edited, but cannot be imported yet; numbering and links remain protected.</p>
       <div class="grid2"><label>Destination <select class="input" id="diKind"></select></label><label>Source file <input class="input" id="diFile" type="file" accept=".csv,.pdf,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"></label></div>
       <button class="btn btn-orange" id="diPreview" style="margin-top:12px">Analyze & Preview File</button>
       <p id="diStatus" class="hint" role="status"></p>
@@ -368,24 +368,28 @@
         token=data.token;previewKind=kind.value;
         const heading=document.createElement('h3');heading.textContent=`${data.count} rows detected — ${data.filename}`;results.append(heading);
         const cols=document.createElement('p');cols.className='hint';cols.textContent='Detected columns: '+data.columns.join(', ');results.append(cols);
-        const table=document.createElement('div');table.style.cssText='overflow:auto;max-height:420px;border:1px solid #d9dee7;border-radius:8px';
+        const singleRecord=data.count===1;
+        const table=document.createElement('div');table.style.cssText=singleRecord?'display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;padding:14px;border:1px solid #d9dee7;border-radius:12px;background:#fbfcfe':'overflow:auto;max-height:420px;border:1px solid #d9dee7;border-radius:8px';
         const grid=document.createElement('table');grid.style.cssText='border-collapse:collapse;width:100%;font-size:13px';
         const header=document.createElement('tr');
-        for(const col of data.columns){const cell=document.createElement('th');cell.textContent=col;cell.style.cssText='padding:8px;text-align:left;white-space:nowrap';header.append(cell);}grid.append(header);
+        for(const col of data.columns){const cell=document.createElement('th');cell.textContent=col.replaceAll('_',' ');cell.style.cssText='padding:8px;text-align:left;white-space:nowrap';header.append(cell);}if(!singleRecord)grid.append(header);
         const editable=[];
         for(let rowIndex=0;rowIndex<data.sample.length;rowIndex++){
           const row=data.sample[rowIndex],tr=document.createElement('tr'),inputs={};
           for(const col of data.columns){
-            const td=document.createElement('td');td.style.cssText='padding:6px;border-top:1px solid #eee;vertical-align:top';
+            const td=document.createElement(singleRecord?'label':'td');td.style.cssText=singleRecord?'display:grid;gap:6px;min-width:0;font-weight:600;font-size:13px':'padding:6px;border-top:1px solid #eee;vertical-align:top';
+            if(singleRecord){const caption=document.createElement('span');caption.textContent=col.replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());td.append(caption);}
             const input=document.createElement(String(row[col]??'').length>110?'textarea':'input');
             if(input.tagName==='INPUT')input.type='text';else input.rows=3;
             input.value=String(row[col]??'');input.maxLength=4000;input.className='input';
-            input.style.cssText='min-width:135px;width:100%;box-sizing:border-box;font-size:13px;padding:7px;';
+            input.style.cssText=singleRecord?'min-width:0;width:100%;box-sizing:border-box;font-size:14px;padding:10px;min-height:38px':'min-width:135px;width:100%;box-sizing:border-box;font-size:13px;padding:7px;';
             input.setAttribute('aria-label',`Row ${rowIndex+1} ${col}`);td.append(input);tr.append(td);inputs[col]=input;
           }
-          grid.append(tr);editable.push(inputs);
+          if(singleRecord){for(const child of Array.from(tr.children))table.append(child);}
+          else grid.append(tr);
+          editable.push(inputs);
         }
-        table.append(grid);results.append(table);
+        if(!singleRecord)table.append(grid);results.append(table);
         const editHint=document.createElement('p');editHint.className='hint';
         editHint.textContent=data.count>data.sample.length?`Showing and editing the first ${data.sample.length} of ${data.count} rows. Other rows will remain unchanged.`:'You can correct any extracted field before importing.';
         results.append(editHint);
@@ -417,6 +421,26 @@
       }catch(err){status.textContent=err.message||String(err);}
     };
   }
+  function renderSdcAccounting(){
+    if(activePlatform!=='sdc')return;
+    clearWorkspaceActions();setWorkspace('SDC — Accounting');
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><h2>SDC Accounting</h2><p class="hint">Financial records for Saddleback Design Co. only. Receipts are currently recorded under Expenses; dedicated receipt attachments, bank reconciliation and statement processing are planned.</p><div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></div></div>';
+    const links=[
+      ['Receipts & Expenses','expenses','Record supplier receipts and business expenses'],
+      ['Accounts Receivable','receivables','Track customer payments and balances'],
+      ['Inventory & Receiving','inventory','Track materials and received quantities'],
+      ['Purchase Orders','purchase_orders','Review supplier POs and their status'],
+      ['Vendors','vendors','Open supplier records']
+    ];
+    const host=el('sdcAccountingLinks');
+    for(const [label,kind,description] of links){
+      const button=document.createElement('button');button.type='button';button.className='btn';
+      button.style.cssText='text-align:left;display:grid;gap:8px;min-height:96px;padding:15px;border-radius:12px';
+      const title=document.createElement('strong');title.textContent=label;
+      const detail=document.createElement('span');detail.className='hint';detail.textContent=description;
+      button.append(title,detail);button.onclick=()=>renderBusinessCollection('sdc',kind);host.append(button);
+    }
+  }
   function renderBusinessHub(platform){
     if(activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
@@ -425,6 +449,7 @@
     for(const [label,kind] of [['Estimates & Invoices','estimates_invoices'],['Purchase Orders','purchase_orders'],['Vendors','vendors'],['Customers','customers']]){
       const b=document.createElement('button');b.className='btn btn-orange';b.textContent=label;b.onclick=()=>renderBusinessCollection(platform,kind);host.append(b);
     }
+    if(platform==='sdc'){const accounting=document.createElement('button');accounting.className='btn btn-orange';accounting.textContent='Accounting';accounting.onclick=()=>renderSdcAccounting();host.append(accounting);}
     const back=document.createElement('button');back.className='btn';back.textContent='← Dashboard';back.onclick=()=>showPlatformShell(platform);host.append(back);
   }
   async function renderBusinessCollection(platform,kind,openNew=false) {
@@ -586,6 +611,7 @@
       addSdc('sdcOfficeNav','Vendors',()=>renderBusinessCollection('sdc','vendors'));
       addSdc('sdcOfficeNav','Products',()=>renderBusinessCollection('sdc','products'));
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
+      addSdc('sdcOfficeNav','Accounting',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
       addSdc('sdcDevelopmentNav','Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads'));
     }
