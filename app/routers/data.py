@@ -277,13 +277,14 @@ def list_parts(
             "id": _norm(item.get("id")),
             "manufacturer": _norm(item.get("manufacturer")),
             "part_number": _norm(item.get("part_number")),
+            "supplier": _norm(item.get("supplier")),
             "description": _norm(item.get("description")),
             "price": item.get("price", ""),
             # compatibility with existing estimate lookup
             "Item": _norm(item.get("part_number")),
             "Description": _norm(item.get("description")),
             "Price": item.get("price", ""),
-            "Preferred Vendor": _norm(item.get("manufacturer")),
+            "Preferred Vendor": _norm(item.get("supplier") or item.get("manufacturer")),
         }
         hay = " ".join([row["manufacturer"], row["part_number"], row["description"]]).lower()
         if qn and qn not in hay:
@@ -304,6 +305,7 @@ def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str]
         "id": uuid.uuid4().hex,
         "manufacturer": _norm(payload.manufacturer),
         "part_number": _norm(payload.part_number),
+        "supplier": _norm(payload.supplier),
         "description": _norm(payload.description),
         "price": payload.price,
     }
@@ -323,6 +325,7 @@ def update_part(request: Request, part_id: str, payload: PartPayload, x_api_key:
         if _norm(item.get("id")) == _norm(part_id):
             item["manufacturer"] = _norm(payload.manufacturer)
             item["part_number"] = _norm(payload.part_number)
+            item["supplier"] = _norm(payload.supplier)
             item["description"] = _norm(payload.description)
             item["price"] = payload.price
             items[i] = item

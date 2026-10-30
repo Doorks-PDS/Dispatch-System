@@ -221,6 +221,16 @@
     });
   }
  
+  // PDS navigation cleanup: move existing controls without replacing their listeners.
+  const pdsJobCol=navJobFlow?.parentElement;
+  const pdsOfficeCol=navDataCenter?.parentElement;
+  if(pdsJobCol) [navJobFlow,navToDoList,navAllJobs,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
+  if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
+  const pdsFormsCol=document.querySelector('#formsBody .navcol');
+  if(pdsFormsCol) [navFormsTimeCard,navFormsReceipts,navFormsTimeOff,navFormsSignOff,navTakeoffs].forEach(b=>{if(b)pdsFormsCol.appendChild(b);});
+  const formsHeading=formsToggle?.querySelector('.panel-hd')||formsToggle;
+  if(formsHeading && /forms/i.test(formsHeading.textContent||'')) formsHeading.textContent='Resources';
+  if(navFormsReceipts){const label=navFormsReceipts.querySelector('span');if(label)label.textContent='Records Upload';}
   const workspaceTitle = el("workspaceTitle");
   const workspaceActions = el("workspaceActions");
   const workspaceBody = el("workspaceBody");
@@ -1492,6 +1502,7 @@
       part_number: payload.part_number || payload.item || payload.Item || "",
       description: payload.description || payload.Description || "",
       price: payload.price ?? payload.Price ?? "",
+      supplier: payload.supplier || payload.Supplier || "",
     };
     const url = body.id ? `/data/parts/${encodeURIComponent(body.id)}` : "/data/parts";
     const method = body.id ? "PUT" : "POST";
@@ -2029,14 +2040,14 @@ async function apiListForms() {
     setVisible(navDataCenter, !!role && perms.dataCenter);
     setVisible(navAccounting, role === "office" || role === "office_admin");
     setVisible(navPayroll, !!role && perms.payroll);
-    setVisible(navEmployees, !!role && perms.employees);
+    setVisible(navEmployees, false); // Available through Accounting Hub
     setVisible(navDataUpload, role === "office_admin" && !!perms.dataUpload);
     setVisible(navSaddleback, false); // Use workspace switcher
     setVisible(navAtlas, !!role && perms.atlas);
     setVisible(navMoses, !!role && perms.moses);
     setVisible(navCustomers, false); // Accessible from Business Hub
     setVisible(navEstimateInvoice, !!role && perms.estimates);
-    setVisible(navPartsList, !!role && perms.parts);
+    setVisible(navPartsList, false); // Available through Business Hub
     setVisible(navDoorLogs, !!role && perms.parts);
     setVisible(navToDoList, !!role && ["office", "office_admin", "admin"].includes(String(role || "")));
     setVisible(navPricingSettings, !!role && perms.estimates);
@@ -5569,7 +5580,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
     async function openPartEditor(item = null) {
       openDrawer(item ? "Edit Part" : "Add Part", (drawerBody, overlay) => {
-        const part = item || { id: "", Manufacturer: "", Item: "", Description: "", Price: "" };
+        const part = item || { id: "", Manufacturer: "", Item: "", Description: "", Price: "", supplier: "" };
         const wrap = document.createElement("div");
         wrap.className = "card";
         wrap.innerHTML = `
@@ -5578,8 +5589,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div><div class="label">Part #</div><input class="input" id="part_item" value="${escapeHtml(part.Item || part.item || "")}" /></div>
           </div>
           <div style="margin-top:10px;"><div class="label">Description</div><textarea id="part_desc">${escapeHtml(part.Description || part.description || "")}</textarea></div>
-          <div style="margin-top:10px;"><div class="label">Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Supplier</div><input class="input" id="part_supplier" placeholder="Preferred supplier" value="${escapeHtml(part.supplier || part.Supplier || "")}" /></div>\n          <div style="margin-top:10px;"><div class="label">Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
         `;
+        const assist=document.createElement('details');
+        assist.style.cssText='margin-top:12px;border:1px solid #d9e1ea;border-radius:10px;padding:12px';
+        assist.innerHTML='<summary style="cursor:pointer;font-weight:700">Part Data Assistant — Paste & Autofill</summary><p class="hint">Paste supplier catalog text. Fields are suggestions; verify before saving. AI document extraction is not connected yet.</p><textarea class="input" id="part_assist_text" rows="4" style="width:100%;box-sizing:border-box" placeholder="Manufacturer: ...\\nPart #: ...\\nDescription: ...\\nSupplier: ...\\nPrice: ..."></textarea><button type="button" class="btn" id="part_assist_apply">Autofill labeled fields</button>';
+        wrap.appendChild(assist);
+        assist.querySelector('#part_assist_apply').onclick=()=>{
+          const raw=assist.querySelector('#part_assist_text').value;
+          const fields=[[/^(?:manufacturer|mfg)\s*:\s*(.+)$/im,'#part_mfg'],[/^(?:part\s*(?:#|number)|item)\s*:\s*(.+)$/im,'#part_item'],[/^description\s*:\s*(.+)$/im,'#part_desc'],[/^supplier\s*:\s*(.+)$/im,'#part_supplier'],[/^price\s*:\s*\$?([\d,.]+)$/im,'#part_price']];
+          for(const [rx,sel] of fields){const m=raw.match(rx);if(m)wrap.querySelector(sel).value=m[1].trim().replace(/,/g,'');}
+        };
         const actions = document.createElement("div");
         actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "12px";
         const save = document.createElement("button"); save.className = "btn btn-orange"; save.textContent = "Save";
@@ -5596,6 +5616,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             item: wrap.querySelector("#part_item").value.trim(),
             description: wrap.querySelector("#part_desc").value.trim(),
             price: Number(wrap.querySelector("#part_price").value || 0),
+            supplier: wrap.querySelector("#part_supplier").value.trim(),
           });
           overlay.remove();
           refresh();
@@ -5612,7 +5633,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row = document.createElement("div");
         row.className = "jobrow";
         row.style.cursor = "pointer";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}</div><div class="hint">$${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}</div>`;
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}</div><div class="hint">$${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}</div>`;
         row.addEventListener("click", ()=> openPartEditor(p));
         list.appendChild(row);
       });
@@ -6014,10 +6035,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
       {id:'receipts',icon:'🧾',label:'Receipts & Packing Slips',description:'Review uploaded expense and supplier documents.'},
       {id:'statements',icon:'🏦',label:'Statements',description:'Statements and document records.'},
-      {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'}
+      {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'},
+      {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'}
     ];
     if(isHub){
-      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>renderAccountingView(x.id)})));
+      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():renderAccountingView(x.id)})));
     }else{
       workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
       workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('hub');
@@ -8384,29 +8406,20 @@ function renderCustomersView() {
       renderList();
     }
 
-    btnCustomers.addEventListener("click", () => renderCustomersTab());
-    btnContacts.addEventListener("click", () => renderContactsTab());
-    btnAddresses.addEventListener("click", () => renderAddressesTab());
-
     root.appendChild(header);
-    root.appendChild(tabs);
     root.appendChild(body);
-    tabs.hidden=true;body.hidden=true;
+    body.style.display='none';
     const cards=header.querySelector('#pdsCustomerCards');cards.style.marginTop='18px';
-    const back=header.querySelector('#pdsCustomerHubBack');
-    back.onclick=()=>renderEstimatePage();
-    const showDirectory=()=>{cards.hidden=false;body.hidden=true;tabs.hidden=true;setWorkspace('Customers & Contacts');};
-    const enter=(tab)=>{cards.hidden=true;body.hidden=false;tabs.hidden=true;setWorkspace('Customers & Contacts — '+(tab==='customers'?'Customers':tab==='contacts'?'Contacts':'Addresses'));if(tab==='customers')renderCustomersTab();else if(tab==='contacts')renderContactsTab();else renderAddressesTab();};
+    header.querySelector('#pdsCustomerHubBack').onclick=()=>renderEstimatePage();
+    const sectionBack=document.createElement('button');sectionBack.className='btn';sectionBack.type='button';sectionBack.textContent='← Customers & Contacts';sectionBack.style.margin='0 0 12px';sectionBack.style.display='none';root.insertBefore(sectionBack,body);
+    const showDirectory=()=>{cards.style.display='';body.style.display='none';sectionBack.style.display='none';setWorkspace('Customers & Contacts');};
+    const enter=(tab)=>{cards.style.display='none';body.style.display='';sectionBack.style.display='';activeTab=tab;setWorkspace('Customers & Contacts — '+(tab==='customers'?'Customers':tab==='contacts'?'Contacts':'Addresses'));if(tab==='customers')renderCustomersTab();else if(tab==='contacts')renderContactsTab();else renderAddressesTab();};
     makeHubCards(cards,[
       {icon:'🏢',label:'Customers',description:'Search, create and edit customer records.',open:()=>enter('customers')},
       {icon:'👤',label:'Contacts',description:'Manage customer contacts and phone numbers.',open:()=>enter('contacts')},
       {icon:'📍',label:'Addresses',description:'Saved job locations and legacy address lookup.',open:()=>enter('addresses')}
     ]);
-    const sectionBack=document.createElement('button');sectionBack.className='btn';sectionBack.type='button';sectionBack.textContent='← Customers & Contacts';sectionBack.style.margin='12px 0';sectionBack.onclick=showDirectory;
-    body.before(sectionBack);sectionBack.hidden=true;
-    // Keep a return control on the selected directory page.
-    for(const card of cards.querySelectorAll('button'))card.addEventListener('click',()=>{sectionBack.hidden=false;});
-    sectionBack.onclick=()=>{sectionBack.hidden=true;showDirectory();};
+    sectionBack.onclick=showDirectory;
 
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
@@ -9568,16 +9581,22 @@ function openEstimateDrawer(job, container = null, ctx = null) {
  
   async function renderPdsVendorHub(){
     setWorkspace('PDS — Suppliers');clearWorkspaceActions();
-    workspaceBody.innerHTML='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2>Suppliers</h2><button class="btn" id="pdsVendorBack">← Business Hub</button></div><p class="hint">Suppliers referenced by existing PDS purchase orders. Dedicated vendor profiles and contacts are not yet available; no records are changed.</p><div id="pdsVendorList">Loading suppliers…</div></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto;padding:20px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Suppliers</h2><p class="hint">Supplier directory and purchasing relationships.</p></div><button class="btn" id="pdsVendorBack">← Business Hub</button></div><div id="pdsSupplierCards" style="margin-top:18px"></div><div id="pdsSupplierSection" style="display:none;margin-top:16px"><button class="btn" id="pdsSupplierReturn">← Suppliers</button><div class="card" style="margin-top:12px"><h3 id="pdsSupplierHeading">Supplier Directory</h3><p class="hint" id="pdsSupplierNote"></p><div id="pdsVendorList">Loading suppliers…</div></div></div></div>';
     el('pdsVendorBack').onclick=()=>renderEstimatePage();
-    try{
-      const data=await fetchJSON('/pds-purchase-orders');
-      const orders=Array.isArray(data)?data:(data.items||data.orders||[]);
-      const names=[...new Set(orders.map(o=>String(o.vendor||'').trim()).filter(Boolean))].sort();
-      const list=el('pdsVendorList');if(!list)return;list.replaceChildren();
-      if(!names.length){list.textContent='No suppliers found in PDS purchase orders.';return;}
-      for(const name of names){const row=document.createElement('div');row.className='jobrow';row.textContent=name;list.append(row);}
-    }catch(e){const list=el('pdsVendorList');if(list)list.textContent='Unable to load supplier list: '+(e.message||e);}
+    const cards=el('pdsSupplierCards'),section=el('pdsSupplierSection');
+    el('pdsSupplierReturn').onclick=()=>{cards.style.display='';section.style.display='none';setWorkspace('PDS — Suppliers');};
+    const show=(heading,note)=>{cards.style.display='none';section.style.display='';el('pdsSupplierHeading').textContent=heading;el('pdsSupplierNote').textContent=note;setWorkspace('PDS — Suppliers — '+heading);};
+    const showOrders=async()=>{
+      show('Supplier Directory','Names from existing PDS purchase orders. Profiles and contacts are not yet editable here.');
+      const list=el('pdsVendorList');list.textContent='Loading suppliers…';
+      try{const data=await fetchJSON('/pds-purchase-orders');const orders=Array.isArray(data)?data:(data.items||data.orders||[]);const names=[...new Set(orders.map(o=>String(o.vendor||'').trim()).filter(Boolean))].sort();list.replaceChildren();if(!names.length){list.textContent='No suppliers found in PDS purchase orders.';return;}for(const name of names){const row=document.createElement('div');row.className='jobrow';const count=orders.filter(o=>String(o.vendor||'').trim()===name).length;const strong=document.createElement('div');strong.className='jobrow-name';strong.textContent=name;const hint=document.createElement('div');hint.className='hint';hint.textContent=count+' linked purchase order'+(count===1?'':'s');row.append(strong,hint);list.append(row);}}
+      catch(e){list.textContent='Unable to load supplier list: '+(e.message||e);}
+    };
+    makeHubCards(cards,[
+      {icon:'🏭',label:'Supplier Directory',description:'Suppliers referenced in PDS purchase orders.',open:showOrders},
+      {icon:'👤',label:'Contacts',description:'Supplier contact profiles (planned).',open:()=>{show('Contacts','Dedicated PDS supplier contact records are not yet implemented.');el('pdsVendorList').textContent='Supplier contacts will be available in a future integration.';}},
+      {icon:'📑',label:'Documents & Compliance',description:'W-9, COI, insurance and payment terms (planned).',open:()=>{show('Documents & Compliance','Dedicated supplier document storage is not yet implemented.');el('pdsVendorList').textContent='Document upload and compliance tracking will be added during integration.';}}
+    ]);
   }
   function renderEstimatePage() {
     setNavActive(primaryEstimateNav);
@@ -9618,7 +9637,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
       {icon:'👥',label:'Customers & Contacts',description:'Open the existing PDS customer and contact database.',open:()=>renderCustomersView()},
-      {icon:'🏢',label:'Suppliers',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()}
+      {icon:'🏢',label:'Suppliers',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()},
+      {icon:'🧰',label:'Parts List',description:'Search parts, prices and preferred suppliers.',open:()=>renderPartsListView()}
     ]);
     const businessBack=document.createElement('button');businessBack.className='btn';businessBack.type='button';businessBack.textContent='← Business Hub';businessBack.style.margin='0 0 12px';businessBack.hidden=true;
     const body = document.createElement("div");
