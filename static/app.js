@@ -474,16 +474,34 @@
     ];
     makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
   }
-  async function renderSdcAccountingOverview(){
+  function showAccountingMetrics(platform,title,entries,back){
+    clearWorkspaceActions();setWorkspace(title);
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button type="button" class="btn" id="accountMetricsBack">← Accounting Hub</button></div><p class="hint">Summary based on saved records. Amounts are not reconciled bank balances.</p><div id="accountMetricsGrid" class="grid2"></div></div>';
+    el('accountMetricsBack').onclick=back;
+    const host=el('accountMetricsGrid');
+    Promise.all(entries.map(async ([label,url,amountField])=>{
+      try{const data=await fetchJSON(url);const items=data.items||[];return {label,count:items.length,amount:amountField?items.reduce((n,r)=>n+Number(r[amountField]||0),0):null};}
+      catch(e){return {label,count:'Unavailable',amount:null};}
+    })).then(results=>{
+      if(!host.isConnected)return;
+      for(const r of results){
+        const card=document.createElement('div');card.className='card';card.style.padding='18px';
+        const name=document.createElement('div');name.className='hint';name.textContent=r.label;
+        const count=document.createElement('h2');count.textContent=String(r.count);count.style.margin='8px 0';
+        card.append(name,count);
+        if(r.amount!==null){const total=document.createElement('div');total.className='hint';total.textContent='Recorded amount: '+r.amount.toLocaleString(undefined,{style:'currency',currency:'USD'});card.append(total);}
+        host.append(card);
+      }
+    }).catch(console.error);
+  }
+  function renderSdcAccountingOverview(){
     if(activePlatform!=='sdc')return;
-    clearWorkspaceActions();setWorkspace('SDC — Accounting Overview & Reports');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button class="btn" id="sdcAcctOverviewBack">← Accounting Hub</button></div><p class="hint">Summary of saved SDC records. This is not a bank balance or reconciled financial statement.</p><div id="sdcAcctOverviewStats"></div></div>';
-    el('sdcAcctOverviewBack').onclick=()=>renderSdcAccounting();
-    const host=el('sdcAcctOverviewStats');
-    const kinds=[['expenses','Receipts & Expenses'],['receivables','Accounts Receivable'],['inventory','Inventory & Receiving'],['purchase_orders','Purchase Orders']];
-    const entries=await Promise.all(kinds.map(async ([kind,label])=>{try{const data=await fetchJSON('/workspaces/sdc/'+kind);return {label,count:(data.items||[]).length};}catch(e){return {label,count:'Unavailable'};}}));
-    if(!host.isConnected)return;
-    makeHubCards(host,entries.map(e=>({icon:'📊',label:e.label,description:String(e.count)+' saved records',open:()=>renderBusinessCollection('sdc',kinds.find(k=>k[1]===e.label)[0],false,()=>renderSdcAccounting())})));
+    showAccountingMetrics('sdc','SDC — Accounting Overview & Reports',[
+      ['Receipts & Expenses','/workspaces/sdc/expenses','amount'],
+      ['Accounts Receivable','/workspaces/sdc/receivables','amount'],
+      ['Inventory & Receiving','/workspaces/sdc/inventory',null],
+      ['Purchase Orders','/workspaces/sdc/purchase_orders',null]
+    ],()=>renderSdcAccounting());
   }
   function renderBusinessHub(platform){
     if(activePlatform!==platform)return;
@@ -606,12 +624,21 @@
     clearWorkspaceActions();setWorkspace('Doorks — Accounting Hub');
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Doorks Accounting Hub</h2><p class="hint">Overview of Doorks financial workflows. All records remain separate from PDS and SDC.</p><div id="doorksAcctHubCards"></div></div>';
     makeHubCards(el('doorksAcctHubCards'),[
-      {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccounting('receivables')},
+      {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
       {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
       {icon:'📦',label:'Inventory & Intake',description:'Review received and outstanding materials.',open:()=>renderDoorksAccounting('inventory')},
       {icon:'🧾',label:'Receipts',description:'Review expense and receipt entries.',open:()=>renderDoorksAccounting('receipts')},
       {icon:'🏦',label:'Statements',description:'Review financial statement records.',open:()=>renderDoorksAccounting('statements')}
     ]);
+  }
+  function renderDoorksAccountingOverview(){
+    if(activePlatform!=='doorks')return;
+    showAccountingMetrics('doorks','Doorks — Accounting Overview & Reports',[
+      ['Accounts Receivable','/doorks-accounting/receivables','amount'],
+      ['Inventory & Intake','/doorks-accounting/inventory',null],
+      ['Receipts','/doorks-accounting/receipts','amount'],
+      ['Statements','/doorks-accounting/statements',null]
+    ],()=>renderDoorksAccountingHub());
   }
   async function renderDoorksAccounting(kind='receivables') {
     if(activePlatform!=='doorks')return;
@@ -668,15 +695,15 @@
       const addSdc=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};
       addSdc('sdcJobNav','Dashboard',()=>showPlatformShell('sdc'));
       addSdc('sdcJobNav','Orders & Production',()=>renderBusinessCollection('sdc','orders'));
-      addSdc('sdcOfficeNav','Customers',()=>renderBusinessCollection('sdc','customers'));
-      addSdc('sdcOfficeNav','Vendors',()=>renderBusinessCollection('sdc','vendors'));
-      addSdc('sdcOfficeNav','Products',()=>renderBusinessCollection('sdc','products'));
+      
+      
+      addSdc('sdcJobNav','Products',()=>renderBusinessCollection('sdc','products'));
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
       addSdc('sdcDevelopmentNav','Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads'));
     }
-    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Customers',()=>renderBusinessCollection('doorks','customers'));add('dbOfficeNav','Vendors',()=>renderBusinessCollection('doorks','vendors'));add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
+    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
     document.querySelector('main.layout')?.classList.toggle('business-platform-layout',false);
     if(headerCalendarBtn)headerCalendarBtn.style.display=currentUser && (inPds ? accessForRole(currentUser.role).calendar : currentUser.role==='office_admin') ? 'inline-flex' : 'none';
     if(inPds)return;
@@ -757,6 +784,7 @@
     if(platform==='doorks' && el('businessNav')){const b=document.createElement('button');b.className='btn btn-orange';b.textContent='Accounting Hub — Doorks';b.onclick=()=>renderDoorksAccountingHub();el('businessNav').prepend(b);const c=document.createElement('button');c.style.cssText='text-align:left;border:1px solid #d9dee7;border-radius:12px;padding:18px;background:#fff;cursor:pointer';c.innerHTML='<strong>Accounting Hub</strong><p class="hint">Independent Doorks receivables, inventory, receipts and statements</p>';c.onclick=()=>renderDoorksAccountingHub();el('businessDashboardCards').prepend(c);}
     const nav=el('businessNav'),cards=el('businessDashboardCards');
     if(!nav||!cards)return;
+    if(platform==='sdc')return; // SDC already has its dedicated scorecard.
     for(const [kind,title] of items){
       const btn=document.createElement('button');btn.className='btn';btn.textContent=title;btn.onclick=()=>renderBusinessCollection(platform,kind);nav.append(btn);
       const card=document.createElement('button');card.type='button';card.style.cssText='text-align:left;border:1px solid #d9dee7;border-radius:12px;padding:18px;background:#fff;cursor:pointer';
@@ -1973,10 +2001,10 @@ async function apiListForms() {
     setVisible(navPayroll, !!role && perms.payroll);
     setVisible(navEmployees, !!role && perms.employees);
     setVisible(navDataUpload, role === "office_admin" && !!perms.dataUpload);
-    setVisible(navSaddleback, role === "office_admin" && !!perms.saddleback);
+    setVisible(navSaddleback, false); // Use workspace switcher
     setVisible(navAtlas, !!role && perms.atlas);
     setVisible(navMoses, !!role && perms.moses);
-    setVisible(navCustomers, !!role && perms.customers);
+    setVisible(navCustomers, false); // Accessible from Business Hub
     setVisible(navEstimateInvoice, !!role && perms.estimates);
     setVisible(navPartsList, !!role && perms.parts);
     setVisible(navDoorLogs, !!role && perms.parts);
@@ -5932,7 +5960,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     await draw();
   }
 
-  async function renderAccountingView(section = "overview") {
+  async function renderAccountingView(section = "hub") {
     try {
       const access = await fetchJSON("/accounting/access");
       if (!access.unlocked) {
@@ -5945,28 +5973,52 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     setActiveChip("Office Flow");
     setWorkspace("Accounting Hub");
     clearWorkspaceActions();
+    const isHub = section === "hub";
     const isOverview = section === "overview";
-    workspaceBody.innerHTML = isOverview
-      ? '<div class="card"><h3>Accounting Hub</h3><p class="hint">Financial overview and document management. Existing accounting permissions and approval controls remain in effect.</p><div id="pdsAcctHubCards"></div><div style="margin-top:14px"><button type="button" class="btn" id="pdsAcctLock">Lock Accounting</button></div></div><div id="acct_content" class="card">Loading accounting data…</div>'
+    workspaceBody.innerHTML = isHub
+      ? '<div class="card"><h3>Accounting Hub</h3><p class="hint">Financial overview and document management. Existing accounting permissions and approval controls remain in effect.</p><div id="pdsAcctHubCards"></div><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:16px"><button type="button" class="btn" id="pdsAcctLock">Lock Accounting</button><button type="button" class="btn btn-orange" id="pdsAcctQuickNew">+ New Input</button></div><div id="pdsAcctQuickOptions"></div></div>'
       : '<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 id="pdsAcctSectionTitle" style="margin:0"></h3><p class="hint" style="margin:6px 0 0">PDS accounting records</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="pdsAcctBack">← Accounting Hub</button><button type="button" class="btn" id="pdsAcctLock">Lock Accounting</button></div></div><div id="acct_content" class="card">Loading accounting data…</div>';
     const sections=[
-      {id:'overview',icon:'📊',label:'Overview',description:'Financial summary and reporting.'},
+      {id:'overview',icon:'📊',label:'Overview & Reports',description:'Financial summary and reporting.'},
       {id:'receivables',icon:'💳',label:'Accounts Receivable',description:'Customer payments and invoice balances.'},
       {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
       {id:'receipts',icon:'🧾',label:'Receipts & Packing Slips',description:'Review uploaded expense and supplier documents.'},
       {id:'statements',icon:'🏦',label:'Statements',description:'Statements and document records.'},
       {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'}
     ];
-    if(isOverview){
+    if(isHub){
       makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>renderAccountingView(x.id)})));
     }else{
       workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
-      workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('overview');
+      workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('hub');
     }
     workspaceBody.querySelector('#pdsAcctLock').onclick=async()=>{
       try{await fetchJSON('/accounting/lock',{method:'POST'});workspaceBody.innerHTML='';setWorkspace('Office Flow');}
       catch(err){alert(err.message||err);}
     };
+    if(isHub){
+      const quick=workspaceBody.querySelector('#pdsAcctQuickNew');
+      quick.onclick=()=>{
+        const holder=workspaceBody.querySelector('#pdsAcctQuickOptions');holder.replaceChildren();
+        const box=document.createElement('div');box.className='card';box.style.marginTop='14px';
+        const heading=document.createElement('strong');heading.textContent='Select input type';box.append(heading);
+        const choices=document.createElement('div');choices.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:12px';
+        for(const [label,target] of [['Receipt / Packing Slip','receipts'],['Inventory / Receiving','stock'],['Statement','statements'],['Accounts Receivable','receivables']]){
+          const b=document.createElement('button');b.className='btn';b.type='button';b.textContent=label;b.onclick=async()=>{
+            await renderAccountingView(target);
+            const root=workspaceBody;
+            const action=[...root.querySelectorAll('button')].find(node=>{
+              const t=(node.textContent||'').trim();
+              return target==='receipts'?/Upload Receipt \/ Read with AI|Upload Receipt|Upload Document/i.test(t):/\+ New (Intake|Statement|Receivable)/.test(t);
+            });
+            if(action)action.click();
+          };choices.append(b);
+        }
+        const cancel=document.createElement('button');cancel.className='btn';cancel.type='button';cancel.textContent='Cancel';cancel.onclick=()=>holder.replaceChildren();choices.append(cancel);
+        box.append(choices);holder.append(box);
+      };
+      currentView={refresh:()=>renderAccountingView('hub')};return;
+    }
     const periodState = window.__doorksAcctPeriod || (window.__doorksAcctPeriod={mode:"month",month:new Date().toLocaleDateString("en-CA").slice(0,7),start:"",end:""});
     const inPeriod = (date) => { const d=String(date||"").slice(0,10); if(periodState.mode==="all")return true; if(!d)return false; if(periodState.mode==="month")return d.startsWith(periodState.month); return (!periodState.start||d>=periodState.start)&&(!periodState.end||d<=periodState.end); };
     window.__doorksAcctInPeriod=inPeriod;
@@ -5999,28 +6051,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const make = (tag, text, parent=host) => { const node = document.createElement(tag); node.textContent = text; parent.appendChild(node); return node; };
       host.innerHTML = "";
       if (section === "overview") {
-        const overviewActions=document.createElement("div");
-        overviewActions.style.cssText="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:0 0 16px";
-        const quickNew=document.createElement("button");quickNew.type="button";quickNew.className="btn btn-orange";quickNew.textContent="+ New Input";
-        const quickLabel=document.createElement("span");quickLabel.className="hint";quickLabel.textContent="Upload a document and review the AI results before saving.";
-        overviewActions.append(quickNew,quickLabel);host.appendChild(overviewActions);
-        quickNew.addEventListener("click",()=>{
-          const chooser=document.createElement("div");chooser.className="card";chooser.style.cssText="margin:10px 0 16px;padding:16px";
-          const heading=document.createElement("strong");heading.textContent="What would you like to upload?";chooser.appendChild(heading);
-          const buttons=document.createElement("div");buttons.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px";
-          for(const [label,target] of [["New Intake","stock"],["New Receipt","receipts"],["New Statement","statements"]]){
-            const b=document.createElement("button");b.type="button";b.className="btn";b.textContent=label;
-            b.addEventListener("click",async()=>{
-              await renderAccountingView(target);
-              const content=workspaceBody;
-              const upload=[...content.querySelectorAll("button")].find(x=>/Upload Document|Upload Receipt \/ Read with AI/.test(x.textContent||""));
-              if(upload)upload.click();
-            });buttons.appendChild(b);
-          }
-          const cancel=document.createElement("button");cancel.type="button";cancel.className="btn";cancel.textContent="Cancel";cancel.addEventListener("click",()=>chooser.remove());buttons.appendChild(cancel);
-          chooser.appendChild(buttons);overviewActions.after(chooser);quickNew.disabled=true;
-          cancel.addEventListener("click",()=>{quickNew.disabled=false;});
-        });
         const stats = make("div", ""); stats.className="grid2";
         for (const [label, value] of [["Expenses in period",money(total)],["Authorized receipts",String(periodReceipts.filter(r=>r.authorization_status==="Authorized").length)],["Pending authorization",String(periodReceipts.filter(r=>r.authorization_status!=="Authorized").length)],["This month",money(monthTotal)],["Receipts in period",String(periodReceipts.length)],["Employees in period",String(new Set(periodReceipts.map(r=>r.employee).filter(Boolean)).size)]]) {
           const box = document.createElement("div"); box.className="card"; box.innerHTML=`<div class="hint">${escapeHtml(label)}</div><h2>${escapeHtml(value)}</h2>`; stats.appendChild(box);
