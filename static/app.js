@@ -318,7 +318,7 @@
   let switchingPlatform = false;
   const workspaceKinds = {
     doorks: {customers:"Customers",vendors:"Vendors",work_orders:"Work Orders",estimates_invoices:"Estimates / Invoices",purchase_orders:"Purchase Orders",customer_inquiries:"Customer Inquiries",vendor_assignments:"Vendor Assignments",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"},
-    sdc: {customers:"Customers",vendors:"Vendors",purchase_orders:"Purchase Orders",orders:"Orders & Production",software_leads:"Doorks Software Sales",products:"Products",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"}
+    sdc: {customers:"Customers",vendors:"Suppliers",purchase_orders:"Purchase Orders",orders:"Orders & Production",software_leads:"Doorks Software Sales",products:"Products",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"}
   };
   const workspaceFields = {
     customers:["name","contact","email","phone","address","customer_type","preferred_visit_type","notes"], vendors:["name","contact","email","phone","service_area","trade","license_number","insurance_expiration","notes"],
@@ -343,7 +343,7 @@
     clearWorkspaceActions();
     setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Data Import Center');
     const collections=platform==='sdc'
-      ? [['customers','Customers & Contacts'],['vendors','Vendors'],['orders','Orders (preview only)'],['products','Products'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']]
+      ? [['customers','Customers & Contacts'],['vendors','Suppliers'],['orders','Orders (preview only)'],['products','Products'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']]
       : [['customers','Customers & Contacts'],['vendors','Vendors'],['work_orders','Legacy Work Orders (preview only)'],['estimates_invoices','Estimates & Invoices (preview only)'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']];
     workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><h2>Data Import Center</h2>
       <p class="hint">Phase 2Q-C: review-first CSV and AI document importer. Upload CSV for multiple records or PDF/image for an AI-extracted draft. AI document extraction currently proposes one record per file. Review every field before approval. No existing records are overwritten. Purchase orders and other numbered documents can be analyzed and edited, but cannot be imported yet; numbering and links remain protected.</p>
@@ -509,17 +509,34 @@
     if(activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Business Hub</h2><p class="hint">Documents, purchasing and business relationships. Numbered documents retain their existing workspace records and counters.</p><div id="businessHubActions"></div></div>';
-    const openKind=(kind,newRecord=false)=>renderBusinessCollection(platform,kind,newRecord,()=>renderBusinessHub(platform));
+    const openKind=(kind,newRecord=false)=>['customers','vendors'].includes(kind)&&!newRecord?renderWorkspaceDirectory(platform,kind):renderBusinessCollection(platform,kind,newRecord,()=>renderBusinessHub(platform));
     const docs=()=>openKind('estimates_invoices');
     makeHubCards(el('businessHubActions'),[
       {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>openKind('estimates_invoices',true)},
       {icon:'📋',label:'Estimates',description:'Open saved estimate and invoice records.',open:docs},
       {icon:'🧾',label:'Invoices',description:'Review saved billing documents.',open:docs},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
-      {icon:'🏢',label:'Vendors',description:'Supplier profiles and contacts.',open:()=>openKind('vendors')},
+      {icon:'🏢',label:platform==='sdc'?'Suppliers':'Vendors',description:platform==='sdc'?'Supplier profiles and contacts.':'Vendor profiles and contacts.',open:()=>openKind('vendors')},
       {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>openKind('customers')}
     ]);
     const note=document.createElement('p');note.className='hint';note.style.marginTop='18px';note.textContent='Estimates and Invoices currently share the existing workspace document collection; separate filtered views are planned.';el('businessHubActions').after(note);
+  }
+  function renderWorkspaceDirectory(platform,kind){
+    if(activePlatform!==platform)return;
+    const title=kind==='vendors'?(platform==='sdc'?'Suppliers':'Vendors'):'Customers & Contacts';
+    clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — '+title);
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2>'+title+'</h2><p class="hint">Manage business records and related contact information.</p></div><button class="btn" id="directoryBack">← Business Hub</button></div><div id="directoryCards"></div></div>';
+    el('directoryBack').onclick=()=>renderBusinessHub(platform);
+    const open=()=>renderBusinessCollection(platform,kind,false,()=>renderWorkspaceDirectory(platform,kind));
+    makeHubCards(el('directoryCards'),kind==='customers'?[
+      {icon:'🏢',label:'Customer Directory',description:'Search, add and edit saved customers.',open},
+      {icon:'👤',label:'Contacts',description:'Contact details are currently stored with customer records.',open},
+      {icon:'📍',label:'Addresses',description:'Saved customer addresses and location details.',open}
+    ]:[
+      {icon:'🏭',label:title+' Directory',description:'Search, add and edit '+title.toLowerCase()+'.',open},
+      {icon:'👤',label:'Contacts',description:'Primary contact and communication details.',open},
+      {icon:'📑',label:'Documents & Compliance',description:'Insurance and licensing fields are available in saved records. Dedicated document attachments are planned.',open}
+    ]);
   }
   async function renderBusinessCollection(platform,kind,openNew=false,backAction=null) {
     if(activePlatform!==platform)return;
@@ -8059,7 +8076,8 @@ function renderCustomersView() {
     const root = document.createElement("div");
     const header = document.createElement("div");
     header.className = "card";
-    header.innerHTML = `<h3>Customers</h3><div class="hint">Manage customers, contacts, and saved addresses.</div>`;
+    header.style.cssText="max-width:1160px;margin:auto;padding:20px";
+    header.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Customers & Contacts</h2><p class="hint">Customer directory, contact people and saved locations.</p></div><button type="button" class="btn" id="pdsCustomerHubBack">← Business Hub</button></div><div id="pdsCustomerCards"></div>`;
 
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
@@ -8373,13 +8391,30 @@ function renderCustomersView() {
     root.appendChild(header);
     root.appendChild(tabs);
     root.appendChild(body);
+    tabs.hidden=true;body.hidden=true;
+    const cards=header.querySelector('#pdsCustomerCards');cards.style.marginTop='18px';
+    const back=header.querySelector('#pdsCustomerHubBack');
+    back.onclick=()=>renderEstimatePage();
+    const showDirectory=()=>{cards.hidden=false;body.hidden=true;tabs.hidden=true;setWorkspace('Customers & Contacts');};
+    const enter=(tab)=>{cards.hidden=true;body.hidden=false;tabs.hidden=true;setWorkspace('Customers & Contacts — '+(tab==='customers'?'Customers':tab==='contacts'?'Contacts':'Addresses'));if(tab==='customers')renderCustomersTab();else if(tab==='contacts')renderContactsTab();else renderAddressesTab();};
+    makeHubCards(cards,[
+      {icon:'🏢',label:'Customers',description:'Search, create and edit customer records.',open:()=>enter('customers')},
+      {icon:'👤',label:'Contacts',description:'Manage customer contacts and phone numbers.',open:()=>enter('contacts')},
+      {icon:'📍',label:'Addresses',description:'Saved job locations and legacy address lookup.',open:()=>enter('addresses')}
+    ]);
+    const sectionBack=document.createElement('button');sectionBack.className='btn';sectionBack.type='button';sectionBack.textContent='← Customers & Contacts';sectionBack.style.margin='12px 0';sectionBack.onclick=showDirectory;
+    body.before(sectionBack);sectionBack.hidden=true;
+    // Keep a return control on the selected directory page.
+    for(const card of cards.querySelectorAll('button'))card.addEventListener('click',()=>{sectionBack.hidden=false;});
+    sectionBack.onclick=()=>{sectionBack.hidden=true;showDirectory();};
+
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
 
     currentView = {
       refresh: () => activeTab === "customers" ? renderCustomersTab() : activeTab === "contacts" ? renderContactsTab() : renderAddressesTab()
     };
-    renderCustomersTab();
+    showDirectory();
   }
   function renderContactsView() {
     renderCustomersView();
@@ -9532,8 +9567,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   }
  
   async function renderPdsVendorHub(){
-    setWorkspace('PDS — Vendors');clearWorkspaceActions();
-    workspaceBody.innerHTML='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2>Vendors</h2><button class="btn" id="pdsVendorBack">← Business Hub</button></div><p class="hint">Suppliers referenced by existing PDS purchase orders. Dedicated vendor profiles and contacts are not yet available; no records are changed.</p><div id="pdsVendorList">Loading suppliers…</div></div>';
+    setWorkspace('PDS — Suppliers');clearWorkspaceActions();
+    workspaceBody.innerHTML='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2>Suppliers</h2><button class="btn" id="pdsVendorBack">← Business Hub</button></div><p class="hint">Suppliers referenced by existing PDS purchase orders. Dedicated vendor profiles and contacts are not yet available; no records are changed.</p><div id="pdsVendorList">Loading suppliers…</div></div>';
     el('pdsVendorBack').onclick=()=>renderEstimatePage();
     try{
       const data=await fetchJSON('/pds-purchase-orders');
@@ -9583,7 +9618,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
       {icon:'👥',label:'Customers & Contacts',description:'Open the existing PDS customer and contact database.',open:()=>renderCustomersView()},
-      {icon:'🏢',label:'Vendors',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()}
+      {icon:'🏢',label:'Suppliers',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()}
     ]);
     const businessBack=document.createElement('button');businessBack.className='btn';businessBack.type='button';businessBack.textContent='← Business Hub';businessBack.style.margin='0 0 12px';businessBack.hidden=true;
     const body = document.createElement("div");
