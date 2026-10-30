@@ -481,7 +481,7 @@
     if(platform==='sdc'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">SDC Operations</div><div class="panel-bd" id="sdcNav"></div></section>`;const links=[['Dashboard',()=>showPlatformShell('sdc')],['Orders & Production',()=>renderBusinessCollection('sdc','orders')],['Customers',()=>renderBusinessCollection('sdc','customers')],['Products',()=>renderBusinessCollection('sdc','products')],['Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads')],['Expenses',()=>renderBusinessCollection('sdc','expenses')],['Accounts Receivable',()=>renderBusinessCollection('sdc','receivables')],['Inventory',()=>renderBusinessCollection('sdc','inventory')]];for(const [label,fn] of links){const b=document.createElement('button');b.className='doorks-side-link';b.textContent=label;b.onclick=fn;document.getElementById('sdcNav').append(b);}}
     if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Customers',()=>renderBusinessCollection('doorks','customers'));add('dbOfficeNav','Vendors',()=>renderBusinessCollection('doorks','vendors'));add('dbOfficeNav','Estimates / Invoices',()=>renderBusinessCollection('doorks','estimates_invoices'));add('dbOfficeNav','Accounting',()=>renderDoorksAccounting());add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
     document.querySelector('main.layout')?.classList.toggle('business-platform-layout',false);
-    if(headerCalendarBtn)headerCalendarBtn.style.display=inPds&&currentUser&&currentUser.role==='office_admin'?'inline-flex':'none';
+    if(headerCalendarBtn)headerCalendarBtn.style.display=currentUser && (inPds ? accessForRole(currentUser.role).calendar : currentUser.role==='office_admin') ? 'inline-flex' : 'none';
     if(inPds)return;
     clearWorkspaceActions();setWorkspace(platform==='sdc'?'SDC — Saddleback Design Co.':'Doorks — Administration');
     const isSdc=platform==='sdc',name=isSdc?'Saddleback Design Co.':'Doorks Service Network';
@@ -501,6 +501,39 @@
       el('doorksNewDispatch').onclick=()=>renderBusinessCollection('doorks','work_orders',true);drawCalendar();
     }else{
       workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
+    }
+    if(platform==='sdc') {
+      const dashboard=workspaceBody.querySelector('.card');
+      if(dashboard){
+        const calendar=document.createElement('div');calendar.className='card';calendar.style.marginTop='16px';
+        dashboard.after(calendar);
+        let month=new Date();month=new Date(month.getFullYear(),month.getMonth(),1);
+        async function drawSdcCalendar(){
+          calendar.replaceChildren();
+          const heading=document.createElement('div');heading.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px';
+          const title=document.createElement('h3');title.textContent='SDC Orders & Production Calendar';title.style.margin='0';
+          const controls=document.createElement('div');controls.style.cssText='display:flex;gap:8px;align-items:center';
+          const prev=document.createElement('button');prev.type='button';prev.className='btn';prev.textContent='←';
+          const next=document.createElement('button');next.type='button';next.className='btn';next.textContent='→';
+          const label=document.createElement('strong');label.textContent=month.toLocaleString(undefined,{month:'long',year:'numeric'});
+          prev.onclick=()=>{month=new Date(month.getFullYear(),month.getMonth()-1,1);drawSdcCalendar();};
+          next.onclick=()=>{month=new Date(month.getFullYear(),month.getMonth()+1,1);drawSdcCalendar();};
+          controls.append(prev,label,next);heading.append(title,controls);calendar.append(heading);
+          const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px';calendar.append(grid);
+          for(const day of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat']){const h=document.createElement('strong');h.textContent=day;h.style.cssText='font-size:12px;text-align:center';grid.append(h);}
+          let orders=[];try{orders=(await fetchJSON('/workspaces/sdc/orders')).items||[];}catch(err){const warning=document.createElement('p');warning.className='hint';warning.textContent='Orders unavailable: '+(err.message||err);calendar.append(warning);}
+          for(let i=0;i<month.getDay();i++)grid.append(document.createElement('span'));
+          const days=new Date(month.getFullYear(),month.getMonth()+1,0).getDate();
+          for(let day=1;day<=days;day++){
+            const date=month.getFullYear()+'-'+String(month.getMonth()+1).padStart(2,'0')+'-'+String(day).padStart(2,'0');
+            const matches=orders.filter(o=>['delivery_date','due_date','scheduled_date','production_date','date'].some(k=>String(o[k]||'').slice(0,10)===date));
+            const cell=document.createElement('button');cell.type='button';cell.style.cssText='min-height:68px;min-width:0;border:1px solid #d9dee7;border-radius:9px;background:#fff;padding:6px;text-align:left;cursor:pointer';cell.textContent=String(day);
+            if(matches.length){const note=document.createElement('div');note.style.cssText='font-size:11px;color:#f97316;font-weight:700;overflow-wrap:anywhere';note.textContent=matches.length+' order'+(matches.length===1?'':'s');cell.append(note);cell.title=matches.map(o=>o.customer||o.item||o.order_number||'Order').join(' • ');}
+            cell.onclick=()=>renderBusinessCollection('sdc','orders');grid.append(cell);
+          }
+        }
+        drawSdcCalendar();
+      }
     }
     if(platform==='doorks' && el('businessNav')){const b=document.createElement('button');b.className='btn btn-orange';b.textContent='Accounting — Doorks';b.onclick=()=>renderDoorksAccounting();el('businessNav').prepend(b);const c=document.createElement('button');c.style.cssText='text-align:left;border:1px solid #d9dee7;border-radius:12px;padding:18px;background:#fff;cursor:pointer';c.innerHTML='<strong>Accounting</strong><p class="hint">Independent Doorks receivables, inventory, receipts and statements</p>';c.onclick=()=>renderDoorksAccounting();el('businessDashboardCards').prepend(c);}
     const nav=el('businessNav'),cards=el('businessDashboardCards');
@@ -1715,7 +1748,7 @@ async function apiListForms() {
     setVisible(officeFlowPanel, !!role && perms.office);
     // Chat navigation removed in Doorks 2.0; Moses form assistant remains available.
     setVisible(notificationsPanel, !!role && perms.notifications);
-    if (headerCalendarBtn) headerCalendarBtn.style.display = role && perms.calendar ? "inline-flex" : "none";
+    if (headerCalendarBtn) headerCalendarBtn.style.display = role && perms.calendar && (activePlatform === "pds" || role === "office_admin") ? "inline-flex" : "none";
     setVisible(navDataCenter, !!role && perms.dataCenter);
     setVisible(navAccounting, role === "office" || role === "office_admin");
     setVisible(navPayroll, !!role && perms.payroll);
@@ -10185,7 +10218,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (usernameInput) usernameInput.addEventListener("keydown", (e) => { if (e.key === "Enter") handleLogin(); });
   if (pinInput) pinInput.addEventListener("keydown", (e) => { if (e.key === "Enter") handlePinLogin(); });
 
-  if (headerCalendarBtn) headerCalendarBtn.addEventListener("click", renderCalendarView);
+  if (headerCalendarBtn) headerCalendarBtn.addEventListener("click", () => { if (activePlatform === "doorks" || activePlatform === "sdc") showPlatformShell(activePlatform); else renderCalendarView(); });
  
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
