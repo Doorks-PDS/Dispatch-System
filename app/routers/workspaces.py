@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 router=APIRouter(prefix="/workspaces",tags=["workspaces"])
 _lock=RLock()
-KINDS={"doorks":("customers","vendors","work_orders","estimates_invoices","customer_inquiries","vendor_assignments","expenses","receivables","inventory"),"sdc":("customers","orders","software_leads","products","expenses","receivables","inventory")}
+KINDS={"doorks":("customers","vendors","work_orders","estimates_invoices","purchase_orders","customer_inquiries","vendor_assignments","expenses","receivables","inventory"),"sdc":("customers","vendors","purchase_orders","orders","software_leads","products","expenses","receivables","inventory")}
 class Record(BaseModel):
     data:dict
 
@@ -61,6 +61,21 @@ def create(platform:str,kind:str,payload:Record,request:Request):
         path=location(request,platform,kind);items=load(path)
         data=clean(payload.data)
         for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
+        if kind=="purchase_orders":
+            # PO numbers are assigned server-side and are never reused after deletion.
+            counter_path=path.parent/"purchase_order_sequence.json"
+            current=0
+            if counter_path.exists():
+                current=int(json.loads(counter_path.read_text(encoding="utf-8")).get("last",0))
+            for existing in items:
+                match=re.fullmatch(r"PO-(\d+)",str(existing.get("po_number","")))
+                if match:current=max(current,int(match.group(1)))
+            data.pop("po_number",None)
+            data["po_number"]=f"PO-{current+1:05d}"
+            tmp=counter_path.with_suffix(".tmp")
+            with tmp.open("w",encoding="utf-8") as f:
+                json.dump({"last":current+1},f);f.flush();os.fsync(f.fileno())
+            os.replace(tmp,counter_path)
         if platform=="doorks" and kind=="work_orders":
             # Monotonic counter on persistent storage, never derived from list length.
             # Keep the counter even if work orders are deleted.
@@ -94,6 +109,7 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
             if item.get("id")==record_id:
                 data=clean(payload.data)
                 for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
+                if kind=="purchase_orders":data.pop("po_number",None)
                 if platform=="doorks" and kind=="work_orders":
                     data.pop("work_order_number",None)
                     data.pop("id",None)
