@@ -465,30 +465,43 @@
       <p class="hint" style="margin-top:22px">Receipts are currently entered through Expenses. Dedicated receipt attachments, automated receiving, bill matching and bank reconciliation are planned.</p>
     </div>`;
     const links=[
+      {label:'Overview & Reports',kind:'__overview',icon:'📊',description:'Summary of expenses, receivables, inventory and purchasing.'},
       {label:'Receipts & Expenses',kind:'expenses',icon:'🧾',description:'Record business purchases, expenses and receipt details.'},
       {label:'Accounts Receivable',kind:'receivables',icon:'💳',description:'Review customer balances and payments due.'},
       {label:'Inventory & Receiving',kind:'inventory',icon:'📦',description:'View materials, stock and receiving records.'},
       {label:'Purchase Orders',kind:'purchase_orders',icon:'📋',description:'Manage supplier purchase orders and statuses.'},
       {label:'Vendors',kind:'vendors',icon:'🏢',description:'Access supplier information and contact records.'}
     ];
-    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>renderBusinessCollection('sdc',e.kind)})));
+    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
+  }
+  async function renderSdcAccountingOverview(){
+    if(activePlatform!=='sdc')return;
+    clearWorkspaceActions();setWorkspace('SDC — Accounting Overview & Reports');
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button class="btn" id="sdcAcctOverviewBack">← Accounting Hub</button></div><p class="hint">Summary of saved SDC records. This is not a bank balance or reconciled financial statement.</p><div id="sdcAcctOverviewStats"></div></div>';
+    el('sdcAcctOverviewBack').onclick=()=>renderSdcAccounting();
+    const host=el('sdcAcctOverviewStats');
+    const kinds=[['expenses','Receipts & Expenses'],['receivables','Accounts Receivable'],['inventory','Inventory & Receiving'],['purchase_orders','Purchase Orders']];
+    const entries=await Promise.all(kinds.map(async ([kind,label])=>{try{const data=await fetchJSON('/workspaces/sdc/'+kind);return {label,count:(data.items||[]).length};}catch(e){return {label,count:'Unavailable'};}}));
+    if(!host.isConnected)return;
+    makeHubCards(host,entries.map(e=>({icon:'📊',label:e.label,description:String(e.count)+' saved records',open:()=>renderBusinessCollection('sdc',kinds.find(k=>k[1]===e.label)[0],false,()=>renderSdcAccounting())})));
   }
   function renderBusinessHub(platform){
     if(activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Business Hub</h2><p class="hint">Documents, purchasing and business relationships. Numbered documents retain their existing workspace records and counters.</p><div id="businessHubActions"></div></div>';
-    const docs=()=>renderBusinessCollection(platform,'estimates_invoices');
+    const openKind=(kind,newRecord=false)=>renderBusinessCollection(platform,kind,newRecord,()=>renderBusinessHub(platform));
+    const docs=()=>openKind('estimates_invoices');
     makeHubCards(el('businessHubActions'),[
-      {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>renderBusinessCollection(platform,'estimates_invoices',true)},
+      {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>openKind('estimates_invoices',true)},
       {icon:'📋',label:'Estimates',description:'Open saved estimate and invoice records.',open:docs},
       {icon:'🧾',label:'Invoices',description:'Review saved billing documents.',open:docs},
-      {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>renderBusinessCollection(platform,'purchase_orders')},
-      {icon:'🏢',label:'Vendors',description:'Supplier profiles and contacts.',open:()=>renderBusinessCollection(platform,'vendors')},
-      {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>renderBusinessCollection(platform,'customers')}
+      {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
+      {icon:'🏢',label:'Vendors',description:'Supplier profiles and contacts.',open:()=>openKind('vendors')},
+      {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>openKind('customers')}
     ]);
     const note=document.createElement('p');note.className='hint';note.style.marginTop='18px';note.textContent='Estimates and Invoices currently share the existing workspace document collection; separate filtered views are planned.';el('businessHubActions').after(note);
   }
-  async function renderBusinessCollection(platform,kind,openNew=false) {
+  async function renderBusinessCollection(platform,kind,openNew=false,backAction=null) {
     if(activePlatform!==platform)return;
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
@@ -530,7 +543,7 @@
     const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';actions.append(cancel);form.append(actions);
     const close=()=>{editor.hidden=true;editingId=null;form.reset();message.textContent='';};
     cancel.onclick=close;el('businessClose').onclick=close;
-    el('businessBack').onclick=()=>showPlatformShell(platform);
+    el('businessBack').textContent=backAction?'← Back to Hub':'← Dashboard';el('businessBack').onclick=()=>backAction?backAction():showPlatformShell(platform);
     const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=item[f]??'';}el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';editor.hidden=false;editor.scrollIntoView({behavior:'smooth',block:'start'});};
     el('businessNew').onclick=()=>open();
     const search=el('businessSearch');
@@ -6455,13 +6468,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     });
     root.appendChild(builder);root.appendChild(templates);root.appendChild(saved);
     refreshSavedTakeoffs().catch(console.error);
-    root.appendChild(card);
-    root.appendChild(list);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
  
-    currentView = { refresh };
-    refresh();
+    currentView = { refresh: refreshSavedTakeoffs };
   }
  
  
@@ -9517,8 +9527,12 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()}
     ]);
+    const businessBack=document.createElement('button');businessBack.className='btn';businessBack.type='button';businessBack.textContent='← Business Hub';businessBack.style.margin='0 0 12px';businessBack.hidden=true;
     const body = document.createElement("div");
-    root.append(tabs, body);
+    root.append(businessBack,tabs, body);
+    businessBack.onclick=()=>{hubIntro.hidden=false;tabs.hidden=true;body.hidden=true;businessBack.hidden=true;};
+    hubIntro.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{hubIntro.hidden=true;tabs.hidden=false;body.hidden=false;businessBack.hidden=false;}));
+    tabs.hidden=true;body.hidden=true;
  
     let activeTab = "generator";
     function syncTabs() {
