@@ -201,7 +201,7 @@
     if (navInvoicePage) navInvoicePage.style.display = "none";
   } else if (navEstimatePage) {
     const pieces = navEstimatePage.querySelectorAll("span, small");
-    if (pieces[0]) pieces[0].textContent = "Estimate/Invoice";
+    if (pieces[0]) pieces[0].textContent = "Business Hub";
     if (pieces[1]) pieces[1].textContent = "Builder";
     if (navInvoicePage) navInvoicePage.style.display = "none";
   }
@@ -335,7 +335,7 @@
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
     workspaceBody.innerHTML='<div class="card" style="max-width:1100px;margin:auto"><h2>Business Hub</h2><p class="hint">Manage estimates, invoices and supplier purchase orders. Purchase orders use an independent persistent sequence for this workspace.</p><div id="businessHubActions" style="display:flex;flex-wrap:wrap;gap:12px"></div><p class="hint">Purchase orders can reference work orders and vendors. Accounting payment and inventory receiving integrations are planned; changing a PO status does not automatically post a payment or inventory transaction.</p></div>';
     const host=el('businessHubActions');
-    for(const [label,kind] of [['Estimates & Invoices','estimates_invoices'],['Purchase Orders','purchase_orders'],['Vendors','vendors']]){
+    for(const [label,kind] of [['Estimates & Invoices','estimates_invoices'],['Purchase Orders','purchase_orders'],['Vendors','vendors'],['Customers','customers']]){
       const b=document.createElement('button');b.className='btn btn-orange';b.textContent=label;b.onclick=()=>renderBusinessCollection(platform,kind);host.append(b);
     }
     const back=document.createElement('button');back.className='btn';back.textContent='← Dashboard';back.onclick=()=>showPlatformShell(platform);host.append(back);
@@ -9130,7 +9130,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   function renderEstimatePage() {
     setNavActive(primaryEstimateNav);
     setActiveChip("Office Flow");
-    setWorkspace("Estimate/Invoice");
+    setWorkspace("Business Hub");
     clearWorkspaceActions();
  
     const root = document.createElement("div");
@@ -9152,7 +9152,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     btnInv.className = "navbtn";
     btnInv.style.width = "auto";
     btnInv.innerHTML = `<span>Invoices</span>`;
-    tabs.append(btnGen, btnEst, btnInv);
+    const btnPO = document.createElement("button");
+    btnPO.className = "navbtn";
+    btnPO.style.width = "auto";
+    btnPO.textContent = "Purchase Orders";
+    tabs.append(btnGen, btnEst, btnInv, btnPO);
  
     const body = document.createElement("div");
     root.append(tabs, body);
@@ -9162,6 +9166,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       btnGen.classList.toggle("navbtn-active", activeTab === "generator");
       btnEst.classList.toggle("navbtn-active", activeTab === "estimates");
       btnInv.classList.toggle("navbtn-active", activeTab === "invoices");
+      btnPO.classList.toggle("navbtn-active", activeTab === "purchase_orders");
     }
  
     async function renderDocList(type) {
@@ -9249,12 +9254,14 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       syncTabs();
       if (activeTab === "estimates") return renderDocList("estimate");
       if (activeTab === "invoices") return renderDocList("invoice");
+      if (activeTab === "purchase_orders") return renderPdsPurchaseOrders(body);
       renderGeneratorTab();
     }
  
     btnGen.addEventListener("click", () => { activeTab = "generator"; renderActiveTab(); });
     btnEst.addEventListener("click", () => { activeTab = "estimates"; renderActiveTab(); });
     btnInv.addEventListener("click", () => { activeTab = "invoices"; renderActiveTab(); });
+    btnPO.addEventListener("click", () => { activeTab = "purchase_orders"; renderActiveTab(); });
  
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
@@ -9262,6 +9269,61 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     renderActiveTab();
   }
  
+  async function renderPdsPurchaseOrders(host) {
+    host.innerHTML = '<div class="card"><h3>PDS Purchase Orders</h3><p class="hint">PDS purchase orders are stored separately from all existing estimates and invoices. PO numbers start at PO-00001.</p><button class="btn btn-orange" id="pdsPoNew">+ New Purchase Order</button><div id="pdsPoRecords" style="margin-top:14px"></div></div>';
+    const list = host.querySelector('#pdsPoRecords');
+    const fields = [['vendor','Vendor / Supplier'],['vendor_contact','Vendor Contact'],['work_order','Job / Work Order #'],['customer','Customer'],['date','PO Date'],['needed_by','Needed By'],['description','Items / Services Description'],['item_type','Type (Materials / Services)'],['quantity','Quantity'],['unit_cost','Unit Cost'],['tax','Tax'],['shipping','Shipping'],['total','Total'],['status','Status'],['received_status','Receiving Status'],['payment_status','Payment Status'],['invoice_reference','Vendor Invoice #'],['notes','Notes']];
+    const escapeText = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fetchOrders = async () => {
+      const res = await fetch('/pds-purchase-orders', {credentials:'same-origin'});
+      if (!res.ok) throw new Error('Unable to load purchase orders (' + res.status + ')');
+      return (await res.json()).items || [];
+    };
+    const showEditor = (record) => {
+      const old = host.querySelector('#pdsPoEditor'); if (old) old.remove();
+      const editor = document.createElement('div'); editor.id = 'pdsPoEditor'; editor.className = 'card'; editor.style.marginTop='12px';
+      const title = document.createElement('h3'); title.textContent=record ? 'Edit ' + record.po_number : 'New Purchase Order'; editor.appendChild(title);
+      const grid = document.createElement('div'); grid.className='grid2';
+      const controls = {};
+      fields.forEach(([key,label])=>{
+        const wrap=document.createElement('label'); wrap.style.display='block'; wrap.style.marginBottom='8px';
+        const caption=document.createElement('div'); caption.className='label'; caption.textContent=label;
+        const input=key==='description'||key==='notes' ? document.createElement('textarea') : document.createElement('input');
+        input.className='input'; input.value=record ? (record[key]??'') : (key==='status'?'Draft':'');
+        if(key==='date'||key==='needed_by')input.type='date';
+        if(['quantity','unit_cost','tax','shipping','total'].includes(key)){input.type='number';input.step='0.01';}
+        controls[key]=input;wrap.append(caption,input);grid.appendChild(wrap);
+      });
+      editor.appendChild(grid);
+      const save=document.createElement('button');save.className='btn btn-orange';save.textContent=record?'Save Changes':'Create Purchase Order';
+      const cancel=document.createElement('button');cancel.className='btn';cancel.textContent='Cancel';cancel.style.marginLeft='8px';cancel.onclick=()=>editor.remove();
+      save.onclick=async()=>{
+        save.disabled=true;
+        try {
+          const data=Object.fromEntries(fields.map(([key])=>[key,controls[key].value]));
+          const res=await fetch('/pds-purchase-orders'+(record?'/'+encodeURIComponent(record.id):''),{method:record?'PATCH':'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({data})});
+          if(!res.ok)throw new Error((await res.text()).slice(0,250));
+          editor.remove();await reload();
+        }catch(err){alert('Unable to save PO: '+err.message);}finally{save.disabled=false;}
+      };
+      editor.append(save,cancel);list.before(editor);
+    };
+    const reload=async()=>{
+      try{
+        const orders=await fetchOrders();list.innerHTML='';
+        if(!orders.length){list.textContent='No PDS purchase orders yet.';return;}
+        orders.slice().reverse().forEach(order=>{
+          const row=document.createElement('div');row.className='card';row.style.marginBottom='8px';
+          row.innerHTML='<strong>'+escapeText(order.po_number)+'</strong> — '+escapeText(order.vendor)+' <span class="hint">'+escapeText(order.status||'Draft')+' · '+escapeText(order.work_order||'')+'</span>';
+          const edit=document.createElement('button');edit.className='btn';edit.textContent='Open / Edit';edit.style.marginLeft='12px';edit.onclick=()=>showEditor(order);
+          row.appendChild(edit);list.appendChild(row);
+        });
+      }catch(err){list.textContent=err.message;}
+    };
+    host.querySelector('#pdsPoNew').onclick=()=>showEditor(null);
+    await reload();
+  }
+
   function renderInvoicePage() {
     renderEstimatePage();
   }
