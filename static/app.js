@@ -522,6 +522,28 @@
       workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:18px"><div class="card"><h2 style="margin:0 0 6px">${name}</h2><div id="businessDashboardCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px"></div></div><div class="card"><h3>Workspace</h3><div id="businessNav" style="display:flex;flex-wrap:wrap;gap:10px"></div></div></div>`;
     }
     if(platform==='sdc') {
+      // Phase 2Q-A: live SDC operating scorecard, sourced from this workspace only.
+      const metricRoot=el('businessDashboardCards');
+      if(metricRoot){
+        const definitions=[
+          ['Open Orders','orders',a=>a.filter(x=>!['delivered','completed','cancelled','canceled'].includes(String(x.status||'').toLowerCase())).length],
+          ['In Production','orders',a=>a.filter(x=>/production|in progress|manufactur/i.test(String(x.status||''))).length],
+          ['Upcoming Deliveries','orders',a=>a.filter(x=>{const d=String(x.delivery_date||x.due_date||'').slice(0,10);const today=new Date().toLocaleDateString('en-CA');return d>=today&&!['delivered','cancelled','canceled'].includes(String(x.status||'').toLowerCase());}).length],
+          ['Products','products',a=>a.length],
+          ['Customers','customers',a=>a.filter(x=>String(x.status||'').toLowerCase()!=='inactive').length],
+          ['Open Receivables','receivables',a=>a.filter(x=>!['paid','closed','cancelled','canceled'].includes(String(x.status||'').toLowerCase())).length]
+        ];
+        metricRoot.replaceChildren();
+        for(const [label,kind,calculate] of definitions){
+          const card=document.createElement('button');card.type='button';card.className='btn';
+          card.style.cssText='display:flex;flex-direction:column;align-items:flex-start;gap:7px;padding:16px;border:1px solid #d9dee7;border-radius:12px;background:#fff;text-align:left;min-height:92px';
+          const caption=document.createElement('span');caption.className='hint';caption.textContent=label;
+          const value=document.createElement('strong');value.style.fontSize='25px';value.textContent='…';
+          card.append(caption,value);card.onclick=()=>renderBusinessCollection('sdc',kind);
+          metricRoot.append(card);
+          fetchJSON('/workspaces/sdc/'+kind).then(data=>{value.textContent=String(calculate(data.items||[]));}).catch(()=>{value.textContent='—';card.title='Could not load '+label.toLowerCase();});
+        }
+      }
       const dashboard=workspaceBody.querySelector('.card');
       if(dashboard){
         const calendar=document.createElement('div');calendar.className='card';calendar.style.marginTop='16px';
