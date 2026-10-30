@@ -9162,7 +9162,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const btnPO = document.createElement("button");
     btnPO.className = "navbtn";
     btnPO.style.width = "auto";
-    btnPO.textContent = "Purchase Orders";
+    btnPO.innerHTML = `<span>Purchase Orders</span>`;
     tabs.append(btnGen, btnEst, btnInv, btnPO);
  
     const body = document.createElement("div");
