@@ -346,9 +346,9 @@
       ? [['customers','Customers & Contacts'],['vendors','Vendors'],['orders','Orders (preview only)'],['products','Products'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']]
       : [['customers','Customers & Contacts'],['vendors','Vendors'],['work_orders','Legacy Work Orders (preview only)'],['estimates_invoices','Estimates & Invoices (preview only)'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']];
     workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><h2>AI Data Import Center</h2>
-      <p class="hint">Phase 2Q-B: safe, review-first CSV importer. Select the record category, upload a CSV, review the detected columns and sample records, then explicitly approve. No existing records are overwritten. Numbered jobs, estimates, invoices and POs are preview-only until their mapping rules are completed.</p>
-      <div class="grid2"><label>Destination <select class="input" id="diKind"></select></label><label>Source file <input class="input" id="diFile" type="file" accept=".csv,text/csv"></label></div>
-      <button class="btn btn-orange" id="diPreview" style="margin-top:12px">Analyze & Preview CSV</button>
+      <p class="hint">Phase 2Q-C: review-first CSV and AI document importer. Upload CSV for multiple records or PDF/image for an AI-extracted draft. AI document extraction currently proposes one record per file. Review every field before approval. No existing records are overwritten. Numbered jobs, estimates, invoices and POs are preview-only until their mapping rules are completed.</p>
+      <div class="grid2"><label>Destination <select class="input" id="diKind"></select></label><label>Source file <input class="input" id="diFile" type="file" accept=".csv,.pdf,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"></label></div>
+      <button class="btn btn-orange" id="diPreview" style="margin-top:12px">Analyze & Preview File</button>
       <p id="diStatus" class="hint" role="status"></p>
       <div id="diResults"></div></div>`;
     const kind=el('diKind'),file=el('diFile'),status=el('diStatus'),results=el('diResults');
@@ -357,11 +357,12 @@
     kind.onchange=()=>{token=null;results.replaceChildren();status.textContent='';};
     file.onchange=()=>{token=null;results.replaceChildren();status.textContent='';};
     el('diPreview').onclick=async()=>{
-      if(!file.files.length){status.textContent='Choose a CSV file.';return;}
+      if(!file.files.length){status.textContent='Choose a CSV, PDF, or image file.';return;}
       status.textContent='Reading and staging file…';results.replaceChildren();token=null;
       try{
         const form=new FormData();form.append('file',file.files[0]);
-        const response=await fetch('/ai-data-import/'+platform+'/'+kind.value+'/preview',{method:'POST',body:form,credentials:'same-origin'});
+        const isCSV=/\.csv$/i.test(file.files[0].name);
+        const response=await fetch('/ai-data-import/'+platform+'/'+kind.value+(isCSV?'/preview':'/ai-preview'),{method:'POST',body:form,credentials:'same-origin'});
         const data=await response.json();
         if(!response.ok)throw new Error(data.detail||'Import preview failed');
         token=data.token;previewKind=kind.value;

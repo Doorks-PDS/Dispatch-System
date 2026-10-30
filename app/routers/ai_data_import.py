@@ -1,3 +1,4 @@
+
 """Review-first CSV import for Doorks and SDC workspace records.
 
 Never touches PDS legacy files or any existing record. Imports append only after
@@ -75,6 +76,26 @@ async def preview(platform:str,kind:str,request:Request,file:UploadFile=File(...
     workspaces.save(path,[stage])
     return {"token":token,"filename":stage["filename"],"columns":headers,"count":len(rows),"sample":rows[:8],
             "note":"Preview only. No records have been changed."}
+
+@router.post("/{platform}/{kind}/ai-preview")
+async def ai_preview(platform:str,kind:str,request:Request,file:UploadFile=File(...)):
+    guard(request,platform,kind)
+    from app.routers import workspace_ai
+    if (platform,kind) not in workspace_ai.FIELDS:
+        raise HTTPException(400,"AI extraction is not available for this destination")
+    if not (file.filename or "").lower().endswith((".pdf",".png",".jpg",".jpeg",".webp")):
+        raise HTTPException(400,"AI preview supports PDF, JPG, PNG and WEBP in this release")
+    extracted=await workspace_ai.extract(platform,kind,request,file=file,email_text="")
+    row={k:v for k,v in extracted["fields"].items() if v}
+    if not row:raise HTTPException(422,"No usable fields found in document")
+    token=uuid.uuid4().hex
+    stage={"platform":platform,"kind":kind,"filename":Path(file.filename or "document").name,
+           "created_at":datetime.now(timezone.utc).isoformat(),
+           "user":str((getattr(request.state,"auth_user",None) or {}).get("id","")),
+           "headers":list(extracted["fields"]),"rows":[row]}
+    workspaces.save(base_dir(request,platform)/(token+".json"),[stage])
+    return {"token":token,"filename":stage["filename"],"columns":stage["headers"],
+            "count":1,"sample":[row],"note":"AI proposed one record. Review carefully before approving; no data has changed."}
 
 class Approval(BaseModel):
     token:str
