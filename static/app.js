@@ -337,6 +337,59 @@
   function safeWorkspaceText(value) { const e=document.createElement("span");e.textContent=String(value??"");return e.innerHTML; }
   // Phase 2D: business-specific dashboard and record editor. Never uses PDS data endpoints.
   // Shared business document navigation. PO records remain isolated by platform.
+
+  function renderAIDataImportCenter(platform){
+    if(activePlatform!==platform)return;
+    clearWorkspaceActions();
+    setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — AI Data Import Center');
+    const collections=platform==='sdc'
+      ? [['customers','Customers & Contacts'],['vendors','Vendors'],['orders','Orders (preview only)'],['products','Products'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']]
+      : [['customers','Customers & Contacts'],['vendors','Vendors'],['work_orders','Legacy Work Orders (preview only)'],['estimates_invoices','Estimates & Invoices (preview only)'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']];
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><h2>AI Data Import Center</h2>
+      <p class="hint">Phase 2Q-B: safe, review-first CSV importer. Select the record category, upload a CSV, review the detected columns and sample records, then explicitly approve. No existing records are overwritten. Numbered jobs, estimates, invoices and POs are preview-only until their mapping rules are completed.</p>
+      <div class="grid2"><label>Destination <select class="input" id="diKind"></select></label><label>Source file <input class="input" id="diFile" type="file" accept=".csv,text/csv"></label></div>
+      <button class="btn btn-orange" id="diPreview" style="margin-top:12px">Analyze & Preview CSV</button>
+      <p id="diStatus" class="hint" role="status"></p>
+      <div id="diResults"></div></div>`;
+    const kind=el('diKind'),file=el('diFile'),status=el('diStatus'),results=el('diResults');
+    for(const [value,label] of collections){const o=document.createElement('option');o.value=value;o.textContent=label;kind.append(o);}
+    let token=null, previewKind=null;
+    kind.onchange=()=>{token=null;results.replaceChildren();status.textContent='';};
+    file.onchange=()=>{token=null;results.replaceChildren();status.textContent='';};
+    el('diPreview').onclick=async()=>{
+      if(!file.files.length){status.textContent='Choose a CSV file.';return;}
+      status.textContent='Reading and staging file…';results.replaceChildren();token=null;
+      try{
+        const form=new FormData();form.append('file',file.files[0]);
+        const response=await fetch('/ai-data-import/'+platform+'/'+kind.value+'/preview',{method:'POST',body:form,credentials:'same-origin'});
+        const data=await response.json();
+        if(!response.ok)throw new Error(data.detail||'Import preview failed');
+        token=data.token;previewKind=kind.value;
+        const heading=document.createElement('h3');heading.textContent=`${data.count} rows detected — ${data.filename}`;results.append(heading);
+        const cols=document.createElement('p');cols.className='hint';cols.textContent='Detected columns: '+data.columns.join(', ');results.append(cols);
+        const table=document.createElement('div');table.style.cssText='overflow:auto;max-height:340px;border:1px solid #d9dee7;border-radius:8px';
+        const grid=document.createElement('table');grid.style.cssText='border-collapse:collapse;width:100%;font-size:13px';
+        const header=document.createElement('tr');
+        for(const col of data.columns){const cell=document.createElement('th');cell.textContent=col;cell.style.padding='8px';header.append(cell);}grid.append(header);
+        for(const row of data.sample){const tr=document.createElement('tr');for(const col of data.columns){const td=document.createElement('td');td.textContent=row[col]??'';td.style.cssText='padding:8px;border-top:1px solid #eee';tr.append(td);}grid.append(tr);}
+        table.append(grid);results.append(table);
+        const locked=['orders','work_orders','estimates_invoices','purchase_orders'].includes(kind.value);
+        if(locked){status.textContent='Preview complete. This category is not yet enabled for direct import because existing numbering and linkage must be preserved.';return;}
+        const approve=document.createElement('button');approve.className='btn btn-orange';approve.style.marginTop='12px';approve.textContent='Approve Import — Add New Records';
+        approve.onclick=async()=>{
+          if(!token||previewKind!==kind.value)return;
+          if(!window.confirm('Add these records to '+platform.toUpperCase()+' '+kind.value+'? Existing matching records will be skipped.'))return;
+          approve.disabled=true;status.textContent='Importing approved records…';
+          try{
+            const response=await fetch('/ai-data-import/'+platform+'/'+kind.value+'/approve',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,confirm:true})});
+            const result=await response.json();if(!response.ok)throw new Error(result.detail||'Import failed');
+            status.textContent=`Imported ${result.added} records; skipped ${result.duplicates_skipped} duplicates.`;approve.remove();token=null;
+          }catch(err){status.textContent=err.message;approve.disabled=false;}
+        };
+        results.append(approve);status.textContent='Preview ready. Review the rows before approving.';
+      }catch(err){status.textContent=err.message||String(err);}
+    };
+  }
   function renderBusinessHub(platform){
     if(activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
@@ -497,8 +550,8 @@
     let businessSide=document.getElementById('doorksBusinessSidebar');
     if(!businessSide){businessSide=document.createElement('aside');businessSide.id='doorksBusinessSidebar';businessSide.className='sidebar';platformSidebar?.parentElement?.insertBefore(businessSide,platformSidebar.nextSibling);}
     businessSide.style.display=platform==='pds'?'none':'flex';
-    if(platform==='sdc'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">SDC Operations</div><div class="panel-bd" id="sdcNav"></div></section>`;const links=[['Dashboard',()=>showPlatformShell('sdc')],['Orders & Production',()=>renderBusinessCollection('sdc','orders')],['Customers',()=>renderBusinessCollection('sdc','customers')],['Products',()=>renderBusinessCollection('sdc','products')],['Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads')],['Expenses',()=>renderBusinessCollection('sdc','expenses')],['Accounts Receivable',()=>renderBusinessCollection('sdc','receivables')],['Inventory',()=>renderBusinessCollection('sdc','inventory')],['Business Hub',()=>renderBusinessHub('sdc')],['Vendors',()=>renderBusinessCollection('sdc','vendors')]];for(const [label,fn] of links){const b=document.createElement('button');b.className='doorks-side-link';b.textContent=label;b.onclick=fn;document.getElementById('sdcNav').append(b);}}
-    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Customers',()=>renderBusinessCollection('doorks','customers'));add('dbOfficeNav','Vendors',()=>renderBusinessCollection('doorks','vendors'));add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting',()=>renderDoorksAccounting());add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
+    if(platform==='sdc'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">SDC Operations</div><div class="panel-bd" id="sdcNav"></div></section>`;const links=[['Dashboard',()=>showPlatformShell('sdc')],['Orders & Production',()=>renderBusinessCollection('sdc','orders')],['Customers',()=>renderBusinessCollection('sdc','customers')],['Products',()=>renderBusinessCollection('sdc','products')],['Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads')],['Expenses',()=>renderBusinessCollection('sdc','expenses')],['Accounts Receivable',()=>renderBusinessCollection('sdc','receivables')],['Inventory',()=>renderBusinessCollection('sdc','inventory')],['Business Hub',()=>renderBusinessHub('sdc')],['AI Data Import',()=>renderAIDataImportCenter('sdc')],['Vendors',()=>renderBusinessCollection('sdc','vendors')]];for(const [label,fn] of links){const b=document.createElement('button');b.className='doorks-side-link';b.textContent=label;b.onclick=fn;document.getElementById('sdcNav').append(b);}}
+    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Customers',()=>renderBusinessCollection('doorks','customers'));add('dbOfficeNav','Vendors',()=>renderBusinessCollection('doorks','vendors'));add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting',()=>renderDoorksAccounting());add('dbOfficeNav','AI Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
     document.querySelector('main.layout')?.classList.toggle('business-platform-layout',false);
     if(headerCalendarBtn)headerCalendarBtn.style.display=currentUser && (inPds ? accessForRole(currentUser.role).calendar : currentUser.role==='office_admin') ? 'inline-flex' : 'none';
     if(inPds)return;
