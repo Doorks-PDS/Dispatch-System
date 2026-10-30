@@ -455,13 +455,14 @@
       button.onclick=entry.open;host.append(button);
     }
   }
+  function renderSdcLegacyNotice(){clearWorkspaceActions();setWorkspace('SDC — Legacy Records');workspaceBody.innerHTML='<div class="card"><h2>Legacy Saddleback Records</h2><p class="hint">The original PDS Saddleback orders and taxes records have not been migrated into SDC. They remain stored in PDS and are not overwritten. Use the PDS workspace to access the original records until a safe migration is available.</p><button class="btn" id="legacySdcBack">← Dashboard</button></div>';el('legacySdcBack').onclick=()=>showPlatformShell('sdc');}
   function renderSdcAccounting(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting Hub');
     workspaceBody.innerHTML=`<div class="card" style="max-width:1160px;margin:auto">
       <h2 style="margin-bottom:8px">SDC Accounting Hub</h2>
       <p class="hint" style="margin-bottom:22px;max-width:800px">Manage Saddleback Design Co. financial records in one place. These are separate from PDS and Doorks.</p>
-      <div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;width:100%;align-items:stretch"></div>
+      <div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;width:100%;align-items:stretch"></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-orange" id="sdcQuickNew">+ New Input</button></div><div id="sdcQuickOptions"></div>
       <p class="hint" style="margin-top:22px">Receipts are currently entered through Expenses. Dedicated receipt attachments, automated receiving, bill matching and bank reconciliation are planned.</p>
     </div>`;
     const links=[
@@ -472,6 +473,7 @@
       {label:'Purchase Orders',kind:'purchase_orders',icon:'📋',description:'Manage supplier purchase orders and statuses.'},
       {label:'Vendors',kind:'vendors',icon:'🏢',description:'Access supplier information and contact records.'}
     ];
+    el('sdcQuickNew').onclick=()=>renderAccountingQuickMenu('sdc','sdcQuickOptions');
     makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
   }
   function showAccountingMetrics(platform,title,entries,back){
@@ -619,10 +621,20 @@
     try{await refresh();if(openNew)open();}catch(err){el('businessRecords').textContent=`Unable to load records: ${err.message||'Unknown error'}`;}
   }
   // Phase 2F: Doorks-only accounting pilot. No PDS accounting endpoints are used.
+  function renderAccountingQuickMenu(platform,hostId){
+    const host=el(hostId);if(!host)return;host.replaceChildren();
+    const card=document.createElement('div');card.className='card';card.style.marginTop='14px';
+    const heading=document.createElement('h3');heading.textContent='Choose an input type';card.append(heading);
+    const options=platform==='sdc'?[['Receipt / Expense','expenses'],['Accounts Receivable','receivables'],['Inventory / Receiving','inventory'],['Purchase Order','purchase_orders']]:[['Receipt','receipts'],['Accounts Receivable','receivables'],['Inventory / Intake','inventory'],['Statement','statements']];
+    const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:10px;flex-wrap:wrap';
+    for(const [label,kind] of options){const b=document.createElement('button');b.type='button';b.className='btn';b.textContent=label;b.onclick=()=>platform==='sdc'?renderBusinessCollection('sdc',kind,true,()=>renderSdcAccounting()):renderDoorksAccounting(kind);buttons.append(b);}
+    const cancel=document.createElement('button');cancel.className='btn';cancel.textContent='Cancel';cancel.onclick=()=>host.replaceChildren();buttons.append(cancel);card.append(buttons);host.append(card);
+  }
   function renderDoorksAccountingHub(){
     if(activePlatform!=='doorks')return;
     clearWorkspaceActions();setWorkspace('Doorks — Accounting Hub');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Doorks Accounting Hub</h2><p class="hint">Overview of Doorks financial workflows. All records remain separate from PDS and SDC.</p><div id="doorksAcctHubCards"></div></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Doorks Accounting Hub</h2><p class="hint">Overview of Doorks financial workflows. All records remain separate from PDS and SDC.</p><div id="doorksAcctHubCards"></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-orange" id="doorksQuickNew">+ New Input</button></div><div id="doorksQuickOptions"></div></div>';
+    el('doorksQuickNew').onclick=()=>renderAccountingQuickMenu('doorks','doorksQuickOptions');
     makeHubCards(el('doorksAcctHubCards'),[
       {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
       {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
@@ -701,6 +713,7 @@
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
+      addSdc('sdcOfficeNav','Legacy Saddleback Records',()=>renderSdcLegacyNotice());
       addSdc('sdcDevelopmentNav','Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads'));
     }
     if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
@@ -9518,6 +9531,19 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     return openEstimateInvoiceHelper(job, "invoice", container, ctx);
   }
  
+  async function renderPdsVendorHub(){
+    setWorkspace('PDS — Vendors');clearWorkspaceActions();
+    workspaceBody.innerHTML='<div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h2>Vendors</h2><button class="btn" id="pdsVendorBack">← Business Hub</button></div><p class="hint">Suppliers referenced by existing PDS purchase orders. Dedicated vendor profiles and contacts are not yet available; no records are changed.</p><div id="pdsVendorList">Loading suppliers…</div></div>';
+    el('pdsVendorBack').onclick=()=>renderEstimatePage();
+    try{
+      const data=await fetchJSON('/pds-purchase-orders');
+      const orders=Array.isArray(data)?data:(data.items||data.orders||[]);
+      const names=[...new Set(orders.map(o=>String(o.vendor||'').trim()).filter(Boolean))].sort();
+      const list=el('pdsVendorList');if(!list)return;list.replaceChildren();
+      if(!names.length){list.textContent='No suppliers found in PDS purchase orders.';return;}
+      for(const name of names){const row=document.createElement('div');row.className='jobrow';row.textContent=name;list.append(row);}
+    }catch(e){const list=el('pdsVendorList');if(list)list.textContent='Unable to load supplier list: '+(e.message||e);}
+  }
   function renderEstimatePage() {
     setNavActive(primaryEstimateNav);
     setActiveChip("Office Flow");
@@ -9555,14 +9581,17 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       {icon:'📝',label:'Generator',description:'Create estimates and invoices.',open:()=>btnGen.click()},
       {icon:'📋',label:'Estimates',description:'Search and manage saved estimates.',open:()=>btnEst.click()},
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
-      {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()}
+      {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
+      {icon:'👥',label:'Customers & Contacts',description:'Open the existing PDS customer and contact database.',open:()=>renderCustomersView()},
+      {icon:'🏢',label:'Vendors',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()}
     ]);
     const businessBack=document.createElement('button');businessBack.className='btn';businessBack.type='button';businessBack.textContent='← Business Hub';businessBack.style.margin='0 0 12px';businessBack.hidden=true;
     const body = document.createElement("div");
-    root.append(businessBack,tabs, body);
-    businessBack.onclick=()=>{hubIntro.hidden=false;tabs.hidden=true;body.hidden=true;businessBack.hidden=true;};
-    hubIntro.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{hubIntro.hidden=true;tabs.hidden=false;body.hidden=false;businessBack.hidden=false;}));
+    root.append(businessBack,body);
+    businessBack.onclick=()=>{hubIntro.hidden=false;body.hidden=true;businessBack.hidden=true;};
+    hubIntro.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{if([btnGen,btnEst,btnInv,btnPO].some(x=>x===b))return;if(!hubIntro.isConnected)return;/* Non-document links navigate independently. */}));
     tabs.hidden=true;body.hidden=true;
+    [btnGen,btnEst,btnInv,btnPO].forEach(b=>b.addEventListener('click',()=>{hubIntro.hidden=true;body.hidden=false;businessBack.hidden=false;}));
  
     let activeTab = "generator";
     function syncTabs() {
