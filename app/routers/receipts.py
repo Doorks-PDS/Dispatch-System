@@ -61,10 +61,13 @@ async def create_receipt(
     request: Request,
     date: str = Form(...), employee: str = Form(...), vendor: str = Form(...),
     amount: float = Form(...), card_last4: str = Form(""), receipt_number: str = Form(""),
-    notes: str = Form(""), category: str = Form("Other"), file: UploadFile = File(...),
+    notes: str = Form(""), category: str = Form("Other"), document_type: str = Form("Receipt"),
+    job_number: str = Form(""), customer: str = Form(""), file: UploadFile = File(...),
     x_api_key: Optional[str] = Header(default=None),
 ):
     _require(request, x_api_key)
+    if document_type not in {"Receipt", "Packing Slip"}:
+        raise HTTPException(400, "Choose Receipt or Packing Slip")
     if not date.strip() or not vendor.strip() or not employee.strip() or amount < 0:
         raise HTTPException(400, "Date, employee, vendor and nonnegative amount are required")
     if card_last4 and not re.fullmatch(r"\d{4}", card_last4):
@@ -84,7 +87,9 @@ async def create_receipt(
     item_id = uuid.uuid4().hex
     filename = item_id + suffix
     record = {
-        "id": item_id, "date": date.strip(), "employee": employee.strip(),
+        "id": item_id, "document_type": document_type,
+        "job_number": job_number.strip()[:80], "customer": customer.strip()[:200],
+        "date": date.strip(), "employee": employee.strip(),
         "vendor": vendor.strip(), "amount": round(amount, 2),
         "card_last4": card_last4, "receipt_number": receipt_number.strip()[:120],
         "notes": notes.strip()[:2000], "category": category.strip()[:100] or "Other", "filename": original,
@@ -203,7 +208,7 @@ async def edit_receipt(request: Request, receipt_id: str, x_api_key: Optional[st
     from app.routers.accounting import require_office
     require_office(request, x_api_key)
     changes = await request.json()
-    allowed = {"date", "employee", "vendor", "amount", "card_last4", "receipt_number", "notes", "category"}
+    allowed = {"document_type", "job_number", "customer", "date", "employee", "vendor", "amount", "card_last4", "receipt_number", "notes", "category"}
     if not isinstance(changes, dict) or any(k not in allowed for k in changes):
         raise HTTPException(400, "Invalid receipt fields")
     base, index = _paths(request)
@@ -245,7 +250,7 @@ def export_receipts(request: Request, x_api_key: Optional[str] = Header(default=
     from app.routers.accounting import require_office
     require_office(request, x_api_key)
     _, index = _paths(request)
-    fields = ["date", "employee", "vendor", "category", "amount", "card_last4", "receipt_number", "notes", "created_at", "updated_at", "authorization_status", "authorized_by", "authorized_at", "id"]
+    fields = ["document_type", "job_number", "customer", "date", "employee", "vendor", "category", "amount", "card_last4", "receipt_number", "notes", "created_at", "updated_at", "authorization_status", "authorized_by", "authorized_at", "id"]
     output = io.StringIO()
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction="ignore")
     writer.writeheader()
@@ -328,8 +333,8 @@ async def extract_receipt(request: Request, file: UploadFile = File(...), x_api_
         attachment = {"type": "input_image", "image_url": f"data:{mime};base64,{encoded}", "detail": "high"}
 
     instructions = (
-        "Read this purchase receipt. Return ONLY a JSON object with keys vendor, date, amount, "
-        "receipt_number, card_last4. Each value must be a string or null. "
+        "Read this purchase receipt or supplier packing slip. Return ONLY a JSON object with keys vendor, date, amount, "
+        "receipt_number, card_last4, job_number, customer. Each value must be a string or null. "
         "Date must be YYYY-MM-DD; amount must be the final amount actually paid, "
         "formatted as digits with two decimal places and no currency symbol. "
         "Card last4 is only the last four digits when explicitly printed. "
@@ -362,7 +367,7 @@ async def extract_receipt(request: Request, file: UploadFile = File(...), x_api_
         return {"ok": True, "fields": {}, "message": "AI could not read this receipt. Please enter the details manually."}
 
     fields = {}
-    for key in ("vendor", "receipt_number"):
+    for key in ("vendor", "receipt_number", "job_number", "customer"):
         value = extracted.get(key)
         if isinstance(value, str) and value.strip():
             fields[key] = value.strip()[:120]

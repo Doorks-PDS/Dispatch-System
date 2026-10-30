@@ -350,9 +350,31 @@
       <div class="grid2"><label>Destination <select class="input" id="diKind"></select></label><label>Source file <input class="input" id="diFile" type="file" accept=".csv,.pdf,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"></label></div>
       <button class="btn btn-orange" id="diPreview" style="margin-top:12px">Analyze & Preview File</button>
       <p id="diStatus" class="hint" role="status"></p>
+      <details style="margin:16px 0;padding:12px 16px;border:1px solid #d6dfe9;border-radius:12px"><summary style="cursor:pointer;font-weight:700">Import History</summary><div id="diHistory" style="padding-top:12px" class="hint">Open to load recent completed imports.</div></details>
       <div id="diResults"></div></div>`;
     const kind=el('diKind'),file=el('diFile'),status=el('diStatus'),results=el('diResults');
     for(const [value,label] of collections){const o=document.createElement('option');o.value=value;o.textContent=label;kind.append(o);}
+    const historyPanel=el('diHistory');
+    const historyDetails=historyPanel.closest('details');
+    historyDetails.addEventListener('toggle',async()=>{
+      if(!historyDetails.open)return;
+      historyPanel.textContent='Loading completed imports…';
+      try{
+        const response=await fetch('/ai-data-import/'+platform+'/history',{credentials:'same-origin'});
+        const payload=await response.json();
+        if(!response.ok)throw new Error(payload.detail||'History unavailable');
+        historyPanel.replaceChildren();
+        if(!payload.items.length){historyPanel.textContent='No completed imports recorded yet.';return;}
+        const list=document.createElement('div');list.style.cssText='display:grid;gap:10px';
+        for(const item of payload.items){
+          const card=document.createElement('div');card.style.cssText='padding:12px;border:1px solid #e2e7ee;border-radius:9px;display:grid;gap:5px;overflow-wrap:anywhere';
+          const title=document.createElement('strong');title.textContent=(item.filename||'Import')+' · '+(item.kind||'records').replaceAll('_',' ');
+          const details=document.createElement('span');details.textContent=(item.completed_at||'').replace('T',' ').slice(0,19)+' UTC · '+item.added+' added · '+item.duplicates_skipped+' skipped';
+          card.append(title,details);list.append(card);
+        }
+        historyPanel.append(list);
+      }catch(err){historyPanel.textContent='Could not load import history: '+err.message;}
+    });
     let token=null, previewKind=null;
     kind.onchange=()=>{token=null;results.replaceChildren();status.textContent='';};
     file.onchange=()=>{token=null;results.replaceChildren();status.textContent='';};
@@ -424,21 +446,30 @@
   function renderSdcAccounting(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><h2>SDC Accounting</h2><p class="hint">Financial records for Saddleback Design Co. only. Receipts are currently recorded under Expenses; dedicated receipt attachments, bank reconciliation and statement processing are planned.</p><div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></div></div>';
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1160px;margin:auto">
+      <h2 style="margin-bottom:8px">SDC Accounting</h2>
+      <p class="hint" style="margin-bottom:22px;max-width:800px">Manage Saddleback Design Co. financial records in one place. These are separate from PDS and Doorks.</p>
+      <div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;width:100%;align-items:stretch"></div>
+      <p class="hint" style="margin-top:22px">Receipts are currently entered through Expenses. Dedicated receipt attachments, automated receiving, bill matching and bank reconciliation are planned.</p>
+    </div>`;
     const links=[
-      ['Receipts & Expenses','expenses','Record supplier receipts and business expenses'],
-      ['Accounts Receivable','receivables','Track customer payments and balances'],
-      ['Inventory & Receiving','inventory','Track materials and received quantities'],
-      ['Purchase Orders','purchase_orders','Review supplier POs and their status'],
-      ['Vendors','vendors','Open supplier records']
+      {label:'Receipts & Expenses',kind:'expenses',icon:'🧾',description:'Record business purchases, expenses and receipt details.'},
+      {label:'Accounts Receivable',kind:'receivables',icon:'💳',description:'Review customer balances and payments due.'},
+      {label:'Inventory & Receiving',kind:'inventory',icon:'📦',description:'View materials, stock and receiving records.'},
+      {label:'Purchase Orders',kind:'purchase_orders',icon:'📋',description:'Manage supplier purchase orders and statuses.'},
+      {label:'Vendors',kind:'vendors',icon:'🏢',description:'Access supplier information and contact records.'}
     ];
     const host=el('sdcAccountingLinks');
-    for(const [label,kind,description] of links){
-      const button=document.createElement('button');button.type='button';button.className='btn';
-      button.style.cssText='text-align:left;display:grid;gap:8px;min-height:96px;padding:15px;border-radius:12px';
-      const title=document.createElement('strong');title.textContent=label;
-      const detail=document.createElement('span');detail.className='hint';detail.textContent=description;
-      button.append(title,detail);button.onclick=()=>renderBusinessCollection('sdc',kind);host.append(button);
+    for(const entry of links){
+      const button=document.createElement('button');button.type='button';
+      button.style.cssText='appearance:none;box-sizing:border-box;min-width:0;width:100%;height:100%;min-height:132px;padding:20px;border:1px solid #d6dfe9;border-radius:14px;background:var(--card-bg,#fff);color:inherit;cursor:pointer;text-align:left;display:flex;flex-direction:column;gap:12px;white-space:normal;overflow-wrap:anywhere;transition:border-color .15s,box-shadow .15s';
+      button.onmouseenter=()=>{button.style.borderColor='#59a5cc';button.style.boxShadow='0 5px 16px rgba(24,62,83,.09)';};
+      button.onmouseleave=()=>{button.style.borderColor='#d6dfe9';button.style.boxShadow='none';};
+      const heading=document.createElement('span');heading.style.cssText='display:flex;align-items:center;gap:10px;font-size:16px;font-weight:750;line-height:1.35';
+      const emoji=document.createElement('span');emoji.textContent=entry.icon;emoji.setAttribute('aria-hidden','true');
+      const title=document.createElement('span');title.textContent=entry.label;heading.append(emoji,title);
+      const detail=document.createElement('span');detail.className='hint';detail.style.cssText='font-size:13px;line-height:1.55;white-space:normal;overflow-wrap:anywhere';detail.textContent=entry.description;
+      button.append(heading,detail);button.onclick=()=>renderBusinessCollection('sdc',entry.kind);host.append(button);
     }
   }
   function renderBusinessHub(platform){
@@ -6094,6 +6125,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       <div class="hint">Upload a photo or PDF. Enter only the last four digits of the card, never the full card number.</div>
       <form id="receipt_submit_form">
         <div class="grid2">
+          <div><div class="label">Upload Category</div><select class="input" name="document_type" id="pds_doc_type"><option>Receipt</option><option>Packing Slip</option></select></div>
+          <div><div class="label">Job # (optional)</div><input class="input" name="job_number" placeholder="Job number" /></div>
+          <div><div class="label">Customer (optional)</div><input class="input" name="customer" placeholder="Customer" /></div>
           <div><div class="label">Date</div><input class="input" type="date" name="date" required /></div>
           <div><div class="label">Employee</div><input class="input" name="employee" required /></div>
           <div><div class="label">Vendor</div><input class="input" name="vendor" required /></div>
@@ -6103,8 +6137,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Expense Category</div><select class="input" name="category" id="receipt_category"><option>Other</option></select></div>
         </div>
         <div class="label">Notes</div><textarea class="input" name="notes" rows="2"></textarea>
-        <div class="label">Receipt Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required />
-        <div class="hint" id="receipt_scan_status">Selecting a file will attempt to read its details. Review all fields before saving.</div></div>
+        <div class="label">Document Photo / PDF</div><input class="input" type="file" name="file" accept="image/*,application/pdf" required />
+        <details style="margin:10px 0;border:1px solid #d9e1ea;border-radius:10px;padding:12px"><summary style="cursor:pointer;font-weight:700">AI Document Reader — Upload & Autofill</summary>
+          <p class="hint">Select a document above, then click Read with AI. Review every field before saving.</p>
+          <button type="button" class="btn" id="receipt_ai_read">Read with AI</button>
+          <div class="hint" id="receipt_scan_status">AI will suggest fields; you can correct them.</div>
+        </details>
         <div style="margin-top:12px;"><button class="btn btn-orange" type="submit">Save Receipt</button></div>
       </form>
       <div id="receipt_feedback" class="hint" style="margin-top:8px;"></div>`;
@@ -6118,7 +6156,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     form.elements.employee.value = currentUser?.name || currentUser?.username || "";
     try { const cats = await fetchJSON("/receipts/categories"); form.elements.category.innerHTML = ""; (cats.items || ["Other"]).forEach(c => { const o = document.createElement("option"); o.value = c; o.textContent = c; form.elements.category.appendChild(o); }); form.elements.category.value = "Other"; } catch(e) { console.warn("Receipt categories unavailable", e); }
     const receiptFileInput = form.elements.file;
-    receiptFileInput.addEventListener("change", async () => {
+    card.querySelector("#receipt_ai_read").addEventListener("click", async () => {
       const file = receiptFileInput.files?.[0];
       const status = card.querySelector("#receipt_scan_status");
       if (!file) { status.textContent = "Select a receipt to read its details."; return; }
@@ -6133,7 +6171,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (!response.ok) throw new Error(result.detail || `HTTP ${response.status}`);
         const fields = result.fields || {};
         const populated = [];
-        for (const key of ["vendor", "date", "amount", "receipt_number", "card_last4"]) {
+        for (const key of ["vendor", "date", "amount", "receipt_number", "card_last4", "job_number", "customer"]) {
           if (fields[key] !== undefined && fields[key] !== null && String(fields[key]).trim() && !String(form.elements[key]?.value || "").trim()) {
             form.elements[key].value = String(fields[key]);
             populated.push(key.replace("_", " "));
@@ -6151,6 +6189,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         if (receiptFileInput.files?.[0] === selectedFile) status.textContent = `Automatic reading unavailable: ${error.message || error}. You can still enter details manually.`;
       }
     });
+    const docType=form.elements.document_type;
+    const updateDocType=()=>{
+      const packing=docType.value==="Packing Slip";
+      form.elements.amount.required=!packing;
+      form.elements.amount.value=packing?"0":(form.elements.amount.value==="0"?"":form.elements.amount.value);
+      form.elements.card_last4.closest("div").style.display=packing?"none":"";
+      form.querySelector('button[type="submit"]').textContent=packing?"Save Packing Slip":"Save Receipt";
+    };
+    docType.addEventListener("change",updateDocType);
+    updateDocType();
     async function refreshReceipts() {
       try {
         const result = await fetchJSON("/receipts");
@@ -6161,7 +6209,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const line = document.createElement("div");
           line.style.cssText = "padding:10px 0;border-bottom:1px solid #ddd";
           const heading = document.createElement("div");
-          heading.textContent = `${item.date || ""} — ${item.vendor || ""} — $${Number(item.amount || 0).toFixed(2)} — ${item.employee || ""}`;
+          heading.textContent = `${item.document_type || "Receipt"} — ${item.date || ""} — ${item.vendor || ""} — ${item.document_type==="Packing Slip"?"Job "+(item.job_number||"N/A"):"$"+Number(item.amount || 0).toFixed(2)} — ${item.employee || ""}`;
           const detail = document.createElement("div");
           detail.className = "hint";
           detail.textContent = `${item.category || "Other"} | Card •••• ${item.card_last4 || "N/A"} | Receipt # ${item.receipt_number || "N/A"} | ${item.notes || ""}`;
@@ -6169,7 +6217,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           link.href = `/receipts/${encodeURIComponent(item.id)}/file`;
           link.target = "_blank";
           link.rel = "noopener";
-          link.textContent = "Open receipt";
+          link.textContent = "Open "+(item.document_type||"Receipt");
           line.append(heading, detail, link);
           history.appendChild(line);
         }
@@ -6185,10 +6233,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const res = await fetch("/receipts", {method:"POST", credentials:"same-origin", body:new FormData(form)});
         const result = await res.json();
         if (!res.ok) throw new Error(result.detail || `HTTP ${res.status}`);
-        feedback.textContent = "Receipt saved.";
+        feedback.textContent = "Document saved.";
         form.reset();
         form.elements.date.value = new Date().toISOString().slice(0,10);
         form.elements.employee.value = currentUser?.name || currentUser?.username || "";
+        updateDocType();
         await refreshReceipts();
       } catch (err) { feedback.textContent = `Unable to save receipt: ${err.message || err}`; }
       finally { btn.disabled = false; }
@@ -6250,6 +6299,109 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
     }
  
+    // Structured takeoffs supplement, rather than replace, the legacy PDF library.
+    const builder=document.createElement("div");builder.className="card";
+    builder.innerHTML=`<h3>New Door / Frame / Glass Takeoff</h3>
+      <p class="hint">Enter measurements exactly as taken in the field (include units). Link by Job # and Customer.</p>
+      <form id="pdsTakeoffForm">
+        <div class="grid2">
+          <label>Job # <input class="input" name="job_number" placeholder="Job number"></label>
+          <label>Customer <input class="input" name="customer" placeholder="Customer"></label>
+          <label>Location / Opening <input class="input" name="location" placeholder="Building / opening ID"></label>
+          <label>Takeoff Type <select class="input" name="takeoff_type" required></select></label>
+        </div>
+        <details style="margin:14px 0;border:1px solid #d9e1ea;border-radius:10px;padding:12px">
+          <summary style="font-weight:700;cursor:pointer">AI Takeoff Assistant — Type, Upload or Dictate</summary>
+          <p class="hint">Type or dictate with your device keyboard, or upload a PDF/photo. AI suggests measurements; review carefully before saving.</p>
+          <textarea class="input" name="ai_notes" rows="3" placeholder="Example: Pair hollow metal doors, 6 foot wide, 7 foot tall, right active, 1-3/4 inch thick..."></textarea>
+          <input class="input" name="ai_file" type="file" accept="application/pdf,image/*" style="margin:8px 0">
+          <button class="btn" id="pdsTakeoffAI" type="button">Read with AI</button>
+          <div class="hint" id="pdsTakeoffAIStatus"></div>
+        </details>
+        <div id="pdsTakeoffFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"></div>
+        <label style="display:block;margin-top:12px">Notes <textarea class="input" name="notes" rows="3"></textarea></label>
+        <button class="btn btn-orange" type="submit" style="margin-top:12px">Save Takeoff</button>
+        <p class="hint" id="pdsTakeoffStatus"></p>
+      </form>`;
+    const tf=builder.querySelector("#pdsTakeoffForm");
+    const types=["Single Hollow Metal Door","Pair of Hollow Metal Doors","Single Hollow Metal Frame",
+      "Single Hollow Metal Door & Frame","Pair of Hollow Metal Doors & Frame",
+      "Single Storefront Door","Pair of Storefront Doors","Single Storefront Frame",
+      "Pair Storefront Frame","Single Storefront Door & Frame","Pair Storefront Doors & Frame","Glass"];
+    for(const t of types){const o=document.createElement("option");o.value=t;o.textContent=t;tf.elements.takeoff_type.append(o);}
+    const fieldDefs=[
+      ["width","Opening / Door Width"],["height","Opening / Door Height"],["depth","Opening Depth"],
+      ["door_thickness","Door Thickness"],["frame_width","Frame Width"],["frame_height","Frame Height"],
+      ["frame_depth","Frame Depth"],["handing","Handing"],["swing","Swing"],
+      ["material","Material"],["finish","Finish / Color"],["quantity","Quantity"],
+      ["glass_width","Glass Width"],["glass_height","Glass Height"],["glass_thickness","Glass Thickness"],
+      ["glass_type","Glass Type (Clear / Tint)"],["glass_tint","Tint Details"],
+      ["dual_pane","Dual Pane (Yes / No)"],["glass_1_thickness","Glass 1 Thickness"],
+      ["center_space","Center Airspace"],["glass_2_thickness","Glass 2 Thickness"],["hardware","Hardware / Prep"]
+    ];
+    for(const [key,label] of fieldDefs){
+      const wrap=document.createElement("label");wrap.style.cssText="display:grid;gap:6px;min-width:0;font-size:13px;font-weight:650";
+      const title=document.createElement("span");title.textContent=label;
+      const input=document.createElement("input");input.className="input";input.name=key;input.placeholder=label;input.style.width="100%";
+      wrap.append(title,input);builder.querySelector("#pdsTakeoffFields").append(wrap);
+      if(key.startsWith("glass_")||["dual_pane","center_space"].includes(key))wrap.dataset.glassField="true";
+    }
+    function updateGlass(){
+      const glass=tf.elements.takeoff_type.value==="Glass";
+      for(const node of builder.querySelectorAll("[data-glass-field]"))node.style.display=glass?"grid":"none";
+    }
+    tf.elements.takeoff_type.addEventListener("change",updateGlass);updateGlass();
+    builder.querySelector("#pdsTakeoffAI").addEventListener("click",async()=>{
+      const status=builder.querySelector("#pdsTakeoffAIStatus");
+      const file=tf.elements.ai_file.files?.[0],notes=tf.elements.ai_notes.value;
+      if(!file&&!notes.trim()){status.textContent="Upload a file or enter notes.";return;}
+      status.textContent="Reading takeoff…";
+      try{
+        const body=new FormData();body.append("notes",notes);if(file)body.append("file",file);
+        const res=await fetch("/pds-takeoffs/extract",{method:"POST",credentials:"same-origin",body});
+        const data=await res.json();if(!res.ok)throw new Error(data.detail||"AI unavailable");
+        for(const [key,value] of Object.entries(data.fields||{})){
+          if(tf.elements[key]&&value){
+            if(key!=="takeoff_type"||types.includes(value))tf.elements[key].value=value;
+          }
+        }
+        updateGlass();status.textContent="AI suggestions filled. Verify dimensions, handing and glass details before saving.";
+      }catch(err){status.textContent="AI unavailable: "+err.message;}
+    });
+    const saved=document.createElement("div");saved.className="card";saved.innerHTML="<h3>Saved Takeoffs</h3>";
+    async function refreshSavedTakeoffs(){
+      const res=await fetch("/pds-takeoffs",{credentials:"same-origin"});
+      if(!res.ok){saved.textContent="Saved takeoffs unavailable.";return;}
+      const data=await res.json();saved.innerHTML="<h3>Saved Takeoffs</h3>";
+      if(!(data.items||[]).length){const empty=document.createElement("p");empty.className="hint";empty.textContent="No saved takeoffs yet.";saved.append(empty);}
+      for(const item of data.items||[]){
+        const row=document.createElement("div");row.style.cssText="padding:12px 0;border-bottom:1px solid #ddd";
+        const title=document.createElement("strong");title.textContent=[item.job_number,item.customer,item.takeoff_type].filter(Boolean).join(" · ");
+        const summary=document.createElement("div");summary.className="hint";summary.textContent=[item.location,item.width&&"W: "+item.width,item.height&&"H: "+item.height,item.created_at?.slice(0,10)].filter(Boolean).join(" | ");
+        const view=document.createElement("button");view.type="button";view.className="btn";view.textContent="View / Print";
+        view.onclick=()=>{
+          const win=window.open("","_blank");if(!win)return;
+          const escape=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+          win.document.write('<!doctype html><html><head><title>Takeoff</title><style>body{font:15px Arial;padding:30px;max-width:800px;margin:auto}dl{display:grid;grid-template-columns:180px 1fr;gap:10px}dt{font-weight:bold}dd{margin:0}button{margin:20px 0}@media print{button{display:none}}</style></head><body><h1>Takeoff Sheet</h1><button onclick="window.print()">Print / Save PDF</button><dl>'+Object.entries(item).filter(([k,v])=>v&&k!=="id").map(([k,v])=>'<dt>'+escape(k.replaceAll("_"," "))+'</dt><dd>'+escape(v)+'</dd>').join("")+'</dl></body></html>');
+          win.document.close();
+        };
+        row.append(title,summary,view);saved.append(row);
+      }
+    }
+    tf.addEventListener("submit",async event=>{
+      event.preventDefault();
+      const status=builder.querySelector("#pdsTakeoffStatus");
+      const payload={};
+      for(const input of tf.querySelectorAll("[name]"))if(input.type!=="file"&&!["ai_notes"].includes(input.name))payload[input.name]=input.value;
+      status.textContent="Saving…";
+      try{
+        const res=await fetch("/pds-takeoffs",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+        const data=await res.json();if(!res.ok)throw new Error(data.detail||"Save failed");
+        status.textContent="Takeoff saved.";await refreshSavedTakeoffs();
+      }catch(err){status.textContent="Unable to save: "+err.message;}
+    });
+    root.appendChild(builder);root.appendChild(saved);
+    refreshSavedTakeoffs().catch(console.error);
     root.appendChild(card);
     root.appendChild(list);
     workspaceBody.innerHTML = "";
