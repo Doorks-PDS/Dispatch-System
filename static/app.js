@@ -5932,39 +5932,42 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     setActiveChip("Office Flow");
     setWorkspace("Accounting Hub");
     clearWorkspaceActions();
-    workspaceBody.innerHTML = `<div class="card"><h3>Accounting Hub</h3><div class="hint">Expenses and document tracking. Amounts are based on saved receipts, not bank balances.</div><div id="acct_tabs" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0;"></div></div><div id="acct_content" class="card">Loading accounting data…</div>`;
-    const acctIntro=document.createElement('div');acctIntro.className='card';acctIntro.style.marginBottom='14px';
-    acctIntro.innerHTML='<h3>Accounting Hub</h3><p class="hint">Financial overview and document management. Existing accounting permissions and approval controls remain in effect.</p><div id="pdsAcctHubCards"></div>';
-    workspaceBody.prepend(acctIntro);
-    makeHubCards(acctIntro.querySelector('#pdsAcctHubCards'),[
-      {icon:'📊',label:'Overview',description:'Financial summary and reporting.',open:()=>renderAccountingView('overview')},
-      {icon:'💳',label:'Accounts Receivable',description:'Customer payments and invoice balances.',open:()=>renderAccountingView('receivables')},
-      {icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.',open:()=>renderAccountingView('stock')},
-      {icon:'🧾',label:'Receipts & Packing Slips',description:'Review uploaded expense and supplier documents.',open:()=>renderAccountingView('receipts')},
-      {icon:'🏦',label:'Statements',description:'Statements and document records.',open:()=>renderAccountingView('statements')},
-      {icon:'🏷️',label:'Categories',description:'Manage expense classifications.',open:()=>renderAccountingView('categories')}
-    ]);
+    const isOverview = section === "overview";
+    workspaceBody.innerHTML = isOverview
+      ? '<div class="card"><h3>Accounting Hub</h3><p class="hint">Financial overview and document management. Existing accounting permissions and approval controls remain in effect.</p><div id="pdsAcctHubCards"></div><div style="margin-top:14px"><button type="button" class="btn" id="pdsAcctLock">Lock Accounting</button></div></div><div id="acct_content" class="card">Loading accounting data…</div>'
+      : '<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 id="pdsAcctSectionTitle" style="margin:0"></h3><p class="hint" style="margin:6px 0 0">PDS accounting records</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="pdsAcctBack">← Accounting Hub</button><button type="button" class="btn" id="pdsAcctLock">Lock Accounting</button></div></div><div id="acct_content" class="card">Loading accounting data…</div>';
+    const sections=[
+      {id:'overview',icon:'📊',label:'Overview',description:'Financial summary and reporting.'},
+      {id:'receivables',icon:'💳',label:'Accounts Receivable',description:'Customer payments and invoice balances.'},
+      {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
+      {id:'receipts',icon:'🧾',label:'Receipts & Packing Slips',description:'Review uploaded expense and supplier documents.'},
+      {id:'statements',icon:'🏦',label:'Statements',description:'Statements and document records.'},
+      {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'}
+    ];
+    if(isOverview){
+      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>renderAccountingView(x.id)})));
+    }else{
+      workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
+      workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('overview');
+    }
+    workspaceBody.querySelector('#pdsAcctLock').onclick=async()=>{
+      try{await fetchJSON('/accounting/lock',{method:'POST'});workspaceBody.innerHTML='';setWorkspace('Office Flow');}
+      catch(err){alert(err.message||err);}
+    };
     const periodState = window.__doorksAcctPeriod || (window.__doorksAcctPeriod={mode:"month",month:new Date().toLocaleDateString("en-CA").slice(0,7),start:"",end:""});
     const inPeriod = (date) => { const d=String(date||"").slice(0,10); if(periodState.mode==="all")return true; if(!d)return false; if(periodState.mode==="month")return d.startsWith(periodState.month); return (!periodState.start||d>=periodState.start)&&(!periodState.end||d<=periodState.end); };
     window.__doorksAcctInPeriod=inPeriod;
-    const periodBar=document.createElement("div");periodBar.className="card";periodBar.style.cssText="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0";
-    periodBar.innerHTML='<strong>Reporting period</strong><select class="input" id="acct_period_mode"><option value="month">Month</option><option value="custom">Custom period</option><option value="all">All time</option></select><input class="input" id="acct_period_month" type="month"/><input class="input" id="acct_period_start" type="date"/><span>to</span><input class="input" id="acct_period_end" type="date"/>';
-    workspaceBody.insertBefore(periodBar, workspaceBody.querySelector("#acct_content"));
-    const pm=periodBar.querySelector("#acct_period_mode"),mm=periodBar.querySelector("#acct_period_month"),ps=periodBar.querySelector("#acct_period_start"),pe=periodBar.querySelector("#acct_period_end");
-    pm.value=periodState.mode;mm.value=periodState.month;ps.value=periodState.start;pe.value=periodState.end;
-    const periodUpdate=()=>{periodState.mode=pm.value;periodState.month=mm.value;periodState.start=ps.value;periodState.end=pe.value;renderAccountingView(section);};
-    [pm,mm,ps,pe].forEach(el=>el.addEventListener("change",periodUpdate));
-    mm.style.display=periodState.mode==="month"?"":"none";ps.style.display=pe.style.display=periodState.mode==="custom"?"":"none";
-    periodBar.querySelector("span").style.display=periodState.mode==="custom"?"":"none";
-    const host = workspaceBody.querySelector("#acct_content");
-    const tabs = workspaceBody.querySelector("#acct_tabs");
-    const lockButton=document.createElement("button");lockButton.className="btn";lockButton.textContent="Lock Accounting";
-    lockButton.addEventListener("click",async()=>{try{await fetchJSON("/accounting/lock",{method:"POST"});workspaceBody.innerHTML="";setWorkspace("Office Flow");}catch(e){alert(e.message||e);}});
-    tabs.parentElement.appendChild(lockButton);
-    for (const [id, title] of [["overview","Overview"],["receivables","Accounts Receivable"],["stock","Inventory"],["receipts","Receipts"],["statements","Statements"],["categories","Categories"]]) {
-      const b = document.createElement("button"); b.className = "btn"; b.textContent = title;
-      if (id === section) b.classList.add("btn-orange");
-      b.addEventListener("click", () => renderAccountingView(id)); tabs.appendChild(b);
+    const host=workspaceBody.querySelector('#acct_content');
+    if(isOverview){
+      const periodBar=document.createElement('div');periodBar.className='card';periodBar.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0';
+      periodBar.innerHTML='<strong>Reporting period</strong><select class="input" id="acct_period_mode"><option value="month">Month</option><option value="custom">Custom period</option><option value="all">All time</option></select><input class="input" id="acct_period_month" type="month"/><input class="input" id="acct_period_start" type="date"/><span>to</span><input class="input" id="acct_period_end" type="date"/>';
+      workspaceBody.insertBefore(periodBar,host);
+      const pm=periodBar.querySelector('#acct_period_mode'),mm=periodBar.querySelector('#acct_period_month'),ps=periodBar.querySelector('#acct_period_start'),pe=periodBar.querySelector('#acct_period_end');
+      pm.value=periodState.mode;mm.value=periodState.month;ps.value=periodState.start;pe.value=periodState.end;
+      const periodUpdate=()=>{periodState.mode=pm.value;periodState.month=mm.value;periodState.start=ps.value;periodState.end=pe.value;renderAccountingView(section);};
+      [pm,mm,ps,pe].forEach(input=>input.addEventListener('change',periodUpdate));
+      mm.style.display=periodState.mode==='month'?'':'none';ps.style.display=pe.style.display=periodState.mode==='custom'?'':'none';
+      periodBar.querySelector('span').style.display=periodState.mode==='custom'?'':'none';
     }
     try {
       if (["stock","statements","receivables"].includes(section)) {
@@ -6365,11 +6368,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         <p class="hint" id="pdsTakeoffStatus"></p>
       </form>`;
     const tf=builder.querySelector("#pdsTakeoffForm");
-    const types=["Single Hollow Metal Door","Pair of Hollow Metal Doors","Single Hollow Metal Frame",
+    const types=["Single Hollow Metal Door","Pair of Hollow Metal Doors","Single Hollow Metal Frame","Pair of Hollow Metal Frames",
       "Single Hollow Metal Door & Frame","Pair of Hollow Metal Doors & Frame",
       "Single Storefront Door","Pair of Storefront Doors","Single Storefront Frame",
       "Pair Storefront Frame","Single Storefront Door & Frame","Pair Storefront Doors & Frame","Glass"];
     for(const t of types){const o=document.createElement("option");o.value=t;o.textContent=t;tf.elements.takeoff_type.append(o);}
+    const templates=document.createElement('div');templates.className='card';
+    templates.innerHTML='<h3>Professional Takeoff PDF Sheets</h3><p class="hint">Download printable, fillable field sheets for hollow metal, storefront and glass measurements. These do not overwrite saved takeoffs.</p>';
+    const templateLinks=document.createElement('div');templateLinks.style.cssText='display:flex;flex-wrap:wrap;gap:10px';
+    for(const [kind,title] of [['hollow-metal','Hollow Metal Door / Frame'],['storefront','Storefront Door / Frame'],['glass','Glass / Insulated Glass']]){
+      const link=document.createElement('a');link.className='btn';link.href='/pds-takeoffs/templates/'+kind;link.target='_blank';link.rel='noopener';link.textContent='Open '+title+' PDF';templateLinks.append(link);
+    }
+    templates.append(templateLinks);
+
     const fieldDefs=[
       ["width","Opening / Door Width"],["height","Opening / Door Height"],["depth","Opening Depth"],
       ["door_thickness","Door Thickness"],["frame_width","Frame Width"],["frame_height","Frame Height"],
@@ -6426,7 +6437,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           win.document.write('<!doctype html><html><head><title>Takeoff</title><style>body{font:15px Arial;padding:30px;max-width:800px;margin:auto}dl{display:grid;grid-template-columns:180px 1fr;gap:10px}dt{font-weight:bold}dd{margin:0}button{margin:20px 0}@media print{button{display:none}}</style></head><body><h1>Takeoff Sheet</h1><button onclick="window.print()">Print / Save PDF</button><dl>'+Object.entries(item).filter(([k,v])=>v&&k!=="id").map(([k,v])=>'<dt>'+escape(k.replaceAll("_"," "))+'</dt><dd>'+escape(v)+'</dd>').join("")+'</dl></body></html>');
           win.document.close();
         };
-        row.append(title,summary,view);saved.append(row);
+        const pdf=document.createElement('a');pdf.className='btn';pdf.textContent='Download Takeoff PDF';pdf.href='/pds-takeoffs/'+encodeURIComponent(item.id)+'/pdf';pdf.target='_blank';pdf.rel='noopener';pdf.style.marginLeft='8px';
+        row.append(title,summary,view,pdf);saved.append(row);
       }
     }
     tf.addEventListener("submit",async event=>{
@@ -6441,7 +6453,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         status.textContent="Takeoff saved.";await refreshSavedTakeoffs();
       }catch(err){status.textContent="Unable to save: "+err.message;}
     });
-    root.appendChild(builder);root.appendChild(saved);
+    root.appendChild(builder);root.appendChild(templates);root.appendChild(saved);
     refreshSavedTakeoffs().catch(console.error);
     root.appendChild(card);
     root.appendChild(list);
