@@ -600,6 +600,29 @@
       else{input=document.createElement('input');input.type=types[field]||'text';if(input.type==='number')input.step='any';}
       if(kind==='purchase_orders'&&field==='po_number'){input.readOnly=true;input.placeholder='Assigned on save';}input.name=field;input.className='input';input.style.cssText='width:100%;box-sizing:border-box;min-height:38px;padding:9px 11px;font-size:14px;border-radius:9px';if(['notes','description','address'].includes(field))label.style.gridColumn='span 2';label.append(input);form.append(label);
     }
+    if(kind==='purchase_orders'){
+      const supplierField=form.elements.namedItem('vendor');
+      const supplierId=form.elements.namedItem('vendor_id');
+      if(supplierField&&supplierId){
+        const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';
+        label.textContent=platform==='sdc'?'Select Supplier Profile':'Select Vendor Profile';
+        const select=document.createElement('select');select.className='input';select.id='workspacePoSupplierSelect';
+        const initial=document.createElement('option');initial.value='';initial.textContent='Manual entry / not linked';select.append(initial);
+        label.append(select);form.insertBefore(label,form.firstChild);
+        fetchJSON('/workspaces/'+platform+'/vendors').then(result=>{
+          for(const record of result.items||[]){
+            const option=document.createElement('option');option.value=record.id;option.textContent=record.name||'Unnamed';
+            select.append(option);
+          }
+        }).catch(console.error);
+        select.onchange=()=>{
+          supplierId.value=select.value;
+          const option=select.selectedOptions[0];
+          if(select.value&&option)supplierField.value=option.textContent;
+        };
+        supplierId.addEventListener('change',()=>{select.value=supplierId.value||'';});
+      }
+    }
     // AI reads only a draft; the user must explicitly save the record.
     if(['orders','work_orders','customers','vendors','customer_inquiries','vendor_assignments','software_leads','estimates_invoices','purchase_orders'].includes(kind)){
       const ai=document.createElement('details');ai.style.cssText='grid-column:1/-1;border:1px solid #d9dee7;border-radius:12px;padding:12px 14px;background:#f8fafc';
@@ -625,7 +648,7 @@
     const close=()=>{editor.hidden=true;editingId=null;form.reset();message.textContent='';};
     cancel.onclick=close;el('businessClose').onclick=close;
     el('businessBack').textContent=backAction?'← Back to Hub':'← Dashboard';el('businessBack').onclick=()=>backAction?backAction():showPlatformShell(platform);
-    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=item[f]??'';}el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';editor.hidden=false;editor.scrollIntoView({behavior:'smooth',block:'start'});};
+    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=item[f]??'';}const poSupplierSelect=el('workspacePoSupplierSelect');if(poSupplierSelect)poSupplierSelect.value=item?.vendor_id||'';el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';editor.hidden=false;editor.scrollIntoView({behavior:'smooth',block:'start'});};
     el('businessNew').onclick=()=>open();
     const search=el('businessSearch');
     function draw(){const host=el('businessRecords');host.replaceChildren();const q=search.value.toLowerCase().trim();const filtered=records.filter(item=>!q||Object.values(item).some(v=>String(v??'').toLowerCase().includes(q)));
@@ -9619,21 +9642,51 @@ function openEstimateDrawer(job, container = null, ctx = null) {
  
   async function renderPdsVendorHub(){
     setWorkspace('PDS — Suppliers');clearWorkspaceActions();
-    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto;padding:20px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Suppliers</h2><p class="hint">Supplier directory and purchasing relationships.</p></div><button class="btn" id="pdsVendorBack">← Business Hub</button></div><div id="pdsSupplierCards" style="margin-top:18px"></div><div id="pdsSupplierSection" style="display:none;margin-top:16px"><button class="btn" id="pdsSupplierReturn">← Suppliers</button><div class="card" style="margin-top:12px"><h3 id="pdsSupplierHeading">Supplier Directory</h3><p class="hint" id="pdsSupplierNote"></p><div id="pdsVendorList">Loading suppliers…</div></div></div></div>';
-    el('pdsVendorBack').onclick=()=>renderEstimatePage();
-    const cards=el('pdsSupplierCards'),section=el('pdsSupplierSection');
-    el('pdsSupplierReturn').onclick=()=>{cards.style.display='';section.style.display='none';setWorkspace('PDS — Suppliers');};
-    const show=(heading,note)=>{cards.style.display='none';section.style.display='';el('pdsSupplierHeading').textContent=heading;el('pdsSupplierNote').textContent=note;setWorkspace('PDS — Suppliers — '+heading);};
-    const showOrders=async()=>{
-      show('Supplier Directory','Names from existing PDS purchase orders. Profiles and contacts are not yet editable here.');
-      const list=el('pdsVendorList');list.textContent='Loading suppliers…';
-      try{const data=await fetchJSON('/pds-purchase-orders');const orders=Array.isArray(data)?data:(data.items||data.orders||[]);const names=[...new Set(orders.map(o=>String(o.vendor||'').trim()).filter(Boolean))].sort();list.replaceChildren();if(!names.length){list.textContent='No suppliers found in PDS purchase orders.';return;}for(const name of names){const row=document.createElement('div');row.className='jobrow';const count=orders.filter(o=>String(o.vendor||'').trim()===name).length;const strong=document.createElement('div');strong.className='jobrow-name';strong.textContent=name;const hint=document.createElement('div');hint.className='hint';hint.textContent=count+' linked purchase order'+(count===1?'':'s');row.append(strong,hint);list.append(row);}}
-      catch(e){list.textContent='Unable to load supplier list: '+(e.message||e);}
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Suppliers</h2><p class="hint">Supplier profiles and purchase order relationships.</p></div><button class="btn" id="pdsSuppliersBack">← Business Hub</button></div><div id="pdsSuppliersCards"></div><section id="pdsSupplierEditor" hidden style="margin-top:16px"><button class="btn" id="pdsSupplierHome">← Suppliers</button><div class="card" style="margin-top:12px"><h3>Supplier Directory</h3><div id="pdsSupplierList"></div><h3 id="pdsSupplierFormHeading">New Supplier</h3><form id="pdsSupplierForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form><p id="pdsSupplierMessage" class="hint"></p></div></section></div>';
+    el('pdsSuppliersBack').onclick=()=>renderEstimatePage();
+    const cards=el('pdsSuppliersCards'),section=el('pdsSupplierEditor');
+    const home=()=>{cards.hidden=false;section.hidden=true;};
+    el('pdsSupplierHome').onclick=home;
+    const fields=[['name','Supplier Name'],['contact','Primary Contact'],['email','Email'],['phone','Phone'],['address','Address'],['payment_terms','Payment Terms'],['insurance_expiration','Insurance Expiration'],['license_number','License #'],['notes','Notes']];
+    let editing=null,records=[];
+    const form=el('pdsSupplierForm');
+    for(const [key,title] of fields){
+      const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-weight:650;font-size:13px';
+      label.textContent=title;
+      const input=key==='notes'?document.createElement('textarea'):document.createElement('input');
+      input.name=key;input.className='input';if(key==='email')input.type='email';if(key==='insurance_expiration')input.type='date';if(key==='name')input.required=true;
+      label.append(input);form.append(label);
+    }
+    const save=document.createElement('button');save.className='btn btn-orange';save.type='submit';save.textContent='Save Supplier';form.append(save);
+    const reset=()=>{editing=null;form.reset();el('pdsSupplierFormHeading').textContent='New Supplier';};
+    async function refresh(){
+      const data=await fetchJSON('/pds-purchase-orders/suppliers');
+      records=data.items||[];const host=el('pdsSupplierList');host.replaceChildren();
+      if(!records.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No supplier profiles yet. Add one below.';host.append(empty);}
+      for(const supplier of records){
+        const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #e5e7eb';
+        const info=document.createElement('div');const title=document.createElement('strong');title.textContent=supplier.name;
+        const sub=document.createElement('div');sub.className='hint';sub.textContent=[supplier.contact,supplier.phone,supplier.payment_terms].filter(Boolean).join(' · ');
+        info.append(title,sub);
+        const edit=document.createElement('button');edit.className='btn';edit.type='button';edit.textContent='Edit';
+        edit.onclick=()=>{editing=supplier.id;for(const [key] of fields)form.elements[key].value=supplier[key]||'';el('pdsSupplierFormHeading').textContent='Edit Supplier — '+supplier.name;form.scrollIntoView({behavior:'smooth',block:'nearest'});};
+        row.append(info,edit);host.append(row);
+      }
+    }
+    form.onsubmit=async event=>{
+      event.preventDefault();const msg=el('pdsSupplierMessage');msg.textContent='Saving…';
+      const data=Object.fromEntries(fields.map(([key])=>[key,form.elements[key].value.trim()]));
+      try{
+        const response=await fetch('/pds-purchase-orders/suppliers'+(editing?'/'+encodeURIComponent(editing):''),{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({data})});
+        const result=await response.json();if(!response.ok)throw Error(result.detail||'Save failed');
+        reset();msg.textContent='Supplier saved.';await refresh();
+      }catch(e){msg.textContent=e.message||String(e);}
     };
+    const show=()=>{cards.hidden=true;section.hidden=false;refresh().catch(e=>{el('pdsSupplierMessage').textContent=e.message;});};
     makeHubCards(cards,[
-      {icon:'🏭',label:'Supplier Directory',description:'Suppliers referenced in PDS purchase orders.',open:showOrders},
-      {icon:'👤',label:'Contacts',description:'Supplier contact profiles (planned).',open:()=>{show('Contacts','Dedicated PDS supplier contact records are not yet implemented.');el('pdsVendorList').textContent='Supplier contacts will be available in a future integration.';}},
-      {icon:'📑',label:'Documents & Compliance',description:'W-9, COI, insurance and payment terms (planned).',open:()=>{show('Documents & Compliance','Dedicated supplier document storage is not yet implemented.');el('pdsVendorList').textContent='Document upload and compliance tracking will be added during integration.';}}
+      {icon:'🏭',label:'Supplier Directory',description:'Create and edit supplier profiles, contacts and terms.',open:show},
+      {icon:'👤',label:'Contacts',description:'Supplier contact details and phone numbers.',open:show},
+      {icon:'📑',label:'Documents & Compliance',description:'Insurance expiration and license information. File attachments planned.',open:show}
     ]);
   }
   function renderEstimatePage() {
@@ -9797,7 +9850,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   async function renderPdsPurchaseOrders(host) {
     host.innerHTML = '<div class="card"><h3>PDS Purchase Orders</h3><p class="hint">PDS purchase orders are stored separately from all existing estimates and invoices. PO numbers start at PO-00001.</p><button class="btn btn-orange" id="pdsPoNew">+ New Purchase Order</button><div id="pdsPoRecords" style="margin-top:14px"></div></div>';
     const list = host.querySelector('#pdsPoRecords');
-    const fields = [['vendor','Vendor / Supplier'],['vendor_contact','Vendor Contact'],['work_order','Job / Work Order #'],['customer','Customer'],['date','PO Date'],['needed_by','Needed By'],['description','Items / Services Description'],['item_type','Type (Materials / Services)'],['quantity','Quantity'],['unit_cost','Unit Cost'],['tax','Tax'],['shipping','Shipping'],['total','Total'],['status','Status'],['received_status','Receiving Status'],['payment_status','Payment Status'],['invoice_reference','Vendor Invoice #'],['notes','Notes']];
+    const fields = [['vendor','Supplier'],['supplier_id','Supplier Profile ID'],['vendor_contact','Vendor Contact'],['work_order','Job / Work Order #'],['customer','Customer'],['date','PO Date'],['needed_by','Needed By'],['description','Items / Services Description'],['item_type','Type (Materials / Services)'],['quantity','Quantity'],['unit_cost','Unit Cost'],['tax','Tax'],['shipping','Shipping'],['total','Total'],['status','Status'],['received_status','Receiving Status'],['payment_status','Payment Status'],['invoice_reference','Vendor Invoice #'],['notes','Notes']];
     const escapeText = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     const fetchOrders = async () => {
       const res = await fetch('/pds-purchase-orders', {credentials:'same-origin'});
@@ -9819,6 +9872,23 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         if(['quantity','unit_cost','tax','shipping','total'].includes(key)){input.type='number';input.step='0.01';}
         controls[key]=input;wrap.append(caption,input);grid.appendChild(wrap);
       });
+      const supplierIdInput=controls.supplier_id;
+      const profileLabel=document.createElement('label');profileLabel.style.display='block';
+      const profileTitle=document.createElement('div');profileTitle.className='label';profileTitle.textContent='Select Saved Supplier';
+      const profileSelect=document.createElement('select');profileSelect.className='input';
+      const blank=document.createElement('option');blank.value='';blank.textContent='Manual entry / no profile';profileSelect.append(blank);
+      profileLabel.append(profileTitle,profileSelect);grid.insertBefore(profileLabel,grid.firstChild);
+      supplierIdInput.closest('label').style.display='none';
+      fetchJSON('/pds-purchase-orders/suppliers').then(result=>{
+        for(const supplier of result.items||[]){
+          const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name;profileSelect.append(option);
+        }
+        profileSelect.value=record?.supplier_id||'';
+      }).catch(console.error);
+      profileSelect.onchange=()=>{
+        supplierIdInput.value=profileSelect.value;
+        if(profileSelect.value)controls.vendor.value=profileSelect.selectedOptions[0].textContent;
+      };
       editor.appendChild(grid);
       const save=document.createElement('button');save.className='btn btn-orange';save.textContent=record?'Save Changes':'Create Purchase Order';
       const cancel=document.createElement('button');cancel.className='btn';cancel.textContent='Cancel';cancel.style.marginLeft='8px';cancel.onclick=()=>editor.remove();

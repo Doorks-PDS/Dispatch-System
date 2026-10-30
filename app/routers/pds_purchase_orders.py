@@ -39,7 +39,7 @@ def _write(path: Path, data):
     os.replace(temp, path)
 
 def _clean(data: dict):
-    allowed = ('vendor','vendor_contact','work_order','customer','date','needed_by','description',
+    allowed = ('vendor','supplier_id','vendor_contact','work_order','customer','date','needed_by','description',
                'item_type','quantity','unit_cost','tax','shipping','total','status','received_status',
                'payment_status','notes','invoice_reference')
     if not isinstance(data, dict): raise HTTPException(400, 'Invalid PO')
@@ -64,6 +64,9 @@ def create_order(payload: POInput, request: Request):
     with _lock:
         records, sequence = _paths(request)
         items = _read(records, [])
+        sid=str(payload.data.get("supplier_id") or "").strip()
+        if sid and not any(x.get("id")==sid for x in _read(_supplier_path(request),[])):
+            raise HTTPException(400,"Select a valid supplier profile")
         last = int(_read(sequence, {'last':0}).get('last', 0))
         for item in items:
             match = re.fullmatch(r'PO-(\d+)', str(item.get('po_number', '')))
@@ -83,6 +86,9 @@ def update_order(record_id: str, payload: POInput, request: Request):
     with _lock:
         records, _ = _paths(request)
         items = _read(records, [])
+        sid=str(payload.data.get("supplier_id") or "").strip()
+        if sid and not any(x.get("id")==sid for x in _read(_supplier_path(request),[])):
+            raise HTTPException(400,"Select a valid supplier profile")
         for item in items:
             if item.get('id') == record_id:
                 item.update(_clean(payload.data))
@@ -90,3 +96,55 @@ def update_order(record_id: str, payload: POInput, request: Request):
                 _write(records, items)
                 return item
         raise HTTPException(404, 'Purchase order not found')
+
+# Phase 2R-E: independent supplier profiles; existing PO records are never migrated.
+SUPPLIER_FIELDS=("name","contact","email","phone","address","payment_terms",
+                 "tax_id_last4","insurance_expiration","license_number","notes")
+def _supplier_path(request):
+    path=Path(request.app.state.data_dir)/"pds_suppliers"
+    path.mkdir(parents=True,exist_ok=True)
+    return path/"records.json"
+
+def _supplier_clean(data):
+    if not isinstance(data,dict):raise HTTPException(400,"Invalid supplier profile")
+    result={}
+    for field in SUPPLIER_FIELDS:
+        value=data.get(field,"")
+        if not isinstance(value,(str,type(None))):raise HTTPException(400,"Invalid supplier field")
+        result[field]=(value or "").strip()[:2000 if field=="notes" else 250]
+    if not result["name"]:raise HTTPException(400,"Supplier name required")
+    return result
+
+@router.get("/suppliers")
+def list_suppliers(request:Request):
+    _guard(request)
+    with _lock:return {"items":_read(_supplier_path(request),[])}
+
+@router.post("/suppliers")
+def create_supplier(payload:POInput,request:Request):
+    _guard(request)
+    with _lock:
+        path=_supplier_path(request);items=_read(path,[])
+        data=_supplier_clean(payload.data)
+        if any(x.get("name","").casefold()==data["name"].casefold() for x in items):
+            raise HTTPException(409,"Supplier already exists")
+        now=datetime.now(timezone.utc).isoformat()
+        item={"id":uuid.uuid4().hex,"created_at":now,"updated_at":now,**data}
+        items.append(item);_write(path,items)
+        return {"item":item}
+
+@router.patch("/suppliers/{supplier_id}")
+def update_supplier(supplier_id:str,payload:POInput,request:Request):
+    _guard(request)
+    with _lock:
+        path=_supplier_path(request);items=_read(path,[])
+        data=_supplier_clean(payload.data)
+        if any(x.get("id")!=supplier_id and x.get("name","").casefold()==data["name"].casefold() for x in items):
+            raise HTTPException(409,"Supplier name already exists")
+        for item in items:
+            if item.get("id")==supplier_id:
+                item.update(data)
+                item["updated_at"]=datetime.now(timezone.utc).isoformat()
+                _write(path,items)
+                return {"item":item}
+    raise HTTPException(404,"Supplier not found")
