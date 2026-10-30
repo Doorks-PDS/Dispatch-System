@@ -1,4 +1,3 @@
-
 """Review-first CSV import for Doorks and SDC workspace records.
 
 Never touches PDS legacy files or any existing record. Imports append only after
@@ -55,6 +54,7 @@ def csv_rows(blob):
             if any(mapped.values()):rows.append(workspaces.clean(mapped))
             if len(rows)>1000:raise ValueError("Maximum 1000 rows per upload")
         if not rows:raise ValueError("No data rows found")
+        headers=[h for h in headers if h not in {"id","created_at","updated_at","authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"}]
         return headers,rows
     except (UnicodeDecodeError,csv.Error,ValueError) as exc:
         raise HTTPException(400,str(exc))
@@ -96,6 +96,45 @@ async def ai_preview(platform:str,kind:str,request:Request,file:UploadFile=File(
     workspaces.save(base_dir(request,platform)/(token+".json"),[stage])
     return {"token":token,"filename":stage["filename"],"columns":stage["headers"],
             "count":1,"sample":[row],"note":"AI proposed one record. Review carefully before approving; no data has changed."}
+
+class PreviewEdit(BaseModel):
+    token: str
+    rows: list[dict[str, str]]
+
+@router.post("/{platform}/{kind}/edit-preview")
+def edit_preview(platform: str, kind: str, request: Request, payload: PreviewEdit):
+    guard(request, platform, kind)
+    if len(payload.token) != 32 or not all(c in "0123456789abcdef" for c in payload.token):
+        raise HTTPException(400, "Invalid preview token")
+    with lock, workspaces._lock:
+        stage_path = base_dir(request, platform) / (payload.token + ".json")
+        if not stage_path.exists():
+            raise HTTPException(404, "Preview not found or already processed")
+        stage = workspaces.load(stage_path)[0]
+        user_id = str((getattr(request.state, "auth_user", None) or {}).get("id", ""))
+        if stage.get("platform") != platform or stage.get("kind") != kind or stage.get("user") != user_id:
+            raise HTTPException(403, "Preview ownership mismatch")
+        from datetime import timedelta
+        if datetime.now(timezone.utc) - datetime.fromisoformat(stage["created_at"]) > timedelta(hours=12):
+            stage_path.unlink(missing_ok=True)
+            raise HTTPException(410, "Preview expired; upload again")
+        original_rows = stage.get("rows", [])
+        columns = stage.get("headers", [])
+        if not isinstance(original_rows, list) or not isinstance(columns, list):
+            raise HTTPException(400, "Invalid preview")
+        if len(payload.rows) != min(8, len(original_rows)):
+            raise HTTPException(400, "Edited row count does not match the preview")
+        forbidden = {"id", "created_at", "updated_at", "authorization_status", "authorized_by", "authorized_at", "unauthorized_by", "unauthorized_at"}
+        allowed_columns = set(columns) - forbidden
+        for i, row in enumerate(payload.rows):
+            if set(row) - allowed_columns:
+                raise HTTPException(400, "Unrecognized or protected column")
+            if any(not isinstance(value, str) or len(value) > 4000 for value in row.values()):
+                raise HTTPException(400, "Invalid field value")
+            original_rows[i] = {key: str(row.get(key, "")).strip() for key in columns if key in allowed_columns}
+        stage["rows"] = original_rows
+        workspaces.save(stage_path, [stage])
+        return {"ok": True, "updated_rows": len(payload.rows), "message": "Preview corrected; no records imported"}
 
 class Approval(BaseModel):
     token:str
