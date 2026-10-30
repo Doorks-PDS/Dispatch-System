@@ -286,7 +286,7 @@ def list_parts(
             "Price": item.get("price", ""),
             "Preferred Vendor": _norm(item.get("supplier") or item.get("manufacturer")),
         }
-        hay = " ".join([row["manufacturer"], row["part_number"], row["description"]]).lower()
+        hay = " ".join([row["manufacturer"], row["part_number"], row["description"], row["supplier"]]).lower()
         if qn and qn not in hay:
             continue
         out.append(row)

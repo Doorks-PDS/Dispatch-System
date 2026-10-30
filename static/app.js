@@ -5565,13 +5565,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<h3>Parts List</h3><div class="hint">Manage manufacturer, part #, description, and price.</div>`;
+    card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 style="margin:0">Parts List</h3><div class="hint">Manage manufacturer, part #, description, supplier, and price.</div></div><button class="btn" type="button" id="parts_back_hub">← Business Hub</button></div>`;
+    card.querySelector("#parts_back_hub").onclick = () => renderEstimatePage();
 
     const controls = document.createElement("div");
     controls.style.display = "flex";
     controls.style.gap = "8px";
     controls.style.marginTop = "12px";
-    controls.innerHTML = `<input class="input" id="parts_search" placeholder="Search manufacturer, part #, or description" /><button class="btn btn-orange" id="parts_add">Add Part</button>`;
+    controls.innerHTML = `<input class="input" id="parts_search" placeholder="Search manufacturer, part #, description, or supplier" /><button class="btn btn-orange" id="parts_add">Add Part</button>`;
 
     const list = document.createElement("div");
     list.style.display = "grid";
@@ -5589,7 +5590,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div><div class="label">Part #</div><input class="input" id="part_item" value="${escapeHtml(part.Item || part.item || "")}" /></div>
           </div>
           <div style="margin-top:10px;"><div class="label">Description</div><textarea id="part_desc">${escapeHtml(part.Description || part.description || "")}</textarea></div>
-          <div style="margin-top:10px;"><div class="label">Supplier</div><input class="input" id="part_supplier" placeholder="Preferred supplier" value="${escapeHtml(part.supplier || part.Supplier || "")}" /></div>\n          <div style="margin-top:10px;"><div class="label">Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Supplier</div><input class="input" id="part_supplier" placeholder="Preferred supplier" value="${escapeHtml(part.supplier || part.Supplier || "")}" /></div>
+          <div style="margin-top:10px;"><div class="label">Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
         `;
         const assist=document.createElement('details');
         assist.style.cssText='margin-top:12px;border:1px solid #d9e1ea;border-radius:10px;padding:12px';
