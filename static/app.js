@@ -557,8 +557,8 @@
     const docs=(type)=>renderWorkspaceEstimateInvoice(platform,false,()=>renderBusinessHub(platform),type);
     makeHubCards(el('businessHubActions'),[
       {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>renderWorkspaceEstimateInvoice(platform,true,()=>renderBusinessHub(platform))},
-      {icon:'📋',label:'Estimates',description:'Open saved estimate and invoice records.',open:()=>docs('Estimate')},
-      {icon:'🧾',label:'Invoices',description:'Review saved billing documents.',open:()=>docs('Invoice')},
+      {icon:'📋',label:'Estimates',description:'Review saved estimates and create a new estimate.',open:()=>docs('Estimate')},
+      {icon:'🧾',label:'Invoices',description:'Review saved invoices and create a new invoice.',open:()=>docs('Invoice')},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
       ...(platform==='doorks'?[{icon:'🔩',label:'Parts List',description:'Doorks parts catalog and inventory. PDS records remain separate.',open:()=>openKind('inventory')}]:[]),
       {icon:'🏢',label:platform==='sdc'?'Suppliers':'Vendors',description:platform==='sdc'?'Supplier profiles and contacts.':'Vendor profiles and contacts.',open:()=>openKind('vendors')},
@@ -591,10 +591,11 @@
     clearWorkspaceActions();
     const company=platform==='sdc'?'Saddleback Design Co.':'Doorks';
     const endpoint=`/workspaces/${platform}/estimates_invoices`;
-    setWorkspace(company+' — Estimates & Invoices');
+    const sectionType=filterType==='Invoice'?'Invoice':'Estimate';
+    setWorkspace(company+' — '+(filterType?sectionType+'s':'Document Generator'));
     workspaceBody.innerHTML=`<div style="max-width:1260px;margin:auto;display:grid;gap:16px">
-      <section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Estimates & Invoices</h2><p class="hint">Create, review and print branded documents.</p></div><button class="btn" id="wedBack">← Business Hub</button></div></section>
-      <section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0">Saved Documents</h3><div style="display:flex;gap:8px"><button class="btn" id="wedNewEstimate">+ New Estimate</button><button class="btn" id="wedNewInvoice">+ New Invoice</button></div></div><div style="display:flex;gap:8px;margin:12px 0"><select class="input" id="wedFilter"><option value="">All Documents</option><option>Estimate</option><option>Invoice</option></select><input class="input" id="wedSearch" type="search" placeholder="Search customer, number, job or status…" style="flex:1;min-width:0"></div><div id="wedList">Loading…</div></section>
+      <section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0" id="wedHeading">Estimates & Invoices</h2><p class="hint" id="wedIntro">Create, review and print branded documents.</p></div><button class="btn" id="wedBack">← Business Hub</button></div></section>
+      <section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0" id="wedSavedHeading">Saved Documents</h3><div style="display:flex;gap:8px"><button class="btn" id="wedNewEstimate">+ New Estimate</button><button class="btn" id="wedNewInvoice">+ New Invoice</button></div></div><div style="display:flex;gap:8px;margin:12px 0"><select class="input" id="wedFilter"><option value="">All Documents</option><option>Estimate</option><option>Invoice</option></select><input class="input" id="wedSearch" type="search" placeholder="Search customer, number, job or status…" style="flex:1;min-width:0"></div><div id="wedList">Loading…</div></section>
       <section class="card" id="wedEditor" hidden><div style="display:flex;justify-content:space-between;align-items:center"><h3 id="wedEditorTitle">New Document</h3><button class="btn" id="wedCancel">Close</button></div>
       <form id="wedForm" style="display:grid;gap:15px">
         <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px">
@@ -622,6 +623,14 @@
     const f=name=>form.elements.namedItem(name);
     q('wedBack').onclick=()=>backAction?backAction():renderBusinessHub(platform);
     q('wedFilter').value=filterType;
+    if(filterType){
+      q('wedHeading').textContent=filterType+'s';
+      q('wedSavedHeading').textContent='Saved '+filterType+'s';
+      q('wedIntro').textContent='Search, view and print saved '+filterType.toLowerCase()+'s.';
+      q('wedNewEstimate').hidden=filterType!=='Estimate';
+      q('wedNewInvoice').hidden=filterType!=='Invoice';
+      q('wedFilter').hidden=true;
+    }
     try{
       const [customerResult,catalogResult]=await Promise.all([
         fetchJSON(`/workspaces/${platform}/customers`).catch(()=>({items:[]})),
@@ -659,7 +668,7 @@
     function open(item=null,type='Estimate'){
       editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();q('wedLines').replaceChildren();
       const data=item||{};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','status','tax_rate','notes'])if(data[key]!=null&&f(key))f(key).value=data[key];
-      if(!item){f('document_type').value=type;f('date').value=new Date().toISOString().slice(0,10);f('document_number').value='';}
+      if(!item){f('document_type').value=type;f('date').value=new Date().toISOString().slice(0,10);f('document_number').value='';} f('document_type').disabled=!!filterType;
       let lines=[];try{lines=Array.isArray(data.line_items)?data.line_items:JSON.parse(data.line_items||'[]');}catch{}
       if(!lines.length&&data.description)lines=[{description:data.description,quantity:1,rate:Number(data.amount)||0,taxable:false}];
       for(const line of lines.length?lines:[{}])addLine(line);
@@ -667,6 +676,7 @@
       q('wedEditor').scrollIntoView({block:'start',behavior:'smooth'});
     }
     q('wedNewEstimate').onclick=()=>open(null,'Estimate');q('wedNewInvoice').onclick=()=>open(null,'Invoice');
+    f('document_type').onchange=()=>{q('wedEditorTitle').textContent=(editing?'Edit ':'New ')+f('document_type').value;};
     q('wedCancel').onclick=()=>{q('wedEditor').hidden=true;editing=null;};
     function previewHtml(item){
       let lines=[];try{lines=Array.isArray(item.line_items)?item.line_items:JSON.parse(item.line_items||'[]');}catch{}
@@ -678,11 +688,11 @@
     q('wedEdit').onclick=()=>viewing&&open(viewing);
     q('wedDetailClose').onclick=()=>{q('wedDetails').hidden=true;viewing=null;};
     q('wedPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print.');return;}w.document.write('<!doctype html><html><head><title>'+escapeHtml(viewing.document_number)+'</title><style>@page{size:letter;margin:.5in}body{margin:0}tr{break-inside:avoid}</style></head><body>'+previewHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
-    function draw(){const search=q('wedSearch').value.toLowerCase(),filter=q('wedFilter').value;const host=q('wedList');host.replaceChildren();const matching=records.filter(r=>(!filter||r.document_type===filter)&&(!search||[r.customer,r.document_number,r.work_order_number,r.status].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${matching.length} of ${records.length} documents`;host.append(count);for(const item of matching){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:15px;margin-top:10px';const heading=document.createElement('strong');heading.textContent=`${item.document_type||'Document'} ${item.document_number||''} · ${item.customer||''}`;const meta=document.createElement('p');meta.className='hint';meta.textContent=`${item.date||''} · ${fmt(item.amount)} · ${item.status||''}`;const button=document.createElement('button');button.className='btn';button.textContent='View Document';button.onclick=()=>view(item);const edit=document.createElement('button');edit.className='btn';edit.style.marginLeft='8px';edit.textContent='Edit';edit.onclick=()=>open(item);card.append(heading,meta,button,edit);host.append(card);}}
+    function draw(){const search=q('wedSearch').value.toLowerCase(),filter=q('wedFilter').value;const host=q('wedList');host.replaceChildren();const matching=records.filter(r=>(!filter||String(r.document_type||'').toLowerCase()===filter.toLowerCase())&&(!search||[r.customer,r.document_number,r.work_order_number,r.status].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${matching.length} ${filter?filter.toLowerCase()+'s':'documents'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:15px;margin-top:10px';const heading=document.createElement('strong');heading.textContent=`${item.document_type||'Document'} ${item.document_number||''} · ${item.customer||''}`;const meta=document.createElement('p');meta.className='hint';meta.textContent=`${item.date||''} · ${fmt(item.amount)} · ${item.status||''}`;const button=document.createElement('button');button.className='btn';button.textContent='View Document';button.onclick=()=>view(item);const edit=document.createElement('button');edit.className='btn';edit.style.marginLeft='8px';edit.textContent='Edit';edit.onclick=()=>open(item);card.append(heading,meta,button,edit);host.append(card);}}
     q('wedFilter').onchange=draw;q('wedSearch').oninput=draw;
     async function refresh(){const result=await fetchJSON(endpoint);records=result.items||[];draw();}
     form.onsubmit=async e=>{e.preventDefault();const msg=q('wedMessage');const lines=getLines();if(!lines.some(l=>l.description||l.item)){msg.textContent='Add at least one line item.';return;}const totals=calculate();const data={};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','status','tax_rate','notes'])data[key]=f(key).value;data.line_items=JSON.stringify(lines);data.amount=totals.total;data.tax_amount=totals.tax;data.description=lines.map(l=>l.description).filter(Boolean).join('; ');if(records.some(r=>r.id!==editing?.id&&r.document_number===data.document_number&&r.document_type===data.document_type)){msg.textContent='That document number already exists in this workspace.';return;}const button=form.querySelector('[type="submit"]');button.disabled=true;msg.textContent='Saving…';try{const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});await refresh();q('wedEditor').hidden=true;const saved=response.item||records.find(r=>r.document_number===data.document_number&&r.document_type===data.document_type);if(saved)view(saved);}catch(err){msg.textContent='Save failed: '+(err.message||err);}finally{button.disabled=false;}};
-    try{await refresh();if(openNew)open();}catch(err){q('wedList').textContent='Unable to load documents: '+(err.message||err);}
+    try{await refresh();if(openNew)open(null,filterType||'Estimate');}catch(err){q('wedList').textContent='Unable to load documents: '+(err.message||err);}
   }
 
   async function renderBusinessCollection(platform,kind,openNew=false,backAction=null) {
@@ -812,7 +822,7 @@
       catch(err){message.textContent=`Save failed: ${err.message||'Unknown error'}`;console.error('Workspace save failed',err);}
       finally{submit.disabled=false;}
     };
-    try{await refresh();if(openNew)open();}catch(err){el('businessRecords').textContent=`Unable to load records: ${err.message||'Unknown error'}`;}
+    try{await refresh();if(openNew)open(null,filterType||'Estimate');}catch(err){el('businessRecords').textContent=`Unable to load records: ${err.message||'Unknown error'}`;}
   }
   // Phase 2F: Doorks-only accounting pilot. No PDS accounting endpoints are used.
   function renderAccountingQuickMenu(platform,hostId){
