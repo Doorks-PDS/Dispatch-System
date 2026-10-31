@@ -283,7 +283,7 @@
   let currentView = null;
  
   function setActiveChip(label) { activeModeChip.textContent = label; }
-  function setWorkspace(title) { workspaceTitle.textContent = title; }
+  function setWorkspace(title) { workspaceTitle.textContent = title; const brand=document.querySelector('.topbar .brand');if(brand)brand.textContent=activePlatform==='pds'?'Priority Door Systems':activePlatform==='sdc'?'Saddleback Design Co.':'Doorks'; }
   function clearWorkspaceActions() { workspaceActions.innerHTML = ""; }
  
   function setNavActive(btn) {
@@ -780,6 +780,7 @@
   }
   function showPlatformShell(platform,initialView='overview') {
     activePlatform=platform;
+    const brand=document.querySelector('.topbar .brand');if(brand)brand.textContent=platform==='pds'?'Priority Door Systems':platform==='sdc'?'Saddleback Design Co.':'Doorks';
     if(platformSelect)platformSelect.value=platform;
     const inPds=platform==='pds';
     if(platformSidebar)platformSidebar.style.display=inPds?'':'none';
@@ -8291,6 +8292,12 @@ function renderCustomersView() {
               <button class="btn" data-edit> Edit </button>
             </div>
           `;
+          const details=document.createElement('div');details.className='hint';details.style.cssText='display:none;margin:12px 0;white-space:pre-wrap;line-height:1.6';
+          details.textContent=[['Customer',c.company_name],['Street Address',c.address],['City',c.city],['State',c.state],['ZIP',c.zip_code],['Phone',c.phone_number],['Email',c.email],['Notes',c.notes]].filter(([,v])=>v).map(([k,v])=>k+': '+v).join('\n');
+          const actions=row.querySelector('.jobrow-top');
+          const view=document.createElement('button');view.className='btn';view.type='button';view.textContent='View Details';
+          view.onclick=()=>{details.style.display=details.style.display==='none'?'block':'none';view.textContent=details.style.display==='none'?'View Details':'Hide Details';};
+          actions.append(view);row.append(details);
           row.querySelector("[data-edit]").addEventListener("click", () => editCustomer(c));
           list.appendChild(row);
         });
@@ -8480,6 +8487,7 @@ function renderCustomersView() {
       {icon:'👤',label:'Contacts',description:'Manage customer contacts and phone numbers.',open:()=>enter('contacts')},
       {icon:'📍',label:'Addresses',description:'Saved job locations and legacy address lookup.',open:()=>enter('addresses')}
     ]);
+    cards.classList.add('pds-directory-cards');if(!document.getElementById('pds-directory-style')){const style=document.createElement('style');style.id='pds-directory-style';style.textContent='@media(min-width:900px){.pds-directory-cards{grid-template-columns:repeat(3,minmax(0,1fr))!important}}';document.head.append(style);}
     sectionBack.onclick=showDirectory;
 
     workspaceBody.innerHTML = "";
@@ -9642,7 +9650,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
  
   async function renderPdsVendorHub(){
     setWorkspace('PDS — Suppliers');clearWorkspaceActions();
-    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Suppliers</h2><p class="hint">Supplier profiles and purchase order relationships.</p></div><button class="btn" id="pdsSuppliersBack">← Business Hub</button></div><div id="pdsSuppliersCards"></div><section id="pdsSupplierEditor" hidden style="margin-top:16px"><button class="btn" id="pdsSupplierHome">← Suppliers</button><div class="card" style="margin-top:12px"><h3>Supplier Directory</h3><div id="pdsSupplierList"></div><h3 id="pdsSupplierFormHeading">New Supplier</h3><form id="pdsSupplierForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form><p id="pdsSupplierMessage" class="hint"></p></div></section></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Suppliers</h2><p class="hint">Supplier profiles and purchase order relationships.</p></div><button class="btn" id="pdsSuppliersBack">← Business Hub</button></div><div id="pdsSuppliersCards"></div><section id="pdsSupplierEditor" hidden style="margin-top:16px"><button class="btn" id="pdsSupplierHome">← Suppliers</button><div class="card" style="margin-top:12px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3>Supplier Directory</h3><button class="btn btn-orange" id="pdsSupplierNew" type="button">+ New Supplier</button></div><input class="input" id="pdsSupplierSearch" placeholder="Search suppliers, contacts, phone, email or status…" style="width:100%;box-sizing:border-box;margin:12px 0"><div id="pdsSupplierList"></div><div id="pdsSupplierFormWrap" hidden style="margin-top:18px"><h3 id="pdsSupplierFormHeading">New Supplier</h3><button class="btn" type="button" id="pdsSupplierCancel">Cancel</button><form id="pdsSupplierForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form></div><p id="pdsSupplierMessage" class="hint"></p></div></section></div>';
     el('pdsSuppliersBack').onclick=()=>renderEstimatePage();
     const cards=el('pdsSuppliersCards'),section=el('pdsSupplierEditor');
     const home=()=>{cards.hidden=false;section.hidden=true;};
@@ -9658,20 +9666,36 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       label.append(input);form.append(label);
     }
     const save=document.createElement('button');save.className='btn btn-orange';save.type='submit';save.textContent='Save Supplier';form.append(save);
-    const reset=()=>{editing=null;form.reset();el('pdsSupplierFormHeading').textContent='New Supplier';};
-    async function refresh(){
-      const data=await fetchJSON('/pds-purchase-orders/suppliers');
-      records=data.items||[];const host=el('pdsSupplierList');host.replaceChildren();
-      if(!records.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No supplier profiles yet. Add one below.';host.append(empty);}
-      for(const supplier of records){
-        const row=document.createElement('div');row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px;padding:10px;border-bottom:1px solid #e5e7eb';
-        const info=document.createElement('div');const title=document.createElement('strong');title.textContent=supplier.name;
-        const sub=document.createElement('div');sub.className='hint';sub.textContent=[supplier.contact,supplier.phone,supplier.payment_terms].filter(Boolean).join(' · ');
-        info.append(title,sub);
-        const edit=document.createElement('button');edit.className='btn';edit.type='button';edit.textContent='Edit';
-        edit.onclick=()=>{editing=supplier.id;for(const [key] of fields)form.elements[key].value=supplier[key]||'';el('pdsSupplierFormHeading').textContent='Edit Supplier — '+supplier.name;form.scrollIntoView({behavior:'smooth',block:'nearest'});};
-        row.append(info,edit);host.append(row);
+    const formWrap=el('pdsSupplierFormWrap');
+    const reset=()=>{editing=null;form.reset();formWrap.hidden=true;el('pdsSupplierFormHeading').textContent='New Supplier';};
+    el('pdsSupplierNew').onclick=()=>{editing=null;form.reset();formWrap.hidden=false;el('pdsSupplierFormHeading').textContent='New Supplier';formWrap.scrollIntoView({block:'nearest',behavior:'smooth'});};
+    el('pdsSupplierCancel').onclick=reset;
+    const supplierSearch=el('pdsSupplierSearch');supplierSearch.oninput=()=>drawSuppliers();
+    let linkedOrders=[];
+    function drawSuppliers(){
+      const host=el('pdsSupplierList');host.replaceChildren();const q=supplierSearch.value.toLowerCase().trim();
+      const shown=records.filter(x=>!q||[x.name,x.contact,x.email,x.phone,x.address,x.payment_terms,x.license_number,x.deactivated_at?'inactive':'active'].some(v=>String(v||'').toLowerCase().includes(q)));
+      const count=document.createElement('p');count.className='hint';count.textContent='Showing '+shown.length+' of '+records.length+' suppliers';host.append(count);
+      if(!shown.length){const p=document.createElement('p');p.className='hint';p.textContent='No matching suppliers.';host.append(p);}
+      for(const supplier of shown){
+        const row=document.createElement('div');row.className='card';row.style.cssText='margin:10px 0;padding:16px;border:1px solid #d9dee7;border-radius:12px';
+        const title=document.createElement('strong');title.textContent=supplier.name+(supplier.deactivated_at?' · Inactive':'');row.append(title);
+        const summary=document.createElement('p');summary.className='hint';summary.textContent=[supplier.contact,supplier.phone,supplier.email,supplier.payment_terms].filter(Boolean).join(' · ');row.append(summary);
+        const details=document.createElement('div');details.className='hint';details.hidden=true;details.style.whiteSpace='pre-wrap';
+        details.textContent=[['Name',supplier.name],['Contact',supplier.contact],['Phone',supplier.phone],['Email',supplier.email],['Address',supplier.address],['Payment Terms',supplier.payment_terms],['Insurance Expiration',supplier.insurance_expiration],['License',supplier.license_number],['Notes',supplier.notes],['Related POs',linkedOrders.filter(o=>o.supplier_id===supplier.id).map(o=>o.po_number).join(', ')||'None linked by profile ID']].filter(([,v])=>v).map(([k,v])=>k+': '+v).join('\n');
+        const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:10px';
+        const addButton=(text,handler)=>{const button=document.createElement('button');button.type='button';button.className='btn';button.textContent=text;button.onclick=handler;buttons.append(button);};
+        addButton('View Details',()=>{details.hidden=!details.hidden;});
+        addButton('Edit',()=>{editing=supplier.id;for(const [key] of fields)form.elements[key].value=supplier[key]||'';formWrap.hidden=false;el('pdsSupplierFormHeading').textContent='Edit Supplier — '+supplier.name;formWrap.scrollIntoView({block:'nearest',behavior:'smooth'});});
+        addButton(supplier.deactivated_at?'Reactivate':'Mark Inactive',async()=>{if(!confirm((supplier.deactivated_at?'Reactivate ':'Mark inactive ')+supplier.name+'?'))return;try{await fetchJSON('/pds-purchase-orders/suppliers/'+encodeURIComponent(supplier.id)+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:!!supplier.deactivated_at})});await refresh();}catch(e){alert(e.message||e);}});
+        addButton('Delete',async()=>{if(!confirm('Permanently delete '+supplier.name+'? This cannot be undone. Linked POs prevent deletion.'))return;try{await fetchJSON('/pds-purchase-orders/suppliers/'+encodeURIComponent(supplier.id),{method:'DELETE'});await refresh();}catch(e){alert(e.message||e);}});
+        row.append(buttons,details);host.append(row);
       }
+    }
+    async function refresh(){
+      const data=await fetchJSON('/pds-purchase-orders/suppliers');records=data.items||[];
+      try{const po=await fetchJSON('/pds-purchase-orders');linkedOrders=po.items||[];}catch(e){linkedOrders=[];}
+      drawSuppliers();
     }
     form.onsubmit=async event=>{
       event.preventDefault();const msg=el('pdsSupplierMessage');msg.textContent='Saving…';

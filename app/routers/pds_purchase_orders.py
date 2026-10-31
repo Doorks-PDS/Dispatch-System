@@ -148,3 +148,33 @@ def update_supplier(supplier_id:str,payload:POInput,request:Request):
                 _write(path,items)
                 return {"item":item}
     raise HTTPException(404,"Supplier not found")
+
+@router.patch('/suppliers/{supplier_id}/status')
+def set_supplier_status(supplier_id:str,payload:dict,request:Request):
+    _guard(request)
+    if not isinstance(payload.get('active'),bool):raise HTTPException(400,'active must be boolean')
+    with _lock:
+        path=_supplier_path(request);items=_read(path,[])
+        for item in items:
+            if item.get('id')==supplier_id:
+                if payload['active']:item.pop('deactivated_at',None)
+                else:item['deactivated_at']=datetime.now(timezone.utc).isoformat()
+                item['updated_at']=datetime.now(timezone.utc).isoformat()
+                _write(path,items)
+                return {'item':item}
+    raise HTTPException(404,'Supplier not found')
+
+@router.delete('/suppliers/{supplier_id}')
+def delete_supplier(supplier_id:str,request:Request):
+    _guard(request)
+    with _lock:
+        path=_supplier_path(request);items=_read(path,[])
+        item=next((x for x in items if x.get('id')==supplier_id),None)
+        if not item:raise HTTPException(404,'Supplier not found')
+        records,_=_paths(request)
+        name=str(item.get('name') or '').strip().casefold()
+        for po in _read(records,[]):
+            if po.get('supplier_id')==supplier_id or (name and str(po.get('vendor') or '').strip().casefold()==name):
+                raise HTTPException(409,'Supplier has linked purchase orders; mark inactive instead')
+        _write(path,[x for x in items if x.get('id')!=supplier_id])
+    return {'ok':True}
