@@ -554,16 +554,17 @@
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Business Hub</h2><p class="hint">Documents, purchasing and business relationships. Numbered documents retain their existing workspace records and counters.</p><div id="businessHubActions"></div></div>';
     const openKind=(kind,newRecord=false)=>['customers','vendors'].includes(kind)&&!newRecord?renderWorkspaceDirectory(platform,kind):renderBusinessCollection(platform,kind,newRecord,()=>renderBusinessHub(platform));
-    const docs=()=>openKind('estimates_invoices');
+    const docs=(type)=>renderWorkspaceEstimateInvoice(platform,false,()=>renderBusinessHub(platform),type);
     makeHubCards(el('businessHubActions'),[
-      {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>openKind('estimates_invoices',true)},
-      {icon:'📋',label:'Estimates',description:'Open saved estimate and invoice records.',open:docs},
-      {icon:'🧾',label:'Invoices',description:'Review saved billing documents.',open:docs},
+      {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>renderWorkspaceEstimateInvoice(platform,true,()=>renderBusinessHub(platform))},
+      {icon:'📋',label:'Estimates',description:'Open saved estimate and invoice records.',open:()=>docs('Estimate')},
+      {icon:'🧾',label:'Invoices',description:'Review saved billing documents.',open:()=>docs('Invoice')},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
+      ...(platform==='doorks'?[{icon:'🔩',label:'Parts List',description:'Doorks parts catalog and inventory. PDS records remain separate.',open:()=>openKind('inventory')}]:[]),
       {icon:'🏢',label:platform==='sdc'?'Suppliers':'Vendors',description:platform==='sdc'?'Supplier profiles and contacts.':'Vendor profiles and contacts.',open:()=>openKind('vendors')},
       {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>openKind('customers')}
     ]);
-    const note=document.createElement('p');note.className='hint';note.style.marginTop='18px';note.textContent='Estimates and Invoices currently share the existing workspace document collection; separate filtered views are planned.';el('businessHubActions').after(note);
+
   }
   function renderWorkspaceDirectory(platform,kind){
     if(activePlatform!==platform)return;
@@ -582,9 +583,112 @@
       {icon:'📑',label:'Documents & Compliance',description:'Insurance and licensing fields are available in saved records. Dedicated document attachments are planned.',open}
     ]);
   }
+
+  // Phase 2R-J-B: workspace-specific estimate/invoice builder.
+  // Existing collection and stored records remain the source of truth.
+  async function renderWorkspaceEstimateInvoice(platform,openNew=false,backAction=null,filterType=''){
+    if(activePlatform!==platform)return;
+    clearWorkspaceActions();
+    const company=platform==='sdc'?'Saddleback Design Co.':'Doorks';
+    const endpoint=`/workspaces/${platform}/estimates_invoices`;
+    setWorkspace(company+' — Estimates & Invoices');
+    workspaceBody.innerHTML=`<div style="max-width:1260px;margin:auto;display:grid;gap:16px">
+      <section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Estimates & Invoices</h2><p class="hint">Create, review and print branded documents.</p></div><button class="btn" id="wedBack">← Business Hub</button></div></section>
+      <section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0">Saved Documents</h3><div style="display:flex;gap:8px"><button class="btn" id="wedNewEstimate">+ New Estimate</button><button class="btn" id="wedNewInvoice">+ New Invoice</button></div></div><div style="display:flex;gap:8px;margin:12px 0"><select class="input" id="wedFilter"><option value="">All Documents</option><option>Estimate</option><option>Invoice</option></select><input class="input" id="wedSearch" type="search" placeholder="Search customer, number, job or status…" style="flex:1;min-width:0"></div><div id="wedList">Loading…</div></section>
+      <section class="card" id="wedEditor" hidden><div style="display:flex;justify-content:space-between;align-items:center"><h3 id="wedEditorTitle">New Document</h3><button class="btn" id="wedCancel">Close</button></div>
+      <form id="wedForm" style="display:grid;gap:15px">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px">
+          <label>Document Type<select class="input" name="document_type"><option>Estimate</option><option>Invoice</option></select></label>
+          <label>Document Number<input class="input" name="document_number" placeholder="Enter unique document number" required></label>
+          <label>Date<input class="input" type="date" name="date" required></label>
+          <label>Terms<select class="input" name="terms"><option>Due on Receipt</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option></select></label>
+          <label>Customer<input class="input" name="customer" list="wedCustomers" required autocomplete="off"><datalist id="wedCustomers"></datalist></label>
+          <label>Customer Address<textarea class="input" name="address" rows="2"></textarea></label>
+          <label>Work Order / Job #<input class="input" name="work_order_number"></label>
+          <label>PO #<input class="input" name="po_number"></label>
+          <label>Status<select class="input" name="status"><option>Draft</option><option>Sent</option><option>Approved</option><option>Declined</option><option>Paid</option></select></label>
+          <label>Sales Tax %<input class="input" name="tax_rate" type="number" step=".01" min="0" value="7.75"></label>
+        </div>
+        <div><h3>Line Items</h3><div id="wedCatalogHint" class="hint"></div><div style="overflow-x:auto"><table style="width:100%;min-width:760px;border-collapse:separate;border-spacing:6px"><thead><tr><th>Item / SKU</th><th>Description</th><th>Qty</th><th>Rate</th><th>Taxable</th><th>Amount</th><th></th></tr></thead><tbody id="wedLines"></tbody></table></div><button class="btn" id="wedAdd" type="button">+ Add Line Item</button></div>
+        <label>Notes / Scope<textarea class="input" name="notes" rows="3"></textarea></label>
+        <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
+        <p id="wedMessage" role="status"></p>
+      </form></section>
+      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
+      </div>`;
+    const q=id=>el(id),form=q('wedForm'),fmt=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    let records=[],editing=null,viewing=null,customers=[],catalog=[];
+    const f=name=>form.elements.namedItem(name);
+    q('wedBack').onclick=()=>backAction?backAction():renderBusinessHub(platform);
+    q('wedFilter').value=filterType;
+    try{
+      const [customerResult,catalogResult]=await Promise.all([
+        fetchJSON(`/workspaces/${platform}/customers`).catch(()=>({items:[]})),
+        fetchJSON(`/workspaces/${platform}/${platform==='sdc'?'products':'inventory'}`).catch(()=>({items:[]}))
+      ]);
+      customers=customerResult.items||[];catalog=catalogResult.items||[];
+      q('wedCustomers').replaceChildren(...customers.map(c=>{const o=document.createElement('option');o.value=c.name||'';return o;}));
+      q('wedCatalogHint').textContent=platform==='sdc'?'Search saved SDC Products by SKU or name, or enter a custom line item.':'Search Doorks Inventory by part number or description, or enter a custom line item. The PDS catalog is not copied or shared automatically.';
+    }catch(e){console.warn('Document lookup unavailable',e);}
+    f('customer').addEventListener('change',()=>{
+      const c=customers.find(x=>String(x.name||'').toLowerCase()===f('customer').value.toLowerCase());
+      if(c&&!f('address').value)f('address').value=c.address||'';
+    });
+    function getLines(){return [...q('wedLines').children].map(tr=>({item:tr.querySelector('[data-k="item"]').value,description:tr.querySelector('[data-k="description"]').value,quantity:Number(tr.querySelector('[data-k="quantity"]').value)||0,rate:Number(tr.querySelector('[data-k="rate"]').value)||0,taxable:tr.querySelector('[data-k="taxable"]').checked}));}
+    function calculate(){const lines=getLines(),subtotal=lines.reduce((a,l)=>a+l.quantity*l.rate,0),taxable=lines.filter(l=>l.taxable).reduce((a,l)=>a+l.quantity*l.rate,0),tax=taxable*(Number(f('tax_rate').value)||0)/100;q('wedTotal').textContent='Total: '+fmt(subtotal+tax);return {subtotal,tax,total:subtotal+tax};}
+    function addLine(item={}){
+      const tr=document.createElement('tr');
+      tr.innerHTML=`<td><input class="input" data-k="item" list="wedCatalog" style="width:140px" autocomplete="off"></td><td><textarea class="input" data-k="description" rows="2" style="min-width:210px"></textarea></td><td><input class="input" data-k="quantity" type="number" min="0" step=".01" style="width:75px"></td><td><input class="input" data-k="rate" type="number" min="0" step=".01" style="width:100px"></td><td><input data-k="taxable" type="checkbox"></td><td data-k="amount"></td><td><button type="button" class="btn">×</button></td>`;
+      for(const key of ['item','description','quantity','rate'])tr.querySelector(`[data-k="${key}"]`).value=item[key]??(key==='quantity'?1:'');
+      tr.querySelector('[data-k="taxable"]').checked=item.taxable!==false;
+      tr.querySelector('button').onclick=()=>{tr.remove();calculate();};
+      const itemField=tr.querySelector('[data-k="item"]');
+      itemField.addEventListener('change',()=>{
+        const match=catalog.find(x=>[x.sku,x.part_number,x.name,x.description].some(v=>String(v||'').toLowerCase()===itemField.value.toLowerCase()));
+        if(match){tr.querySelector('[data-k="description"]').value=match.description||match.name||'';tr.querySelector('[data-k="rate"]').value=match.price??match.unit_cost??'';calculate();}
+      });
+      tr.addEventListener('input',()=>{tr.querySelector('[data-k="amount"]').textContent=fmt(Number(tr.querySelector('[data-k="quantity"]').value)*Number(tr.querySelector('[data-k="rate"]').value));calculate();});
+      q('wedLines').append(tr);tr.querySelector('[data-k="amount"]').textContent=fmt((Number(item.quantity)||0)*(Number(item.rate)||0));calculate();
+    }
+    const datalist=document.createElement('datalist');datalist.id='wedCatalog';
+    for(const item of catalog){for(const value of [item.sku||item.part_number||item.name])if(value){const opt=document.createElement('option');opt.value=value;opt.label=item.description||item.name||'';datalist.append(opt);}}
+    q('wedLines').after(datalist);
+    q('wedAdd').onclick=()=>addLine();
+    f('tax_rate').oninput=calculate;
+    function open(item=null,type='Estimate'){
+      editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();q('wedLines').replaceChildren();
+      const data=item||{};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','status','tax_rate','notes'])if(data[key]!=null&&f(key))f(key).value=data[key];
+      if(!item){f('document_type').value=type;f('date').value=new Date().toISOString().slice(0,10);f('document_number').value='';}
+      let lines=[];try{lines=Array.isArray(data.line_items)?data.line_items:JSON.parse(data.line_items||'[]');}catch{}
+      if(!lines.length&&data.description)lines=[{description:data.description,quantity:1,rate:Number(data.amount)||0,taxable:false}];
+      for(const line of lines.length?lines:[{}])addLine(line);
+      q('wedEditorTitle').textContent=(item?'Edit ':'New ')+f('document_type').value;
+      q('wedEditor').scrollIntoView({block:'start',behavior:'smooth'});
+    }
+    q('wedNewEstimate').onclick=()=>open(null,'Estimate');q('wedNewInvoice').onclick=()=>open(null,'Invoice');
+    q('wedCancel').onclick=()=>{q('wedEditor').hidden=true;editing=null;};
+    function previewHtml(item){
+      let lines=[];try{lines=Array.isArray(item.line_items)?item.line_items:JSON.parse(item.line_items||'[]');}catch{}
+      if(!lines.length&&item.description)lines=[{description:item.description,quantity:1,rate:Number(item.amount)||0,taxable:false}];
+      const subtotal=lines.reduce((a,l)=>a+(Number(l.quantity)||0)*(Number(l.rate)||0),0),tax=Number(item.tax_amount)||0;
+      return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:25px;background:white"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(company)}</h2><p>41080 Saddleback Dr<br>Aguanga, CA 92536</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}</p></div></header><hr><p><b>Customer:</b> ${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}<br><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#f0f2f6"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Tax: ${fmt(tax)}</p><h2>Total: ${fmt(item.amount)}</h2></div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
+    }
+    function view(item){viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    q('wedEdit').onclick=()=>viewing&&open(viewing);
+    q('wedDetailClose').onclick=()=>{q('wedDetails').hidden=true;viewing=null;};
+    q('wedPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print.');return;}w.document.write('<!doctype html><html><head><title>'+escapeHtml(viewing.document_number)+'</title><style>@page{size:letter;margin:.5in}body{margin:0}tr{break-inside:avoid}</style></head><body>'+previewHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
+    function draw(){const search=q('wedSearch').value.toLowerCase(),filter=q('wedFilter').value;const host=q('wedList');host.replaceChildren();const matching=records.filter(r=>(!filter||r.document_type===filter)&&(!search||[r.customer,r.document_number,r.work_order_number,r.status].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${matching.length} of ${records.length} documents`;host.append(count);for(const item of matching){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:15px;margin-top:10px';const heading=document.createElement('strong');heading.textContent=`${item.document_type||'Document'} ${item.document_number||''} · ${item.customer||''}`;const meta=document.createElement('p');meta.className='hint';meta.textContent=`${item.date||''} · ${fmt(item.amount)} · ${item.status||''}`;const button=document.createElement('button');button.className='btn';button.textContent='View Document';button.onclick=()=>view(item);const edit=document.createElement('button');edit.className='btn';edit.style.marginLeft='8px';edit.textContent='Edit';edit.onclick=()=>open(item);card.append(heading,meta,button,edit);host.append(card);}}
+    q('wedFilter').onchange=draw;q('wedSearch').oninput=draw;
+    async function refresh(){const result=await fetchJSON(endpoint);records=result.items||[];draw();}
+    form.onsubmit=async e=>{e.preventDefault();const msg=q('wedMessage');const lines=getLines();if(!lines.some(l=>l.description||l.item)){msg.textContent='Add at least one line item.';return;}const totals=calculate();const data={};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','status','tax_rate','notes'])data[key]=f(key).value;data.line_items=JSON.stringify(lines);data.amount=totals.total;data.tax_amount=totals.tax;data.description=lines.map(l=>l.description).filter(Boolean).join('; ');if(records.some(r=>r.id!==editing?.id&&r.document_number===data.document_number&&r.document_type===data.document_type)){msg.textContent='That document number already exists in this workspace.';return;}const button=form.querySelector('[type="submit"]');button.disabled=true;msg.textContent='Saving…';try{const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});await refresh();q('wedEditor').hidden=true;const saved=response.item||records.find(r=>r.document_number===data.document_number&&r.document_type===data.document_type);if(saved)view(saved);}catch(err){msg.textContent='Save failed: '+(err.message||err);}finally{button.disabled=false;}};
+    try{await refresh();if(openNew)open();}catch(err){q('wedList').textContent='Unable to load documents: '+(err.message||err);}
+  }
+
   async function renderBusinessCollection(platform,kind,openNew=false,backAction=null) {
     if(activePlatform!==platform)return;
     if(kind==='purchase_orders')return renderUnifiedPurchaseOrders(platform,openNew,backAction);
+    if(kind==='estimates_invoices')return renderWorkspaceEstimateInvoice(platform,openNew,backAction);
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
