@@ -9964,14 +9964,23 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const selectLabel=document.createElement('label');selectLabel.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';selectLabel.textContent='Saved Supplier / Vendor Profile';
     const supplierSelect=document.createElement('select');supplierSelect.className='input';supplierSelect.innerHTML='<option value="">Manual entry / no profile</option>';selectLabel.append(supplierSelect);grid.insertBefore(selectLabel,grid.firstChild);
     supplierSelect.onchange=()=>{const supplier=suppliers.find(x=>x.id===supplierSelect.value);if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||'';}};
+    const supplierSearch=document.createElement('input');supplierSearch.type='search';supplierSearch.className='input';supplierSearch.placeholder='Type supplier name…';supplierSearch.setAttribute('list','upoSupplierOptions');
+    const supplierOptions=document.createElement('datalist');supplierOptions.id='upoSupplierOptions';
+    selectLabel.insertBefore(supplierSearch,supplierSelect);selectLabel.append(supplierOptions);supplierSelect.style.display='none';
+    supplierSearch.oninput=()=>{const name=supplierSearch.value.trim().toLowerCase();const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===name);supplierSelect.value=supplier?.id||'';if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||'';}};
+    form.elements.vendor.addEventListener('input',()=>{supplierSelect.value='';});
+    const customerSearch=document.createElement('input');customerSearch.type='search';customerSearch.className='input';customerSearch.placeholder='Type to find a saved customer…';customerSearch.setAttribute('list','upoCustomerOptions');
+    const customerOptions=document.createElement('datalist');customerOptions.id='upoCustomerOptions';
+    const customerField=form.elements.customer;customerField.parentElement.insertBefore(customerSearch,customerField);customerField.style.display='none';customerField.parentElement.append(customerOptions);
+    let customers=[];
+    customerSearch.oninput=()=>{const name=customerSearch.value.trim().toLowerCase();const customer=customers.find(x=>String(x.name||x.customer||'').toLowerCase()===name);customerField.value=customer?.name||customer?.customer||customerSearch.value;};
+
     const parseLines=item=>{try{const parsed=JSON.parse(item.line_items||'[]');if(Array.isArray(parsed)&&parsed.length)return parsed;}catch(e){}
       const qty=Number(item.quantity||0),rate=Number(item.unit_cost||0);
       return [{item:item.item_type||'',description:item.description||'',quantity:qty||1,unit:item.unit||'',rate:rate||Number(item.amount||item.total||0)/(qty||1)}];};
     // PDS catalog is a lookup only. PO rates are vendor purchase costs, not sales prices.
     let pdsCatalog=[];
     if(isPds){
-      try{pdsCatalog=await apiListParts({limit:500});}
-      catch(e){console.warn('PDS Parts List lookup unavailable',e);}
       const hint=document.createElement('p');hint.className='hint';
       hint.textContent='PDS Parts List: select an existing part to populate its number and description. Enter the supplier purchase cost separately; no inventory is changed when a PO is saved.';
       q('upoAddLine').before(hint);
@@ -9982,24 +9991,27 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         const first=tr.querySelector('[data-key="item"]');
         const description=tr.querySelector('[data-key="description"]');
         const holder=first.parentElement;
-        const lookup=document.createElement('select');lookup.className='input';
+        // Searchable catalog: suggestions narrow as the user types, not a 500-item dropdown.
+        const lookup=document.createElement('input');lookup.type='search';lookup.className='input';
+        lookup.placeholder='Search part # or description…';lookup.autocomplete='off';
         lookup.style.cssText='width:100%;min-width:140px;margin-bottom:5px';
-        const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Find saved part…';lookup.append(placeholder);
-        pdsCatalog.forEach((part,index)=>{
-          const option=document.createElement('option');option.value=String(index);
-          option.textContent=[part.Item||part.part_number||part.item,part.Description||part.description].filter(Boolean).join(' — ').slice(0,120);
-          lookup.append(option);
-        });
-        lookup.onchange=()=>{
-          if(lookup.value==='')return;
-          const part=pdsCatalog[Number(lookup.value)];if(!part)return;
+        const matches=document.createElement('div');matches.style.cssText='max-height:170px;overflow:auto;border:1px solid #d9dee7;border-radius:8px;background:white;display:none';
+        const choose=part=>{
           first.value=part.Item||part.part_number||part.item||'';
           description.value=part.Description||part.description||'';
-          // Do not copy retail sales price into vendor purchase rate.
-          tr.dataset.partId=String(part.id||'');
-          total();
+          lookup.value=[first.value,description.value].filter(Boolean).join(' — ');
+          tr.dataset.partId=String(part.id||'');matches.replaceChildren();matches.style.display='none';total();
         };
-        holder.insertBefore(lookup,first);
+        let searchSeq=0;
+        lookup.oninput=async()=>{
+          const term=lookup.value.trim().toLowerCase(),seq=++searchSeq;matches.replaceChildren();matches.style.display='none';
+          if(term.length<2)return;
+          let filtered=[];try{filtered=(await apiListParts({q:term,limit:12})).slice(0,12);}catch(e){console.warn('Part search unavailable',e);return;}
+          if(seq!==searchSeq)return;
+          for(const part of filtered){const opt=document.createElement('button');opt.type='button';opt.className='btn';opt.style.cssText='display:block;width:100%;text-align:left;border:0;border-radius:0';opt.textContent=[part.Item||part.part_number||part.item,part.Description||part.description].filter(Boolean).join(' — ');opt.onclick=()=>choose(part);matches.append(opt);}
+          if(filtered.length)matches.style.display='block';
+        };
+        holder.insertBefore(matches,first);holder.insertBefore(lookup,matches);
         if(item.part_id)tr.dataset.partId=String(item.part_id);
       }
       const amount=document.createElement('td');amount.style.cssText='padding:8px;text-align:right;white-space:nowrap';amount.className='upoAmount';tr.append(amount);
@@ -10013,7 +10025,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
       if(!item){form.elements.ship_to.value=company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');}
-      supplierSelect.value=item?.supplier_id||item?.vendor_id||'';q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
+      supplierSelect.value=item?.supplier_id||item?.vendor_id||'';supplierSearch.value=item?.vendor||'';customerSearch.value=item?.customer||'';q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
       (item?parseLines(item):[{}]).forEach(addLine);total();q('upoMessage').textContent='';q('upoEditor').scrollIntoView({behavior:'smooth',block:'start'});};
     q('upoNew').onclick=()=>edit(null);
     const docHtml=item=>{const lines=parseLines(item),sub=lines.reduce((a,x)=>a+Number(x.quantity||0)*Number(x.rate||0),0),tax=Number(item.tax||0),shipping=Number(item.shipping||0),sum=sub+tax+shipping;
@@ -10045,6 +10057,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     form.onsubmit=async event=>{event.preventDefault();const button=q('upoSave');button.disabled=true;const msg=q('upoMessage');msg.textContent='Saving…';try{
       const lines=getLines().filter(x=>x.item||x.description);if(!lines.length)throw Error('Add at least one line item');if(lines.some(x=>!Number.isFinite(x.quantity)||x.quantity<=0||!Number.isFinite(x.rate)||x.rate<0))throw Error('Each line needs a positive quantity and valid rate');
       const raw=JSON.stringify(lines);if(raw.length>3900)throw Error('Too many line-item details for this PO record. Shorten descriptions or split the PO.');
+      customerField.value=customerSearch.value.trim();if(supplierSelect.value){const linked=suppliers.find(x=>x.id===supplierSelect.value);if(linked)form.elements.vendor.value=linked.name||'';}else if(supplierSearch.value.trim())form.elements.vendor.value=supplierSearch.value.trim();
       const data=Object.fromEntries(fields.map(([key])=>[key,String(form.elements[key].value||'').trim()]));
       data.line_items=raw;data.tax=String(q('upoTax').value||0);data.shipping=String(q('upoShipping').value||0);data.quantity=String(lines.reduce((n,x)=>n+x.quantity,0));data.unit_cost=String(lines.length===1?lines[0].rate:0);data.description=lines.map(x=>[x.item,x.description].filter(Boolean).join(' — ')).join('; ').slice(0,3900);
       data.supplier_id=supplierSelect.value;data.vendor_id=supplierSelect.value;data.total=String(total());data.amount=data.total;
@@ -10058,7 +10071,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         const f=result.fields||{};for(const [key] of fields){if(f[key]!==undefined&&String(f[key]).trim())form.elements[key].value=String(f[key]);}if(f.work_order&&!f.work_order_number)form.elements.work_order_number.value=f.work_order;
         if(Array.isArray(result.line_items)&&result.line_items.length){q('upoLines').replaceChildren();result.line_items.forEach(addLine);}if(f.tax!==undefined)q('upoTax').value=f.tax;if(f.shipping!==undefined)q('upoShipping').value=f.shipping;total();status.textContent='AI draft loaded. Verify every item, price, address and total before saving.';
       }catch(e){status.textContent='AI import unavailable: '+(e.message||e);}finally{btn.disabled=false;}};
-    try{const result=await fetchJSON(supplierEndpoint);suppliers=result.items||[];for(const supplier of suppliers){const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name||'Unnamed';supplierSelect.append(option);}}catch(e){console.warn('Supplier lookup unavailable',e);}
+    try{const result=await fetchJSON(supplierEndpoint);suppliers=result.items||[];for(const supplier of suppliers){const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name||'Unnamed';supplierSelect.append(option);const suggestion=document.createElement('option');suggestion.value=supplier.name||'';supplierOptions.append(suggestion);}}catch(e){console.warn('Supplier lookup unavailable',e);}
+    try{const result=await fetchJSON(isPds?'/crm/customers':'/workspaces/'+platform+'/customers');customers=Array.isArray(result)?result:(result.items||result.customers||[]);for(const customer of customers){const option=document.createElement('option');option.value=customer.name||customer.customer||'';customerOptions.append(option);}}catch(e){console.warn('Customer lookup unavailable',e);}
     await reload();if(openNew)edit(null);
   }
 
