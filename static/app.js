@@ -587,6 +587,11 @@
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
+    if(kind==='purchase_orders'){
+      const action=document.createElement('button');action.type='button';action.className='btn';action.textContent='Receiving & Inventory';
+      action.onclick=()=>renderPoReceiving(platform);
+      el('businessNew').parentElement.append(action);
+    }
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
     const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',scheduled_date:'date',scheduled_time:'time',expected_date:'date',preferred_date:'date',preferred_time:'time'};
@@ -9871,8 +9876,55 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     renderActiveTab();
   }
  
+  async function renderPoReceiving(platform){
+    if(platform!=='pds'&&activePlatform!==platform)return;
+    clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — PO Receiving & Inventory');
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>PO Receiving & Inventory</h2><p class="hint">Record partial deliveries and packing-slip references. Stock shown here is received stock only, not available inventory.</p></div><button class="btn" id="receiveBack">← Business Hub</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Received Stock by SKU</h3><div id="receiveStock" class="hint"></div></div>';
+    el('receiveBack').onclick=()=>platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
+    let data={orders:[],events:[],received_stock_by_sku:{}};
+    async function reload(){
+      try{data=await fetchJSON('/pds-purchase-orders/receiving/'+platform);draw();}
+      catch(e){el('receiveOrders').textContent='Unable to load receiving records: '+(e.message||e);}
+    }
+    function draw(){
+      const q=el('receiveSearch').value.toLowerCase().trim(),host=el('receiveOrders');host.replaceChildren();
+      for(const order of data.orders.filter(o=>[o.po_number,o.supplier,o.description].some(x=>String(x||'').toLowerCase().includes(q)))){
+        const card=document.createElement('div');card.className='card';card.style.margin='8px 0';
+        const title=document.createElement('strong');title.textContent=(order.po_number||'PO')+' — '+(order.supplier||'Supplier not specified');
+        const info=document.createElement('p');info.className='hint';info.textContent='Ordered: '+order.ordered+' | Received: '+order.received+' | Outstanding: '+order.outstanding+' | '+order.receiving_status;
+        card.append(title,info);
+        if(order.outstanding>0){
+          const button=document.createElement('button');button.className='btn btn-orange';button.textContent='+ Receive Delivery';card.append(button);
+          button.onclick=()=>{
+            const form=document.createElement('form');form.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px';
+            const fields=[['quantity','Quantity Received','number'],['reference','Packing Slip / Delivery #','text'],['sku','Inventory SKU (optional)','text'],['notes','Notes','text']];
+            for(const [key,label,type] of fields){const wrap=document.createElement('label');wrap.textContent=label;wrap.style.cssText='display:grid;gap:5px';const input=document.createElement('input');input.className='input';input.name=key;input.type=type;if(key==='quantity'){input.required=true;input.min='0.0001';input.max=String(order.outstanding);input.step='any';}wrap.append(input);form.append(wrap);}
+            const wrap=document.createElement('label');wrap.style.cssText='display:flex;align-items:center;gap:8px';const check=document.createElement('input');check.type='checkbox';check.name='to_inventory';wrap.append(check,document.createTextNode('Record as received stock (SKU required)'));form.append(wrap);
+            const submit=document.createElement('button');submit.className='btn btn-orange';submit.textContent='Confirm Receipt';form.append(submit);
+            const status=document.createElement('p');status.className='hint';form.append(status);
+            form.onsubmit=async ev=>{ev.preventDefault();submit.disabled=true;status.textContent='Saving…';
+              try{const payload={quantity:Number(form.elements.quantity.value),reference:form.elements.reference.value,sku:form.elements.sku.value,notes:form.elements.notes.value,to_inventory:check.checked,request_id:(globalThis.crypto?.randomUUID?.()||String(Date.now())+'-'+Math.random())};
+                await fetchJSON('/pds-purchase-orders/receiving/'+platform+'/'+encodeURIComponent(order.po_id),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});await reload();
+              }catch(e){status.textContent=e.message||String(e);submit.disabled=false;}
+            };card.append(form);button.remove();
+          };
+        }host.append(card);
+      }
+      if(!host.children.length)host.textContent='No matching purchase orders.';
+      const history=el('receiveHistory');history.replaceChildren();
+      for(const event of data.events.slice().reverse().slice(0,100)){
+        const row=document.createElement('p');row.className='hint';row.textContent=(event.po_number||'PO')+' · '+event.quantity+' received · '+(event.reference||'No reference')+' · '+(event.created_at||'').slice(0,10)+(event.to_inventory?' · SKU '+event.sku:'');history.append(row);
+      }
+      if(!history.children.length)history.textContent='No receiving events yet.';
+      const stock=el('receiveStock');stock.replaceChildren();
+      const entries=Object.entries(data.received_stock_by_sku||{});
+      for(const [sku,qty] of entries){const row=document.createElement('p');row.textContent=sku+': '+qty+' received';stock.append(row);}
+      if(!entries.length)stock.textContent='No received stock recorded yet.';
+    }
+    el('receiveSearch').oninput=draw;await reload();
+  }
   async function renderPdsPurchaseOrders(host) {
-    host.innerHTML = '<div class="card"><h3>PDS Purchase Orders</h3><p class="hint">PDS purchase orders are stored separately from all existing estimates and invoices. PO numbers start at PO-00001.</p><button class="btn btn-orange" id="pdsPoNew">+ New Purchase Order</button><div id="pdsPoRecords" style="margin-top:14px"></div></div>';
+    host.innerHTML = '<div class="card"><h3>PDS Purchase Orders</h3><p class="hint">PDS purchase orders are stored separately from all existing estimates and invoices. PO numbers start at PO-00001.</p><button class="btn" id="pdsPoReceiving">Receiving & Inventory</button> <button class="btn btn-orange" id="pdsPoNew">+ New Purchase Order</button><div id="pdsPoRecords" style="margin-top:14px"></div></div>';
     const list = host.querySelector('#pdsPoRecords');
     const fields = [['vendor','Supplier'],['supplier_id','Supplier Profile ID'],['vendor_contact','Vendor Contact'],['work_order','Job / Work Order #'],['customer','Customer'],['date','PO Date'],['needed_by','Needed By'],['description','Items / Services Description'],['item_type','Type (Materials / Services)'],['quantity','Quantity'],['unit_cost','Unit Cost'],['tax','Tax'],['shipping','Shipping'],['total','Total'],['status','Status'],['received_status','Receiving Status'],['payment_status','Payment Status'],['invoice_reference','Vendor Invoice #'],['notes','Notes']];
     const escapeText = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -9939,6 +9991,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         });
       }catch(err){list.textContent=err.message;}
     };
+    host.querySelector('#pdsPoReceiving').onclick=()=>renderPoReceiving('pds');
     host.querySelector('#pdsPoNew').onclick=()=>showEditor(null);
     await reload();
   }

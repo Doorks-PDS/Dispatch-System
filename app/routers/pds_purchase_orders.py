@@ -178,3 +178,115 @@ def delete_supplier(supplier_id:str,request:Request):
                 raise HTTPException(409,'Supplier has linked purchase orders; mark inactive instead')
         _write(path,[x for x in items if x.get('id')!=supplier_id])
     return {'ok':True}
+
+# Phase 2R-G: append-only receiving journal, isolated by workspace.
+# Existing PO/parts/inventory/accounting files are not modified.
+from pydantic import Field
+from math import isfinite
+
+class ReceiveInput(BaseModel):
+    quantity: float = Field(gt=0, le=1000000)
+    reference: str = ""
+    notes: str = ""
+    sku: str = ""
+    to_inventory: bool = False
+    request_id: str = ""
+
+def _receive_context(request, platform):
+    if platform == "pds":
+        _guard(request)
+        orders_path, _ = _paths(request)
+        return orders_path
+    if platform not in ("doorks", "sdc"):
+        raise HTTPException(404, "Unknown workspace")
+    if not getattr(request.state, "auth_user", None):
+        raise HTTPException(401, "Login required")
+    if getattr(request.state, "auth_role", None) != "office_admin":
+        raise HTTPException(403, "Office Admin only")
+    if request.session.get("active_platform") != platform:
+        raise HTTPException(403, "Switch workspace first")
+    return Path(request.app.state.data_dir)/"business_workspaces"/platform/"purchase_orders.json"
+
+def _receive_journal(request, platform):
+    path = Path(request.app.state.data_dir)/"po_receiving"/platform
+    path.mkdir(parents=True, exist_ok=True)
+    return path/"events.json"
+
+def _receive_events(request, platform):
+    events=_read(_receive_journal(request,platform),[])
+    if not isinstance(events,list):raise HTTPException(500,"Invalid receiving journal")
+    return events
+
+def _receive_qty(po):
+    try: quantity=float(po.get("quantity") or 0)
+    except (ValueError,TypeError):raise HTTPException(409,"PO quantity must be numeric before receiving")
+    if not isfinite(quantity) or quantity<=0:
+        raise HTTPException(409,"PO must have a positive ordered quantity")
+    return quantity
+
+@router.get("/receiving/{platform}")
+def list_receiving(platform:str,request:Request):
+    orders_path=_receive_context(request,platform)
+    with _lock:
+        orders=_read(orders_path,[])
+        events=_receive_events(request,platform)
+        totals={}
+        for event in events:
+            key=event["po_id"]
+            totals[key]=totals.get(key,0)+float(event["quantity"])
+        result=[]
+        for po in orders:
+            try:ordered=_receive_qty(po)
+            except HTTPException:ordered=0
+            received=round(totals.get(str(po.get("id")),0),4)
+            result.append({"po_id":po.get("id"),"po_number":po.get("po_number"),
+                           "supplier":po.get("vendor") or po.get("supplier"),
+                           "description":po.get("description"),"ordered":ordered,
+                           "received":received,"outstanding":max(0,round(ordered-received,4)),
+                           "receiving_status":"Received" if ordered>0 and received>=ordered else
+                           "Partially Received" if received>0 else "Not Received"})
+        inventory={}
+        for event in events:
+            if not event.get("to_inventory"):continue
+            sku=event.get("sku","")
+            inventory[sku]=round(inventory.get(sku,0)+float(event["quantity"]),4)
+        return {"orders":result,"events":events,"received_stock_by_sku":inventory,
+                "note":"Received stock is a receiving-journal total, not live on-hand inventory."}
+
+@router.post("/receiving/{platform}/{po_id}")
+def receive_po(platform:str,po_id:str,payload:ReceiveInput,request:Request):
+    orders_path=_receive_context(request,platform)
+    if not isfinite(payload.quantity):raise HTTPException(400,"Invalid quantity")
+    if payload.to_inventory and not payload.sku.strip():
+        raise HTTPException(400,"SKU required when adding to received stock")
+    for value in (payload.reference,payload.notes,payload.sku,payload.request_id):
+        if len(value)>500:raise HTTPException(400,"Field too long")
+    if not payload.request_id.strip():
+        raise HTTPException(400,"Request ID required to prevent duplicate receipts")
+    with _lock:
+        orders=_read(orders_path,[])
+        po=next((x for x in orders if str(x.get("id"))==po_id),None)
+        if not po:raise HTTPException(404,"Purchase order not found")
+        if str(po.get("status","")).strip().lower() in ("cancelled","canceled"):
+            raise HTTPException(409,"Cannot receive cancelled PO")
+        ordered=_receive_qty(po)
+        events=_receive_events(request,platform)
+        existing=next((x for x in events if x.get("request_id")==payload.request_id),None)
+        if existing:
+            if existing["po_id"]!=po_id:raise HTTPException(409,"Request ID already used")
+            return {"event":existing,"duplicate":True}
+        received=sum(float(x["quantity"]) for x in events if x["po_id"]==po_id)
+        if received+payload.quantity>ordered+0.000001:
+            raise HTTPException(409,f"Receipt exceeds outstanding quantity ({max(0,ordered-received):g})")
+        event={"id":uuid.uuid4().hex,"request_id":payload.request_id,
+               "po_id":po_id,"po_number":po.get("po_number",""),
+               "supplier":po.get("vendor") or po.get("supplier") or "",
+               "quantity":payload.quantity,"reference":payload.reference.strip(),
+               "notes":payload.notes.strip(),"sku":payload.sku.strip(),
+               "to_inventory":payload.to_inventory,
+               "created_at":datetime.now(timezone.utc).isoformat(),
+               "created_by":str(getattr(request.state,"auth_user",""))[:200]}
+        events.append(event)
+        _write(_receive_journal(request,platform),events)
+        return {"event":event,"received":round(received+payload.quantity,4),
+                "outstanding":max(0,round(ordered-received-payload.quantity,4))}
