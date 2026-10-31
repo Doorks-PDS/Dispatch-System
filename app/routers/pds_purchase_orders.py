@@ -355,3 +355,21 @@ async def ai_po_draft(platform:str,request:Request,file:Optional[UploadFile]=Fil
         return {'fields':clean_fields,'line_items':clean_lines,'draft_only':True}
     except (httpx.HTTPError,ValueError,TypeError,KeyError,json.JSONDecodeError):
         raise HTTPException(502,'AI could not reliably extract the PO; please enter manually')
+
+# Phase 2R-I: deletion through a guarded route shared by all three workspaces.
+# Receiving events are append-only and block removal of the source PO.
+@router.delete('/manage/{platform}/{po_id}')
+def delete_purchase_order(platform:str,po_id:str,request:Request):
+    path=_receive_context(request,platform)
+    with _lock:
+        events=_receive_events(request,platform)
+        if any(str(e.get('po_id'))==po_id for e in events):
+            raise HTTPException(409,'Purchase order has receiving history; cancellation is required instead of deletion')
+        orders=_read(path,[])
+        if not isinstance(orders,list):raise HTTPException(500,'Invalid PO store')
+        target=next((x for x in orders if str(x.get('id'))==po_id),None)
+        if target is None:raise HTTPException(404,'Purchase order not found')
+        remaining=[x for x in orders if str(x.get('id'))!=po_id]
+        _write(path,remaining)
+        # Do not decrement PO counters; identifiers must never be reused.
+        return {'ok':True,'po_number':target.get('po_number')}
