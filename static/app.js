@@ -513,12 +513,12 @@
       {label:'Receipts & Expenses',kind:'expenses',icon:'🧾',description:'Record business purchases, expenses and receipt details.'},
       {label:'Accounts Receivable',kind:'receivables',icon:'💳',description:'Review customer balances and payments due.'},
       {label:'Accounts Payable',kind:'__payable',icon:'💸',description:'Review purchase orders and supplier payment status.'},
-      {label:'Inventory & Receiving',kind:'inventory',icon:'📦',description:'View materials, stock and receiving records.'},
+      {label:'Inventory & Receiving',kind:'__receiving',icon:'📦',description:'Receive purchase orders and review stock and receiving history.'},
       {label:'Purchase Orders',kind:'purchase_orders',icon:'📋',description:'Manage supplier purchase orders and statuses.'},
       {label:'Vendors',kind:'vendors',icon:'🏢',description:'Access supplier information and contact records.'}
     ];
     el('sdcQuickNew').onclick=()=>renderAccountingQuickMenu('sdc','sdcQuickOptions');
-    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():e.kind==='__payable'?renderAccountsPayable('sdc'):renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
+    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():e.kind==='__payable'?renderAccountsPayable('sdc'):e.kind==='__receiving'?renderPoReceiving('sdc',renderSdcAccounting):renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
   }
   function showAccountingMetrics(platform,title,entries,back){
     clearWorkspaceActions();setWorkspace(title);
@@ -560,7 +560,8 @@
       {icon:'📋',label:'Estimates',description:'Review saved estimates and create a new estimate.',open:()=>docs('Estimate')},
       {icon:'🧾',label:'Invoices',description:'Review saved invoices and create a new invoice.',open:()=>docs('Invoice')},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
-      ...(platform==='doorks'?[{icon:'🔩',label:'Parts List',description:'Doorks parts catalog and inventory. PDS records remain separate.',open:()=>openKind('inventory')}]:[]),
+      {icon:'📥',label:'Inventory & Receiving',description:'Receive purchase orders, review received stock and receiving history.',open:()=>renderPoReceiving(platform,()=>renderBusinessHub(platform))},
+      ...(platform==='doorks'?[{icon:'🔩',label:'Parts List',description:'Doorks part master records; stock receiving is tracked separately.',open:()=>openKind('inventory')}]:[]),
       {icon:'🏢',label:platform==='sdc'?'Suppliers':'Vendors',description:platform==='sdc'?'Supplier profiles and contacts.':'Vendor profiles and contacts.',open:()=>openKind('vendors')},
       {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>openKind('customers')}
     ]);
@@ -749,7 +750,7 @@
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
     if(kind==='purchase_orders'){
       const action=document.createElement('button');action.type='button';action.className='btn';action.textContent='Receiving & Inventory';
-      action.onclick=()=>renderPoReceiving(platform);
+      action.onclick=()=>renderPoReceiving(platform,()=>renderBusinessCollection(platform,'purchase_orders'));
       el('businessNew').parentElement.append(action);
     }
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
@@ -888,7 +889,7 @@
       {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
       {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
       {icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.',open:()=>renderAccountsPayable('doorks')},
-      {icon:'📦',label:'Inventory & Intake',description:'Review received and outstanding materials.',open:()=>renderDoorksAccounting('inventory')},
+      {icon:'📦',label:'Inventory & Receiving',description:'Receive purchase orders and review received stock.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)},
       {icon:'🧾',label:'Receipts',description:'Review expense and receipt entries.',open:()=>renderDoorksAccounting('receipts')},
       {icon:'🏦',label:'Statements',description:'Review financial statement records.',open:()=>renderDoorksAccounting('statements')}
     ]);
@@ -6266,7 +6267,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'}
     ];
     if(isHub){
-      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():x.id==='payables'?renderAccountsPayable('pds'):renderAccountingView(x.id)})));
+      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():x.id==='payables'?renderAccountsPayable('pds'):x.id==='stock'?renderPoReceiving('pds',()=>renderAccountingView('hub')):renderAccountingView(x.id)})));
     }else{
       workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
       workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('hub');
@@ -6284,6 +6285,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const choices=document.createElement('div');choices.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:12px';
         for(const [label,target] of [['Receipt / Packing Slip','receipts'],['Inventory / Receiving','stock'],['Statement','statements'],['Accounts Receivable','receivables']]){
           const b=document.createElement('button');b.className='btn';b.type='button';b.textContent=label;b.onclick=async()=>{
+            if(target==='stock'){renderPoReceiving('pds',()=>renderAccountingView('hub'));return;}
             await renderAccountingView(target);
             const root=workspaceBody;
             const action=[...root.querySelectorAll('button')].find(node=>{
@@ -10037,11 +10039,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     renderActiveTab();
   }
  
-  async function renderPoReceiving(platform){
+  async function renderPoReceiving(platform,backAction=null){
     if(platform!=='pds'&&activePlatform!==platform)return;
-    clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — PO Receiving & Inventory');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>PO Receiving & Inventory</h2><p class="hint">Record partial deliveries and packing-slip references. Stock shown here is received stock only, not available inventory.</p></div><button class="btn" id="receiveBack">← Business Hub</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Received Stock by SKU</h3><div id="receiveStock" class="hint"></div></div>';
-    el('receiveBack').onclick=()=>platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
+    clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Inventory & Receiving');
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Received totals are not yet net available stock or accounting valuation.</p></div><button class="btn" id="receiveBack">← Business Hub</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Received Stock by SKU</h3><div id="receiveStock" class="hint"></div></div>';
+    el('receiveBack').onclick=()=>backAction?backAction():platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
     let data={orders:[],events:[],received_stock_by_sku:{}};
     async function reload(){
       try{data=await fetchJSON('/pds-purchase-orders/receiving/'+platform);draw();}
@@ -10180,7 +10182,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     q('upoTax').oninput=total;q('upoShipping').oninput=total;q('upoAddLine').onclick=()=>addLine();
     const close=()=>{q('upoEditor').hidden=true;q('upoDetails').hidden=true;};q('upoClose').onclick=close;q('upoCancel').onclick=close;q('upoDetailsClose').onclick=close;
     q('upoBack').onclick=()=>backAction?backAction():isPds?renderEstimatePage():renderBusinessHub(platform);
-    q('upoReceiving').onclick=()=>renderPoReceiving(platform);
+    el('upoReceiving').onclick=()=>renderPoReceiving(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));
     const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
       if(!item){form.elements.ship_to.value=company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');}
