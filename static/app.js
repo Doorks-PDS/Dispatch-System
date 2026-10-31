@@ -607,7 +607,7 @@
           <label>Customer Address<textarea class="input" name="address" rows="2"></textarea></label>
           <label>Work Order / Job #<input class="input" name="work_order_number"></label>
           <label>PO #<input class="input" name="po_number"></label>
-          <label>Status<select class="input" name="status" id="wedStatus"></select></label><label id="wedPaidWrap" hidden>Amount Paid<input class="input" name="paid" type="number" min="0" step=".01" value="0"></label><label>Prepared By<input class="input" name="prepared_by" placeholder="Employee name"></label>
+          <label>Status<select class="input" name="status" id="wedStatus"></select></label><label id="wedPaidWrap" hidden>Manually Recorded Payments (not processor-synced)<input class="input" name="paid" type="number" min="0" step=".01" value="0"></label><label>Prepared By<input class="input" name="prepared_by" placeholder="Employee name"></label>
           <label>Sales Tax %<input class="input" name="tax_rate" type="number" step=".01" min="0" value="7.75"></label>
         </div>
         <div><h3>Line Items</h3><div id="wedCatalogHint" class="hint"></div><div style="overflow-x:auto"><table style="width:100%;min-width:760px;border-collapse:separate;border-spacing:6px"><thead><tr><th>Item / SKU</th><th>Description</th><th>Qty</th><th>Rate</th><th>Taxable</th><th>Amount</th><th></th></tr></thead><tbody id="wedLines"></tbody></table></div><button class="btn" id="wedAdd" type="button">+ Add Line Item</button></div>
@@ -615,8 +615,27 @@
         <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
         <p id="wedMessage" role="status"></p>
       </form></section>
-      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
+      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedConvert" hidden>Create Invoice from Estimate</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
       </div>`;
+    // Phase 2R-K: scoped document workspace styling; PDS views are untouched.
+    const kStyle=document.createElement('style');
+    kStyle.textContent=`
+      .wed-shell .card{border:1px solid #dce3ed;border-radius:18px;box-shadow:0 6px 24px rgba(20,35,55,.045);padding:22px;background:#fff}
+      .wed-shell .input{min-height:43px;border:1px solid #cbd5e1;border-radius:10px;padding:9px 12px;box-sizing:border-box;width:100%;font:inherit;background:#fff;color:#162033}
+      .wed-shell label{display:grid;gap:7px;font-weight:650;font-size:13px;color:#28364c}
+      .wed-shell label .input{font-weight:450}
+      .wed-shell .input:focus{outline:2px solid #6aa6d9;outline-offset:1px}
+      .wed-shell #wedLines td{vertical-align:top;padding:4px}
+      .wed-shell #wedLines tr{background:#f8fafc}
+      .wed-shell #wedLines tr td:first-child{border-radius:10px 0 0 10px}
+      .wed-shell #wedLines tr td:last-child{border-radius:0 10px 10px 0}
+      .wed-shell #wedDetails #wedPreview{border:1px solid #e2e8f0;border-radius:14px;overflow:auto;background:#fff}
+      .wed-shell #wedForm h3{margin:0 0 9px}
+      .wed-shell #wedForm>div{min-width:0}
+      @media(max-width:700px){.wed-shell .card{padding:14px}.wed-shell #wedLines{font-size:12px}}
+    `;
+    workspaceBody.prepend(kStyle);
+    workspaceBody.querySelector('div').classList.add('wed-shell');
     const q=id=>el(id),form=q('wedForm'),fmt=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
     const escapeHtml=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
     let records=[],editing=null,viewing=null,customers=[],catalog=[];
@@ -665,7 +684,7 @@
       const itemField=tr.querySelector('[data-k="item"]');
       itemField.addEventListener('change',()=>{
         const match=catalog.find(x=>[x.sku,x.part_number,x.name,x.description].some(v=>String(v||'').toLowerCase()===itemField.value.toLowerCase()));
-        if(match){tr.querySelector('[data-k="description"]').value=match.description||match.name||'';tr.querySelector('[data-k="rate"]').value=match.price??match.unit_cost??'';calculate();}
+        if(match){tr.querySelector('[data-k="description"]').value=match.description||match.name||'';tr.querySelector('[data-k="rate"]').value=match.price??match.sale_price??'';calculate();}
       });
       tr.addEventListener('input',()=>{tr.querySelector('[data-k="amount"]').textContent=fmt(Number(tr.querySelector('[data-k="quantity"]').value)*Number(tr.querySelector('[data-k="rate"]').value));calculate();});
       q('wedLines').append(tr);tr.querySelector('[data-k="amount"]').textContent=fmt((Number(item.quantity)||0)*(Number(item.rate)||0));calculate();
@@ -678,7 +697,7 @@
     function open(item=null,type='Estimate'){
       editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();q('wedLines').replaceChildren();
       const data=item||{};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','tax_rate','notes','paid','prepared_by'])if(data[key]!=null&&f(key))f(key).value=data[key];
-      if(!item){f('document_type').value=type;f('date').value=new Date().toISOString().slice(0,10);f('document_number').value='';} updateStatusOptions(f('document_type').value,data.status||'Draft');f('document_type').disabled=!!filterType;
+      if(!item){f('document_type').value=type;f('date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);f('document_number').value='';} updateStatusOptions(f('document_type').value,data.status||'Draft');f('document_type').disabled=!!filterType;
       let lines=[];try{lines=Array.isArray(data.line_items)?data.line_items:JSON.parse(data.line_items||'[]');}catch{}
       if(!lines.length&&data.description)lines=[{description:data.description,quantity:1,rate:Number(data.amount)||0,taxable:false}];
       for(const line of lines.length?lines:[{}])addLine(line);
@@ -692,16 +711,32 @@
       let lines=[];try{lines=Array.isArray(item.line_items)?item.line_items:JSON.parse(item.line_items||'[]');}catch{}
       if(!lines.length&&item.description)lines=[{description:item.description,quantity:1,rate:Number(item.amount)||0,taxable:false}];
       const subtotal=lines.reduce((a,l)=>a+(Number(l.quantity)||0)*(Number(l.rate)||0),0),tax=Number(item.tax_amount)||0;
-      return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:25px;background:white"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(company)}</h2><p>41080 Saddleback Dr<br>Aguanga, CA 92536</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><p><b>Customer:</b> ${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}<br><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#f0f2f6"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Tax: ${fmt(tax)}</p><h2>Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
+      return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:34px;background:white;line-height:1.5"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(company)}</h2><p>41080 Saddleback Dr<br>Aguanga, CA 92536</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><p><b>Customer:</b> ${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}<br><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#eaf0f6;color:#17263a"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Tax: ${fmt(tax)}</p><h2 style="border-top:2px solid #263a50;padding-top:12px">Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
     }
-    function view(item){viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    function view(item){q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    q('wedConvert').onclick=()=>{
+      if(!viewing||viewing.document_type!=='Estimate')return;
+      const source=viewing;
+      open({...source,id:undefined,document_type:'Invoice',document_number:'',status:'Draft',paid:0},'Invoice');
+      // Never update the original estimate; save creates a new invoice.
+      editing=null;
+      f('document_type').disabled=true;
+      f('document_type').value='Invoice';
+      updateStatusOptions('Invoice','Draft');
+      f('document_number').value='';
+      q('wedEditorTitle').textContent='New Invoice from '+(source.document_number||'Estimate');
+      q('wedMessage').textContent='Review the details and save to create a separate invoice. The estimate stays unchanged.';
+    };
     q('wedEdit').onclick=()=>viewing&&open(viewing);
     q('wedDetailClose').onclick=()=>{q('wedDetails').hidden=true;viewing=null;};
     q('wedPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print.');return;}w.document.write('<!doctype html><html><head><title>'+escapeHtml(viewing.document_number)+'</title><style>@page{size:letter;margin:.5in}body{margin:0}tr{break-inside:avoid}</style></head><body>'+previewHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
     function draw(){const search=q('wedSearch').value.toLowerCase(),filter=q('wedFilter').value;const host=q('wedList');host.replaceChildren();const matching=records.filter(r=>(!filter||String(r.document_type||'').toLowerCase()===filter.toLowerCase())&&(!search||[r.customer,r.document_number,r.work_order_number,r.status].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${matching.length} ${filter?filter.toLowerCase()+'s':'documents'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:15px;margin-top:10px';const heading=document.createElement('strong');heading.textContent=`${item.document_type||'Document'} ${item.document_number||''} · ${item.customer||''}`;const meta=document.createElement('p');meta.className='hint';meta.textContent=`${item.date||''} · ${fmt(item.amount)} · ${item.status||''}${item.document_type==='Invoice'?' · Balance '+fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0))):''}`;const button=document.createElement('button');button.className='btn';button.textContent='View Document';button.onclick=()=>view(item);const edit=document.createElement('button');edit.className='btn';edit.style.marginLeft='8px';edit.textContent='Edit';edit.onclick=()=>open(item);card.append(heading,meta,button,edit);host.append(card);}}
     q('wedFilter').onchange=draw;q('wedSearch').oninput=draw;
     async function refresh(){const result=await fetchJSON(endpoint);records=result.items||[];draw();}
-    form.onsubmit=async e=>{e.preventDefault();const msg=q('wedMessage');const lines=getLines();if(!lines.some(l=>l.description||l.item)){msg.textContent='Add at least one line item.';return;}const totals=calculate();const data={};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','tax_rate','notes','paid','prepared_by'])data[key]=f(key).value;data.line_items=JSON.stringify(lines);data.amount=totals.total;data.status=f('status').value;data.paid=Number(f('paid').value)||0;data.tax_amount=totals.tax;data.description=lines.map(l=>l.description).filter(Boolean).join('; ');if(editing&&records.some(r=>r.id!==editing.id&&r.document_number===data.document_number&&r.document_type===data.document_type)){msg.textContent='That document number already exists in this workspace.';return;}const button=form.querySelector('[type="submit"]');button.disabled=true;msg.textContent='Saving…';try{const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});await refresh();q('wedEditor').hidden=true;const saved=response.item||records.find(r=>r.document_number===data.document_number&&r.document_type===data.document_type);if(saved)view(saved);}catch(err){msg.textContent='Save failed: '+(err.message||err);}finally{button.disabled=false;}};
+    form.onsubmit=async e=>{e.preventDefault();const msg=q('wedMessage');const lines=getLines();if(!lines.some(l=>l.description||l.item)){msg.textContent='Add at least one line item.';return;}const totals=calculate();
+      if(lines.some(l=>l.quantity<0||l.rate<0)||Number(f('tax_rate').value)<0){msg.textContent='Quantity, rate and tax cannot be negative.';return;}
+      if(f('document_type').value==='Invoice'&&Number(f('paid').value)>totals.total+.005){msg.textContent='Recorded payments cannot exceed the invoice total.';return;}
+      const data={};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','tax_rate','notes','paid','prepared_by'])data[key]=f(key).value;data.line_items=JSON.stringify(lines);data.amount=totals.total;data.status=f('status').value;data.paid=Math.max(0,Number(f('paid').value)||0);data.tax_amount=totals.tax;data.description=lines.map(l=>l.description).filter(Boolean).join('; ');if(editing&&records.some(r=>r.id!==editing.id&&r.document_number===data.document_number&&r.document_type===data.document_type)){msg.textContent='That document number already exists in this workspace.';return;}const button=form.querySelector('[type="submit"]');button.disabled=true;msg.textContent='Saving…';try{const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});await refresh();q('wedEditor').hidden=true;const saved=response.item||records.find(r=>r.document_number===data.document_number&&r.document_type===data.document_type);if(saved)view(saved);}catch(err){msg.textContent='Save failed: '+(err.message||err);}finally{button.disabled=false;}};
     try{await refresh();if(openNew)open(null,filterType||'Estimate');}catch(err){q('wedList').textContent='Unable to load documents: '+(err.message||err);}
   }
 
