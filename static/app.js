@@ -9950,10 +9950,10 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const advanced=document.createElement('details');advanced.style.cssText='margin-top:14px;border:1px solid #d9dee7;border-radius:12px;padding:12px';
     advanced.innerHTML='<summary style="cursor:pointer;font-weight:700">Additional Details — SRO, salesperson, status, payment & notes</summary>';
     const advancedGrid=document.createElement('div');advancedGrid.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px';advanced.append(advancedGrid);
-    grid.after(advanced);
     let orders=[],suppliers=[],editing=null,viewing=null;
     const form=q('upoForm');
     const grid=q('upoFields');
+    grid.after(advanced);
     for(const [key,title] of fields){const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';label.textContent=title;
       const input=['notes','vendor_address','ship_to'].includes(key)?document.createElement('textarea'):document.createElement(key==='status'?'select':'input');
       input.name=key;input.className='input';if(key==='date'||key==='expected_date')input.type='date';if(input.tagName==='TEXTAREA')input.rows=2;
