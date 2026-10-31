@@ -584,6 +584,7 @@
   }
   async function renderBusinessCollection(platform,kind,openNew=false,backAction=null) {
     if(activePlatform!==platform)return;
+    if(kind==='purchase_orders')return renderUnifiedPurchaseOrders(platform,openNew,backAction);
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
@@ -9924,76 +9925,125 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     el('receiveSearch').oninput=draw;await reload();
   }
   async function renderPdsPurchaseOrders(host) {
-    host.innerHTML = '<div class="card"><h3>PDS Purchase Orders</h3><p class="hint">PDS purchase orders are stored separately from all existing estimates and invoices. PO numbers start at PO-00001.</p><button class="btn" id="pdsPoReceiving">Receiving & Inventory</button> <button class="btn btn-orange" id="pdsPoNew">+ New Purchase Order</button><div id="pdsPoRecords" style="margin-top:14px"></div></div>';
-    const list = host.querySelector('#pdsPoRecords');
-    const fields = [['vendor','Supplier'],['supplier_id','Supplier Profile ID'],['vendor_contact','Vendor Contact'],['work_order','Job / Work Order #'],['customer','Customer'],['date','PO Date'],['needed_by','Needed By'],['description','Items / Services Description'],['item_type','Type (Materials / Services)'],['quantity','Quantity'],['unit_cost','Unit Cost'],['tax','Tax'],['shipping','Shipping'],['total','Total'],['status','Status'],['received_status','Receiving Status'],['payment_status','Payment Status'],['invoice_reference','Vendor Invoice #'],['notes','Notes']];
-    const escapeText = value => String(value == null ? '' : value).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const fetchOrders = async () => {
-      const res = await fetch('/pds-purchase-orders', {credentials:'same-origin'});
-      if (!res.ok) throw new Error('Unable to load purchase orders (' + res.status + ')');
-      return (await res.json()).items || [];
-    };
-    const showEditor = (record) => {
-      const old = host.querySelector('#pdsPoEditor'); if (old) old.remove();
-      const editor = document.createElement('div'); editor.id = 'pdsPoEditor'; editor.className = 'card'; editor.style.marginTop='12px';
-      const title = document.createElement('h3'); title.textContent=record ? 'Edit ' + record.po_number : 'New Purchase Order'; editor.appendChild(title);
-      const grid = document.createElement('div'); grid.className='grid2';
-      const controls = {};
-      fields.forEach(([key,label])=>{
-        const wrap=document.createElement('label'); wrap.style.display='block'; wrap.style.marginBottom='8px';
-        const caption=document.createElement('div'); caption.className='label'; caption.textContent=label;
-        const input=key==='description'||key==='notes' ? document.createElement('textarea') : document.createElement('input');
-        input.className='input'; input.value=record ? (record[key]??'') : (key==='status'?'Draft':'');
-        if(key==='date'||key==='needed_by')input.type='date';
-        if(['quantity','unit_cost','tax','shipping','total'].includes(key)){input.type='number';input.step='0.01';}
-        controls[key]=input;wrap.append(caption,input);grid.appendChild(wrap);
-      });
-      const supplierIdInput=controls.supplier_id;
-      const profileLabel=document.createElement('label');profileLabel.style.display='block';
-      const profileTitle=document.createElement('div');profileTitle.className='label';profileTitle.textContent='Select Saved Supplier';
-      const profileSelect=document.createElement('select');profileSelect.className='input';
-      const blank=document.createElement('option');blank.value='';blank.textContent='Manual entry / no profile';profileSelect.append(blank);
-      profileLabel.append(profileTitle,profileSelect);grid.insertBefore(profileLabel,grid.firstChild);
-      supplierIdInput.closest('label').style.display='none';
-      fetchJSON('/pds-purchase-orders/suppliers').then(result=>{
-        for(const supplier of result.items||[]){
-          const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name;profileSelect.append(option);
-        }
-        profileSelect.value=record?.supplier_id||'';
-      }).catch(console.error);
-      profileSelect.onchange=()=>{
-        supplierIdInput.value=profileSelect.value;
-        if(profileSelect.value)controls.vendor.value=profileSelect.selectedOptions[0].textContent;
-      };
-      editor.appendChild(grid);
-      const save=document.createElement('button');save.className='btn btn-orange';save.textContent=record?'Save Changes':'Create Purchase Order';
-      const cancel=document.createElement('button');cancel.className='btn';cancel.textContent='Cancel';cancel.style.marginLeft='8px';cancel.onclick=()=>editor.remove();
-      save.onclick=async()=>{
-        save.disabled=true;
-        try {
-          const data=Object.fromEntries(fields.map(([key])=>[key,controls[key].value]));
-          const res=await fetch('/pds-purchase-orders'+(record?'/'+encodeURIComponent(record.id):''),{method:record?'PATCH':'POST',headers:{'Content-Type':'application/json'},credentials:'same-origin',body:JSON.stringify({data})});
-          if(!res.ok)throw new Error((await res.text()).slice(0,250));
-          editor.remove();await reload();
-        }catch(err){alert('Unable to save PO: '+err.message);}finally{save.disabled=false;}
-      };
-      editor.append(save,cancel);list.before(editor);
-    };
-    const reload=async()=>{
-      try{
-        const orders=await fetchOrders();list.innerHTML='';
-        if(!orders.length){list.textContent='No PDS purchase orders yet.';return;}
-        orders.slice().reverse().forEach(order=>{
-          const row=document.createElement('div');row.className='card';row.style.marginBottom='8px';
-          row.innerHTML='<strong>'+escapeText(order.po_number)+'</strong> — '+escapeText(order.vendor)+' <span class="hint">'+escapeText(order.status||'Draft')+' · '+escapeText(order.work_order||'')+'</span>';
-          const edit=document.createElement('button');edit.className='btn';edit.textContent='Open / Edit';edit.style.marginLeft='12px';edit.onclick=()=>showEditor(order);
-          row.appendChild(edit);list.appendChild(row);
+    return renderUnifiedPurchaseOrders('pds',false,()=>renderEstimatePage(),host);
+  }
+
+  async function renderUnifiedPurchaseOrders(platform,openNew=false,backAction=null,container=null){
+    if(platform!=='pds'&&activePlatform!==platform)return;
+    const isPds=platform==='pds',company=platform==='pds'?'Priority Door Systems':platform==='sdc'?'Saddleback Design Co.':'Doorks';
+    const address=isPds?'836 W. Washington Ave.\nEscondido, CA 92025':'41080 Saddleback Dr\nAguanga, CA 92536';
+    const endpoint=isPds?'/pds-purchase-orders':'/workspaces/'+platform+'/purchase_orders';
+    const supplierEndpoint=isPds?'/pds-purchase-orders/suppliers':'/workspaces/'+platform+'/vendors';
+    if(!container){clearWorkspaceActions();setWorkspace(company+' — Purchase Orders');container=workspaceBody;}
+    container.innerHTML=`<div style="max-width:1300px;margin:auto;display:grid;gap:14px">
+      <div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Purchase Orders</h2><p class="hint">Itemized PO documents and saved purchase-order tickets.</p></div><button class="btn" id="upoBack">← Business Hub</button></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px"><h3 style="margin:0">Saved Purchase Orders</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="upoReceiving">Receiving & Inventory</button><button class="btn btn-orange" id="upoNew">+ New Purchase Order</button></div></div><input class="input" id="upoSearch" placeholder="Search PO number, supplier, job, item or status…" style="width:100%;box-sizing:border-box;margin:12px 0"><div id="upoList">Loading…</div></div>
+      <section class="card" id="upoEditor" hidden><div style="display:flex;justify-content:space-between;align-items:center"><h3 id="upoEditorTitle">Purchase Order Generator</h3><button class="btn" id="upoClose">Close</button></div><p class="hint">Review all fields and line items before saving. PO number is assigned by the existing server counter.</p>
+      <div id="upoAi" style="border:1px solid #d9dee7;border-radius:12px;padding:12px;margin-bottom:14px"><details><summary style="cursor:pointer;font-weight:700">✨ AI Import — PDF or Image (review before saving)</summary><div style="display:grid;gap:8px;margin-top:10px"><input type="file" id="upoFile" accept=".pdf,.png,.jpg,.jpeg,.webp" class="input"><textarea id="upoPaste" class="input" rows="2" placeholder="Or paste PO text"></textarea><button class="btn" id="upoRead" type="button">Read Purchase Order</button><p class="hint" id="upoAiStatus"></p></div></details></div>
+      <form id="upoForm"><div id="upoFields" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(225px,1fr));gap:12px"></div><h3 style="margin-top:20px">Line Items</h3><div style="overflow-x:auto"><table style="width:100%;min-width:720px;border-collapse:collapse"><thead><tr><th>Item / Part #</th><th>Description</th><th>Qty</th><th>U/M</th><th>Rate</th><th>Amount</th><th></th></tr></thead><tbody id="upoLines"></tbody></table></div><button type="button" class="btn" id="upoAddLine" style="margin-top:10px">+ Add Line Item</button><div style="display:flex;justify-content:flex-end;gap:20px;margin:18px 0;font-weight:700"><span>Tax <input id="upoTax" class="input" type="number" step="0.01" min="0" value="0" style="width:110px"></span><span>Shipping <input id="upoShipping" class="input" type="number" step="0.01" min="0" value="0" style="width:110px"></span><span>Total: <span id="upoTotal">$0.00</span></span></div><div style="display:flex;gap:10px;flex-wrap:wrap"><button type="submit" class="btn btn-orange" id="upoSave">Save Purchase Order</button><button type="button" class="btn" id="upoCancel">Cancel</button></div><p id="upoMessage" role="status" class="hint"></p></form></section>
+      <section class="card" id="upoDetails" hidden><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 id="upoDetailsTitle">Purchase Order</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="upoPrint">Print / Save PDF</button><button class="btn" id="upoEdit">Edit</button><button class="btn" id="upoDetailsClose">Close</button></div></div><div id="upoPreview"></div></section></div>`;
+    const q=id=>container.querySelector('#'+id),money=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    const fields=[['vendor','Supplier / Vendor'],['vendor_address','Vendor Address'],['ship_to','Ship To Address'],['customer','Customer / Project'],['work_order_number','Job Number'],['sro_number','SRO #'],['salesperson','Salesperson'],['date','PO Date'],['expected_date','Needed By'],['status','Status'],['payment_status','Payment Status'],['notes','Notes']];
+    let orders=[],suppliers=[],editing=null,viewing=null;
+    const form=q('upoForm');
+    const grid=q('upoFields');
+    for(const [key,title] of fields){const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';label.textContent=title;
+      const input=['notes','vendor_address','ship_to'].includes(key)?document.createElement('textarea'):document.createElement(key==='status'?'select':'input');
+      input.name=key;input.className='input';if(key==='date'||key==='expected_date')input.type='date';if(input.tagName==='TEXTAREA')input.rows=2;
+      if(key==='status')for(const status of ['Draft','Submitted','Partially Received','Received','Billed','Paid','Cancelled']){const option=document.createElement('option');option.value=status;option.textContent=status;input.append(option);}
+      label.append(input);grid.append(label);
+    }
+    const selectLabel=document.createElement('label');selectLabel.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';selectLabel.textContent='Saved Supplier / Vendor Profile';
+    const supplierSelect=document.createElement('select');supplierSelect.className='input';supplierSelect.innerHTML='<option value="">Manual entry / no profile</option>';selectLabel.append(supplierSelect);grid.insertBefore(selectLabel,grid.firstChild);
+    supplierSelect.onchange=()=>{const supplier=suppliers.find(x=>x.id===supplierSelect.value);if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||'';}};
+    const parseLines=item=>{try{const parsed=JSON.parse(item.line_items||'[]');if(Array.isArray(parsed)&&parsed.length)return parsed;}catch(e){}
+      const qty=Number(item.quantity||0),rate=Number(item.unit_cost||0);
+      return [{item:item.item_type||'',description:item.description||'',quantity:qty||1,unit:item.unit||'',rate:rate||Number(item.amount||item.total||0)/(qty||1)}];};
+    // PDS catalog is a lookup only. PO rates are vendor purchase costs, not sales prices.
+    let pdsCatalog=[];
+    if(isPds){
+      try{pdsCatalog=await apiListParts({limit:500});}
+      catch(e){console.warn('PDS Parts List lookup unavailable',e);}
+      const hint=document.createElement('p');hint.className='hint';
+      hint.textContent='PDS Parts List: select an existing part to populate its number and description. Enter the supplier purchase cost separately; no inventory is changed when a PO is saved.';
+      q('upoAddLine').before(hint);
+    }
+    const addLine=(item={})=>{const tr=document.createElement('tr');for(const [key,width] of [['item','140px'],['description','260px'],['quantity','75px'],['unit','65px'],['rate','100px']]){
+      const td=document.createElement('td');td.style.padding='5px';const input=document.createElement(key==='description'?'textarea':'input');input.className='input';input.dataset.key=key;input.style.cssText='width:100%;min-width:'+width+';box-sizing:border-box';if(key==='quantity'||key==='rate'){input.type='number';input.step='any';input.min='0';}input.value=item[key]??(key==='quantity'?1:'');input.oninput=total;td.append(input);tr.append(td);}
+      if(isPds){
+        const first=tr.querySelector('[data-key="item"]');
+        const description=tr.querySelector('[data-key="description"]');
+        const holder=first.parentElement;
+        const lookup=document.createElement('select');lookup.className='input';
+        lookup.style.cssText='width:100%;min-width:140px;margin-bottom:5px';
+        const placeholder=document.createElement('option');placeholder.value='';placeholder.textContent='Find saved part…';lookup.append(placeholder);
+        pdsCatalog.forEach((part,index)=>{
+          const option=document.createElement('option');option.value=String(index);
+          option.textContent=[part.Item||part.part_number||part.item,part.Description||part.description].filter(Boolean).join(' — ').slice(0,120);
+          lookup.append(option);
         });
-      }catch(err){list.textContent=err.message;}
-    };
-    host.querySelector('#pdsPoReceiving').onclick=()=>renderPoReceiving('pds');
-    host.querySelector('#pdsPoNew').onclick=()=>showEditor(null);
-    await reload();
+        lookup.onchange=()=>{
+          if(lookup.value==='')return;
+          const part=pdsCatalog[Number(lookup.value)];if(!part)return;
+          first.value=part.Item||part.part_number||part.item||'';
+          description.value=part.Description||part.description||'';
+          // Do not copy retail sales price into vendor purchase rate.
+          tr.dataset.partId=String(part.id||'');
+          total();
+        };
+        holder.insertBefore(lookup,first);
+        if(item.part_id)tr.dataset.partId=String(item.part_id);
+      }
+      const amount=document.createElement('td');amount.style.cssText='padding:8px;text-align:right;white-space:nowrap';amount.className='upoAmount';tr.append(amount);
+      const remove=document.createElement('td');const btn=document.createElement('button');btn.type='button';btn.className='btn';btn.textContent='×';btn.setAttribute('aria-label','Remove line');btn.onclick=()=>{tr.remove();total();};remove.append(btn);tr.append(remove);q('upoLines').append(tr);total();};
+    const getLines=()=>[...q('upoLines').children].map(tr=>{const o={};tr.querySelectorAll('[data-key]').forEach(input=>o[input.dataset.key]=input.value);return {item:String(o.item||''),description:String(o.description||''),quantity:Number(o.quantity||0),unit:String(o.unit||''),rate:Number(o.rate||0),...(tr.dataset.partId?{part_id:tr.dataset.partId}:{})};});
+    const total=()=>{let sum=0;for(const tr of q('upoLines').children){const vals={};tr.querySelectorAll('[data-key]').forEach(x=>vals[x.dataset.key]=x.value);const amount=Number(vals.quantity||0)*Number(vals.rate||0);tr.querySelector('.upoAmount').textContent=money(amount);sum+=amount;}sum+=Number(q('upoTax').value||0)+Number(q('upoShipping').value||0);q('upoTotal').textContent=money(sum);return sum;};
+    q('upoTax').oninput=total;q('upoShipping').oninput=total;q('upoAddLine').onclick=()=>addLine();
+    const close=()=>{q('upoEditor').hidden=true;q('upoDetails').hidden=true;};q('upoClose').onclick=close;q('upoCancel').onclick=close;q('upoDetailsClose').onclick=close;
+    q('upoBack').onclick=()=>backAction?backAction():isPds?renderEstimatePage():renderBusinessHub(platform);
+    q('upoReceiving').onclick=()=>renderPoReceiving(platform);
+    const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
+      for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
+      if(!item){form.elements.ship_to.value=company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');}
+      supplierSelect.value=item?.supplier_id||item?.vendor_id||'';q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
+      (item?parseLines(item):[{}]).forEach(addLine);total();q('upoMessage').textContent='';q('upoEditor').scrollIntoView({behavior:'smooth',block:'start'});};
+    q('upoNew').onclick=()=>edit(null);
+    const docHtml=item=>{const lines=parseLines(item),sub=lines.reduce((a,x)=>a+Number(x.quantity||0)*Number(x.rate||0),0),tax=Number(item.tax||0),shipping=Number(item.shipping||0),sum=sub+tax+shipping;
+      const vendorAddress=item.vendor_address||suppliers.find(x=>x.id===(item.supplier_id||item.vendor_id))?.address||'';
+      const header=`<div style="display:flex;justify-content:space-between;gap:30px;align-items:flex-start"><div><h2 style="margin:0 0 8px">${esc(company)}</h2><div style="white-space:pre-line">${esc(address)}</div>${isPds?'<div>760-233-5037 · www.prioritydoors.com</div>':''}</div><div style="text-align:right"><h1 style="margin:0 0 12px">Purchase Order</h1><b>Date:</b> ${esc(item.date||'')}<br><b>P.O. No.:</b> ${esc(item.po_number||'Draft')}</div></div>`;
+      const blocks=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:28px 0"><div style="border:1px solid #9ca3af;min-height:110px;padding:12px"><b>Vendor</b><hr>${esc(item.vendor||'')}<div style="white-space:pre-line">${esc(vendorAddress)}</div></div><div style="border:1px solid #9ca3af;min-height:110px;padding:12px"><b>Ship To</b><hr><div style="white-space:pre-line">${esc(item.ship_to||company+'\n'+address)}</div></div></div>`;
+      const refs=`<div style="display:flex;justify-content:flex-end;margin:10px 0 18px"><table style="border-collapse:collapse"><tr>${['Salesperson','Job Number','SRO #'].map(x=>'<th style="border:1px solid #9ca3af;padding:7px">'+x+'</th>').join('')}</tr><tr>${[item.salesperson,item.work_order_number||item.work_order,item.sro_number].map(x=>'<td style="border:1px solid #9ca3af;padding:7px">'+esc(x)+'</td>').join('')}</tr></table></div>`;
+      const rows=lines.map((x,i)=>`<tr style="background:${i%2?'#f2f2f2':'white'}"><td>${esc(x.item)}</td><td>${esc(x.description)}</td><td style="text-align:right">${esc(x.quantity)}</td><td>${esc(x.unit)}</td><td style="text-align:right">${money(x.rate)}</td><td style="text-align:right">${money(Number(x.quantity)*Number(x.rate))}</td></tr>`).join('');
+      const table=`<table style="border-collapse:collapse;width:100%"><thead><tr style="background:#e5e7eb">${['Item','Description','Qty','U/M','Rate','Amount'].map(x=>'<th style="border:1px solid #aaa;padding:7px;text-align:left">'+x+'</th>').join('')}</tr></thead><tbody>${rows}</tbody></table><div style="margin:14px 0 0 auto;max-width:310px"><div style="display:flex;justify-content:space-between"><span>Subtotal</span><b>${money(sub)}</b></div><div style="display:flex;justify-content:space-between"><span>Tax</span><b>${money(tax)}</b></div><div style="display:flex;justify-content:space-between"><span>Shipping</span><b>${money(shipping)}</b></div><hr><div style="display:flex;justify-content:space-between;font-size:20px"><b>Total</b><b>${money(sum)}</b></div></div>`;
+      return `<article style="background:white;color:#111;font:13px Arial,sans-serif;padding:24px;line-height:1.5">${header}${blocks}${refs}${table}${item.notes?'<p><b>Notes:</b> '+esc(item.notes)+'</p>':''}</article>`;};
+    const show=item=>{viewing=item;q('upoEditor').hidden=true;q('upoDetails').hidden=false;q('upoDetailsTitle').textContent=item.po_number||'Purchase Order';q('upoPreview').innerHTML=docHtml(item);q('upoDetails').scrollIntoView({behavior:'smooth',block:'start'});};
+    q('upoEdit').onclick=()=>{if(viewing)edit(viewing);};
+    q('upoPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print the PO.');return;}w.document.open();w.document.write('<!doctype html><html><head><title>'+esc(viewing.po_number||'Purchase Order')+'</title><style>@page{size:letter;margin:0.45in}body{margin:0}td{border:1px solid #aaa;padding:6px;vertical-align:top}table{page-break-inside:auto}tr{break-inside:avoid}</style></head><body>'+docHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
+    const draw=()=>{const qtext=q('upoSearch').value.trim().toLowerCase(),list=q('upoList');list.replaceChildren();const shown=orders.filter(x=>!qtext||[x.po_number,x.vendor,x.customer,x.work_order_number,x.work_order,x.description,x.line_items,x.status].some(v=>String(v||'').toLowerCase().includes(qtext)));
+      const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${shown.length} of ${orders.length} purchase orders`;list.append(count);
+      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status,item.customer,item.work_order_number||item.work_order].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],['Edit',()=>edit(item)]]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
+      if(!shown.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching purchase orders.';list.append(empty);}};
+    const reload=async()=>{try{const response=await fetchJSON(endpoint);orders=response.items||[];draw();}catch(e){q('upoList').textContent='Unable to load POs: '+(e.message||e);}};
+    q('upoSearch').oninput=draw;
+    form.onsubmit=async event=>{event.preventDefault();const button=q('upoSave');button.disabled=true;const msg=q('upoMessage');msg.textContent='Saving…';try{
+      const lines=getLines().filter(x=>x.item||x.description);if(!lines.length)throw Error('Add at least one line item');if(lines.some(x=>!Number.isFinite(x.quantity)||x.quantity<=0||!Number.isFinite(x.rate)||x.rate<0))throw Error('Each line needs a positive quantity and valid rate');
+      const raw=JSON.stringify(lines);if(raw.length>3900)throw Error('Too many line-item details for this PO record. Shorten descriptions or split the PO.');
+      const data=Object.fromEntries(fields.map(([key])=>[key,String(form.elements[key].value||'').trim()]));
+      data.line_items=raw;data.tax=String(q('upoTax').value||0);data.shipping=String(q('upoShipping').value||0);data.quantity=String(lines.reduce((n,x)=>n+x.quantity,0));data.unit_cost=String(lines.length===1?lines[0].rate:0);data.description=lines.map(x=>[x.item,x.description].filter(Boolean).join(' — ')).join('; ').slice(0,3900);
+      data.supplier_id=supplierSelect.value;data.vendor_id=supplierSelect.value;data.total=String(total());data.amount=data.total;
+      if(isPds){data.work_order=data.work_order_number;data.needed_by=data.expected_date;data.item_type=lines[0].item;delete data.vendor_id;delete data.work_order_number;delete data.expected_date;delete data.amount;}
+      else{delete data.supplier_id;delete data.sro_number;/* sro_number is retained as generic metadata below */data.sro_number=String(form.elements.sro_number.value||'');}
+      const result=await fetchJSON(endpoint+(editing?'/'+encodeURIComponent(editing.id):''),{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
+      const saved=result.item||result;msg.textContent='Purchase order saved.';await reload();const found=orders.find(x=>x.id===saved.id)||saved;show(found);
+    }catch(e){msg.textContent='Could not save PO: '+(e.message||e);}finally{button.disabled=false;}};
+    q('upoRead').onclick=async()=>{const file=q('upoFile').files?.[0],text=q('upoPaste').value,status=q('upoAiStatus');if(!file&&!text.trim()){status.textContent='Choose a document or paste text.';return;}
+      const btn=q('upoRead');btn.disabled=true;status.textContent='Reading…';try{const body=new FormData();if(file)body.append('file',file);body.append('email_text',text);const result=await fetchJSON('/pds-purchase-orders/ai-po/'+platform,{method:'POST',body});
+        const f=result.fields||{};for(const [key] of fields){if(f[key]!==undefined&&String(f[key]).trim())form.elements[key].value=String(f[key]);}if(f.work_order&&!f.work_order_number)form.elements.work_order_number.value=f.work_order;
+        if(Array.isArray(result.line_items)&&result.line_items.length){q('upoLines').replaceChildren();result.line_items.forEach(addLine);}if(f.tax!==undefined)q('upoTax').value=f.tax;if(f.shipping!==undefined)q('upoShipping').value=f.shipping;total();status.textContent='AI draft loaded. Verify every item, price, address and total before saving.';
+      }catch(e){status.textContent='AI import unavailable: '+(e.message||e);}finally{btn.disabled=false;}};
+    try{const result=await fetchJSON(supplierEndpoint);suppliers=result.items||[];for(const supplier of suppliers){const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name||'Unnamed';supplierSelect.append(option);}}catch(e){console.warn('Supplier lookup unavailable',e);}
+    await reload();if(openNew)edit(null);
   }
 
   function renderInvoicePage() {
