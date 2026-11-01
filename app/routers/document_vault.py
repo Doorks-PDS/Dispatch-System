@@ -13,7 +13,7 @@ from pydantic import BaseModel
 router=APIRouter(prefix='/document-vault',tags=['document-vault'])
 _lock=RLock()
 TYPES={'receipt','packing_slip','vendor_bill','statement','other'}
-MIME={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}
+MIME={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.xls':'application/vnd.ms-excel','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.csv':'text/csv','.txt':'text/plain','.rtf':'application/rtf','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.odt':'application/vnd.oasis.opendocument.text','.ods':'application/vnd.oasis.opendocument.spreadsheet'}
 MAX=12*1024*1024
 class TextPreview(BaseModel):
     document_type:str
@@ -67,7 +67,7 @@ async def create(platform:str,request:Request,document_type:str=Form(...),vendor
     raw=None;suffix='';original=''
     if file and file.filename:
         original=Path(file.filename).name[:180];suffix=Path(original).suffix.lower()
-        if suffix not in MIME:raise HTTPException(400,'PDF or image only')
+        if suffix not in MIME:raise HTTPException(400,'Unsupported document format')
         raw=await file.read(MAX+1)
         if not raw or len(raw)>MAX:raise HTTPException(400,'File must be 1 byte to 12 MB')
     if not raw and not notes.strip() and not parsed:raise HTTPException(400,'Upload a document or enter text')
