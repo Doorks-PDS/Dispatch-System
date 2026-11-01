@@ -475,16 +475,7 @@
     setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Accounts Payable');
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Accounts Payable</h2><p class="hint">Purchase order commitments and payment status. These amounts are NOT verified supplier bills or accounting liabilities.</p></div><button class="btn" id="apBack">← Accounting Hub</button></div><div id="apMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:18px 0"></div><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><input class="input" id="apSearch" placeholder="Search supplier, PO or status…" style="flex:1;min-width:200px"><button class="btn" id="apNewPO">+ Purchase Order</button></div><div id="apRows" style="margin-top:14px">Loading purchase orders…</div></div>';
     el('apBack').onclick=back;
-    if(platform==='sdc'){
-      const heading=el('apBack');heading.textContent='← Accounting Hub';
-      const panel=heading.closest('.card');
-      if(panel){panel.style.maxWidth='none';panel.style.padding='24px';}
-      const metrics=el('apMetrics');
-      if(metrics){metrics.style.margin='22px 0';metrics.style.gridTemplateColumns='repeat(auto-fit,minmax(210px,1fr))';}
-      const search=el('apSearch');if(search)search.style.minHeight='48px';
-      const create=el('apNewPO');if(create){create.classList.add('btn-orange');create.textContent='+ New Purchase Order';}
-    }
-    el('apNewPO').onclick=()=>platform==='pds'?renderEstimatePage('purchase_orders'):renderUnifiedPurchaseOrders(platform,true,back);
+    el('apNewPO').onclick=()=>platform==='pds'?renderEstimatePage('purchase_orders'):renderBusinessCollection(platform,'purchase_orders',true,back);
     const endpoint=platform==='pds'?'/pds-purchase-orders':'/workspaces/'+platform+'/purchase_orders';
     let orders=[];
     try{
@@ -511,15 +502,15 @@
   function renderSdcAccounting(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting Hub');
-    workspaceBody.innerHTML=`<div class="card" style="max-width:none;margin:auto">
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1160px;margin:auto">
       <h2 style="margin-bottom:8px">SDC Accounting Hub</h2>
       <p class="hint" style="margin-bottom:22px;max-width:800px">Manage Saddleback Design Co. financial records in one place. These are separate from PDS and Doorks.</p>
       <div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;width:100%;align-items:stretch"></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-orange" id="sdcQuickNew">+ New Input</button></div><div id="sdcQuickOptions"></div>
-      <p class="hint" style="margin-top:18px">Select a section to review records, purchasing activity, or supporting documents. Financial records are kept separate by workspace.</p>
+      <p class="hint" style="margin-top:22px">Existing expenses remain in Expenses. The Document Library now saves separate attachments; bill matching and bank reconciliation remain future work.</p>
     </div>`;
     const links=[
       {label:'Overview & Reports',kind:'__overview',icon:'📊',description:'Summary of expenses, receivables, inventory and purchasing.'},
-      {label:'Document Library',kind:'__vault',icon:'📎',description:'Search and upload workspace documents of supported file types.'},
+      {label:'Document Library',kind:'__vault',icon:'📎',description:'Search and upload documents.'},
       {label:'Receipts & Expenses',kind:'expenses',icon:'🧾',description:'Record business purchases, expenses and receipt details.'},
       {label:'Accounts Receivable',kind:'receivables',icon:'💳',description:'Review customer balances and payments due.'},
       {label:'Accounts Payable',kind:'__payable',icon:'💸',description:'Review purchase orders and supplier payment status.'},
@@ -528,14 +519,13 @@
       {label:'Vendors',kind:'vendors',icon:'🏢',description:'Access supplier information and contact records.'}
     ];
     el('sdcQuickNew').onclick=()=>renderAccountingQuickMenu('sdc','sdcQuickOptions');
-    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():e.kind==='__payable'?renderAccountsPayable('sdc'):e.kind==='__receiving'?renderPoReceiving('sdc',renderSdcAccounting):e.kind==='purchase_orders'?renderUnifiedPurchaseOrders('sdc',false,renderSdcAccounting):e.kind==='__vault'?renderDocumentVault('sdc','',renderSdcAccounting):renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
+    makeHubCards(el('sdcAccountingLinks'),links.map(e=>({icon:e.icon,label:e.label,description:e.description,open:()=>e.kind==='__overview'?renderSdcAccountingOverview():e.kind==='__payable'?renderAccountsPayable('sdc'):e.kind==='__receiving'?renderPoReceiving('sdc',renderSdcAccounting):e.kind==='__vault'?renderDocumentVault('sdc','',renderSdcAccounting):renderBusinessCollection('sdc',e.kind,false,()=>renderSdcAccounting())})));
   }
   function showAccountingMetrics(platform,title,entries,back){
     clearWorkspaceActions();setWorkspace(title);
-    workspaceBody.innerHTML='<div class="card" style="max-width:1400px;margin:auto;padding:24px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button type="button" class="btn" id="accountMetricsBack">← Accounting Hub</button></div><p class="hint">Summary based on saved records. Amounts are not reconciled bank balances.</p><div id="accountMetricsGrid" class="grid2"></div></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button type="button" class="btn" id="accountMetricsBack">← Accounting Hub</button></div><p class="hint">Summary based on saved records. Amounts are not reconciled bank balances.</p><div id="accountMetricsGrid" class="grid2"></div></div>';
     el('accountMetricsBack').onclick=back;
     const host=el('accountMetricsGrid');
-    if(platform==='sdc'){host.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px';}
     Promise.all(entries.map(async ([label,url,amountField])=>{
       try{const data=await fetchJSON(url);const items=data.items||[];return {label,count:items.length,amount:amountField?items.reduce((n,r)=>n+Number(r[amountField]||0),0):null};}
       catch(e){return {label,count:'Unavailable',amount:null};}
@@ -572,7 +562,7 @@
       {icon:'🧾',label:'Invoices',description:'Review saved invoices and create a new invoice.',open:()=>docs('Invoice')},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
       {icon:'📥',label:'Inventory & Receiving',description:'Receive purchase orders, review received stock and receiving history.',open:()=>renderPoReceiving(platform,()=>renderBusinessHub(platform))},
-      {icon:'📎',label:'Document Library',description:'Search and upload supporting documents for this workspace.',open:()=>renderDocumentVault(platform,'',()=>renderBusinessHub(platform))},
+      {icon:'📎',label:'Document Library & AI Upload',description:'Separate receipts, packing slips, bills and statements with AI review.',open:()=>renderDocumentVault(platform,'',()=>renderBusinessHub(platform))},
       ...(platform==='doorks'?[{icon:'🔩',label:'Parts List',description:'Doorks part master records; stock receiving is tracked separately.',open:()=>openKind('inventory')}]:[]),
       {icon:'🏢',label:platform==='sdc'?'Suppliers':'Vendors',description:platform==='sdc'?'Supplier profiles and contacts.':'Vendor profiles and contacts.',open:()=>openKind('vendors')},
       {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>openKind('customers')}
@@ -759,40 +749,11 @@
     if(kind==='estimates_invoices')return renderWorkspaceEstimateInvoice(platform,openNew,backAction);
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
-    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:8px 0 0">${platform==='sdc'&&kind==='expenses'?'Record and review Saddleback business expenses and receipts.':platform==='sdc'&&kind==='receivables'?'Track Saddleback customer balances, invoices and payments.':'Review and manage saved workspace records.'}</p></div><button class="btn" id="businessBack">← ${backAction?'Accounting Hub':'Dashboard'}</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
-    // SDC accounting landing pages: use the same single-panel hierarchy as Inventory & Receiving.
-    // This rearranges existing DOM nodes only; record forms, endpoints and event IDs stay intact.
-    if(platform==='sdc' && backAction && ['expenses','receivables'].includes(kind)){
-      const shell=workspaceBody.firstElementChild;
-      const headingCard=shell?.children[0];
-      const recordsCard=shell?.children[1];
-      if(headingCard && recordsCard){
-        headingCard.style.maxWidth='none';
-        headingCard.style.padding='24px';
-        headingCard.style.display='grid';
-        headingCard.style.gap='14px';
-        const intro=headingCard.firstElementChild;
-        if(intro){intro.style.alignItems='flex-start';intro.style.paddingBottom='8px';}
-        const recordsTitle=recordsCard.firstElementChild;
-        if(recordsTitle){recordsTitle.style.paddingBottom='8px';headingCard.append(recordsTitle);}
-        headingCard.append(el('businessSearch'),el('businessRecords'));
-        recordsCard.remove();
-        el('businessSearch').style.margin='0';
-        el('businessSearch').placeholder=kind==='expenses'?'Search expenses by supplier, category, date or notes…':'Search receivables by customer, invoice or status…';
-        const title=headingCard.querySelector('h2');
-        if(title)title.style.fontSize='28px';
-      }
-    }
+    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2></div><button class="btn" id="businessBack">← Dashboard</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
     if(kind==='purchase_orders'){
       const action=document.createElement('button');action.type='button';action.className='btn';action.textContent='Receiving & Inventory';
       action.onclick=()=>renderPoReceiving(platform,()=>renderBusinessCollection(platform,'purchase_orders'));
       el('businessNew').parentElement.append(action);
-    }
-    // Keep SDC accounting editor readable on narrow phones; do not affect other workspaces.
-    if(platform==='sdc' && ['expenses','receivables'].includes(kind)){
-      const responsive=document.createElement('style');
-      responsive.textContent=`@media(max-width:720px){#businessRecordForm{grid-template-columns:minmax(0,1fr)!important}#businessRecordForm>label{grid-column:1/-1!important;min-width:0}#businessRecordForm .input{max-width:100%;min-width:0}#businessEditor{padding:16px!important}#businessEditor h3{font-size:22px}#businessSearch{min-width:0}}`;
-      workspaceBody.prepend(responsive);
     }
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
@@ -831,7 +792,7 @@
       }
     }
     // AI reads only a draft; the user must explicitly save the record.
-    if(['orders','work_orders','customers','vendors','customer_inquiries','vendor_assignments','software_leads','estimates_invoices','purchase_orders','expenses','receivables'].includes(kind)){
+    if(['orders','work_orders','customers','vendors','customer_inquiries','vendor_assignments','software_leads','estimates_invoices','purchase_orders'].includes(kind)){
       const ai=document.createElement('details');ai.style.cssText='grid-column:1/-1;border:1px solid #d9dee7;border-radius:12px;padding:12px 14px;background:#f8fafc';
       const heading=document.createElement('summary');heading.style.cssText='font-weight:700;cursor:pointer';heading.textContent='Read document with AI (optional)';ai.append(heading);const aiInner=document.createElement('div');aiInner.style.cssText='display:grid;gap:10px;margin-top:12px';ai.append(aiInner);
       const hint=document.createElement('p');hint.className='hint';hint.textContent='Review AI suggestions before saving.';aiInner.append(hint);
@@ -928,7 +889,7 @@
     el('doorksQuickNew').onclick=()=>renderAccountingQuickMenu('doorks','doorksQuickOptions');
     makeHubCards(el('doorksAcctHubCards'),[
       {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
-      {icon:'📎',label:'Document Library',description:'Search and upload workspace documents.',open:()=>renderDocumentVault('doorks','',renderDoorksAccountingHub)},
+      {icon:'📎',label:'Document Library',description:'Search and upload documents.',open:()=>renderDocumentVault('doorks','',renderDoorksAccountingHub)},
       {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
       {icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.',open:()=>renderAccountsPayable('doorks')},
       {icon:'📦',label:'Inventory & Receiving',description:'Receive purchase orders and review received stock.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)},
@@ -950,12 +911,11 @@
     const names={receivables:'Accounts Receivable',inventory:'Inventory & Intake',receipts:'Receipts',statements:'Statements'};
     const fields={receivables:['customer','invoice_number','invoice_date','due_date','amount','paid','job_number','notes'],inventory:['supplier','po_number','date','part_number','description','quantity_ordered','quantity_shipped','quantity_backordered','quantity_received','notes'],receipts:['vendor','date','amount','category','receipt_number','card_last4','employee','notes'],statements:['document_type','issuer','period_start','period_end','amount','transaction_summary','notes']};
     clearWorkspaceActions();setWorkspace('Doorks — Accounting Hub');
-    const sectionName=names[kind];
-    clearWorkspaceActions();setWorkspace('Doorks — '+sectionName);
-    workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><section class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap"><div><h2 style="margin:0 0 8px">${sectionName}</h2><p class="hint" style="margin:0">${kind==='receivables'?'Review customer balances and payment records.':kind==='receipts'?'Review expense receipts and supporting documentation.':'Review saved financial statements and supporting documents.'}</p></div><button class="btn" id="dacBack">← Accounting Hub</button></div></section><section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px"><h3 style="margin:0">Saved ${sectionName}</h3><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-orange" id="dacNew">+ New ${kind==='receivables'?'Record':kind==='receipts'?'Receipt':'Statement'}</button><button class="btn" id="dacUpload">📎 Upload / Read with AI</button></div></div><input class="input" type="search" id="dacSearch" placeholder="Search ${sectionName.toLowerCase()} by any field…" style="width:100%;box-sizing:border-box"><p class="hint" id="dacCount"></p><div id="dacRecords"></div><details style="margin-top:18px"><summary style="cursor:pointer;font-weight:700">Additional tools & reporting filters</summary><div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin:16px 0"><label style="display:grid;gap:5px;font-weight:700">Reporting period<select class="input" id="dacPeriod"><option value="all">All time</option><option value="month">Month</option><option value="custom">Custom dates</option></select></label><label style="display:grid;gap:5px;font-weight:700">Month<input class="input" id="dacMonth" type="month"></label><label style="display:grid;gap:5px;font-weight:700">From<input class="input" id="dacStart" type="date"></label><label style="display:grid;gap:5px;font-weight:700">Through<input class="input" id="dacEnd" type="date"></label><button class="btn" id="dacExport">Export CSV</button></div><div id="dacReport"></div></details></section><section class="card" id="dacEditor" hidden><h3 id="dacTitle">New record</h3><p class="hint">AI suggestions are a draft. Review all values before saving.</p><form id="dacForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"></form><p id="dacMessage" role="status"></p></section></div>`;
-    el('dacBack').onclick=()=>renderDoorksAccountingHub();
+    workspaceBody.innerHTML='<div style="max-width:1400px;margin:auto;display:grid;gap:14px"><div class="card"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><h2 style="margin:0">Doorks Accounting Hub</h2><button class="btn" id="dacBack">← Dashboard</button></div><p class="hint">Separate Doorks financial records. PDS Accounting is unchanged.</p><div id="dacTabs" style="display:flex;flex-wrap:wrap;gap:8px"></div></div><div class="card"><div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap;margin-bottom:14px"><label style="display:grid;gap:5px;font-weight:700">Reporting period<select class="input" id="dacPeriod"><option value="month">Month</option><option value="all">All time</option><option value="custom">Custom dates</option></select></label><label style="display:grid;gap:5px;font-weight:700">Month<input class="input" id="dacMonth" type="month"></label><label style="display:grid;gap:5px;font-weight:700">From<input class="input" id="dacStart" type="date"></label><label style="display:grid;gap:5px;font-weight:700">Through<input class="input" id="dacEnd" type="date"></label></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn btn-orange" id="dacNew">+ New</button><button class="btn" id="dacUpload">Upload / Read with AI</button><button class="btn" id="dacExport">Export CSV</button></div><details style="margin:16px 0"><summary style="font-weight:700;cursor:pointer">Dashboard & Reports</summary><div id="dacReport" style="padding:12px 0"></div></details><input class="input" type="search" id="dacSearch" placeholder="Search all saved record fields…" style="width:100%;box-sizing:border-box"><p class="hint" id="dacCount"></p><div id="dacRecords"></div></div><section class="card" id="dacEditor" hidden><h3 id="dacTitle">New record</h3><p class="hint">AI suggestions are a draft. Review all values before saving.</p><form id="dacForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"></form><p id="dacMessage" role="status"></p></section></div>';
+    el('dacBack').textContent='← Accounting Hub';el('dacBack').onclick=()=>renderDoorksAccountingHub();
+    for(const [id,label] of Object.entries(names)){const b=document.createElement('button');b.className='btn'+(id===kind?' btn-orange':'');b.textContent=label;b.onclick=()=>renderDoorksAccounting(id);el('dacTabs').append(b);}
     const endpoint='/doorks-accounting/'+kind, form=el('dacForm'),editor=el('dacEditor'),message=el('dacMessage');let records=[],editing=null,uploadFile=null;
-    const dacPeriodState=window.__doorksAccountingPeriod||(window.__doorksAccountingPeriod={mode:'all',month:new Date().toISOString().slice(0,7),start:'',end:''});
+    const dacPeriodState=window.__doorksAccountingPeriod||(window.__doorksAccountingPeriod={mode:'month',month:new Date().toISOString().slice(0,7),start:'',end:''});
     const periodMode=el('dacPeriod'),periodMonth=el('dacMonth'),periodStart=el('dacStart'),periodEnd=el('dacEnd');
     periodMode.value=dacPeriodState.mode;periodMonth.value=dacPeriodState.month;periodStart.value=dacPeriodState.start;periodEnd.value=dacPeriodState.end;
     function updatePeriodInputs(){const mode=periodMode.value;periodMonth.parentElement.style.display=mode==='month'?'grid':'none';periodStart.parentElement.style.display=mode==='custom'?'grid':'none';periodEnd.parentElement.style.display=mode==='custom'?'grid':'none';}
@@ -6301,11 +6261,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       : '<div class="card" style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 id="pdsAcctSectionTitle" style="margin:0"></h3><p class="hint" style="margin:6px 0 0">PDS accounting records</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="pdsAcctBack">← Accounting Hub</button><button type="button" class="btn" id="pdsAcctLock">Lock Accounting</button></div></div><div id="acct_content" class="card">Loading accounting data…</div>';
     const sections=[
       {id:'overview',icon:'📊',label:'Overview & Reports',description:'Financial summary and reporting.'},
-      {id:'vault',icon:'📎',label:'Document Library',description:'Search and upload workspace documents.'},
+      {id:'vault',icon:'📎',label:'Document Library',description:'Search and upload documents. Existing PDS receipts remain available in Receipts & Expenses.'},
       {id:'receivables',icon:'💳',label:'Accounts Receivable',description:'Customer payments and invoice balances.'},
       {id:'payables',icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.'},
       {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
-      {id:'receipts',icon:'🧾',label:'Legacy Receipts & Packing Slips',description:'Existing PDS receipt and packing slip records.'},
+      {id:'receipts',icon:'🧾',label:'Receipts & Expenses',description:'All existing PDS receipts, expense records, AI intake and authorization.'},
       {id:'statements',icon:'🏦',label:'Statements',description:'Statements and document records.'},
       {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'},
       {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'}
@@ -6348,7 +6308,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const inPeriod = (date) => { const d=String(date||"").slice(0,10); if(periodState.mode==="all")return true; if(!d)return false; if(periodState.mode==="month")return d.startsWith(periodState.month); return (!periodState.start||d>=periodState.start)&&(!periodState.end||d<=periodState.end); };
     window.__doorksAcctInPeriod=inPeriod;
     const host=workspaceBody.querySelector('#acct_content');
-    if(isOverview){
+    if(isOverview || section==='receipts'){
       const periodBar=document.createElement('div');periodBar.className='card';periodBar.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0';
       periodBar.innerHTML='<strong>Reporting period</strong><select class="input" id="acct_period_mode"><option value="month">Month</option><option value="custom">Custom period</option><option value="all">All time</option></select><input class="input" id="acct_period_month" type="month"/><input class="input" id="acct_period_start" type="date"/><span>to</span><input class="input" id="acct_period_end" type="date"/>';
       workspaceBody.insertBefore(periodBar,host);
@@ -6431,11 +6391,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const bar = make("div", ""); bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px";
         const search = document.createElement("input"); search.className="input"; search.placeholder="Search vendor, employee, category, receipt #"; bar.appendChild(search);
         const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV";
+        const showAllLabel=document.createElement('label');showAllLabel.style.cssText='display:flex;align-items:center;gap:8px;font-weight:600';
+        const showAllReceipts=document.createElement('input');showAllReceipts.type='checkbox';showAllReceipts.checked=true;
+        showAllLabel.append(showAllReceipts,document.createTextNode('Show all saved receipts (regardless of reporting period)'));
+        bar.append(showAllLabel);
         const list = make("div", "");
+        showAllReceipts.onchange=()=>draw();
         function draw() {
           list.innerHTML="";
           const q=search.value.trim().toLowerCase();
-          periodReceipts.filter(r=>[r.vendor,r.employee,r.category,r.receipt_number,r.date].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
+          (showAllReceipts.checked?items:periodReceipts).filter(r=>[r.vendor,r.employee,r.category,r.receipt_number,r.date].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
             const line=document.createElement("div"); line.className="card";line.style.cssText="padding:14px;margin:10px 0;border:1px solid #d9dfe8;border-radius:12px";
             const name=document.createElement("div");name.style.cssText="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center";
             const info=document.createElement("div");const heading=document.createElement("strong");heading.textContent=r.vendor||"Unknown vendor";info.appendChild(heading);
@@ -10090,22 +10055,22 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     if(platform!=='pds'&&activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Document Library');
     workspaceBody.innerHTML=`<div class="card" style="max-width:1200px;margin:auto;display:grid;gap:15px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">Document Library</h2><p class="hint">Search and upload supporting files for this workspace. Existing receipts and accounting records remain in their original sections; library uploads do not post transactions.</p></div><button class="btn" id="dvBack">← Back to Hub</button></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap"><select id="dvFilter" class="input"><option value="">All Documents</option><option value="receipt">Receipts</option><option value="packing_slip">Packing Slips</option><option value="vendor_bill">Vendor Bills</option><option value="statement">Statements</option><option value="other">Other Documents</option></select><input id="dvSearch" class="input" type="search" placeholder="Search supplier, PO, number or notes…" style="flex:1;min-width:190px"><button class="btn btn-orange" id="dvNew">+ Upload / Add Document</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">Receipts, Packing Slips & Statements</h2><p class="hint">Separate document records by type. Saving documents does not post inventory or accounting transactions.</p></div><button class="btn" id="dvBack">← Back to Hub</button></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><select id="dvFilter" class="input"><option value="">All Documents</option><option value="receipt">Receipts</option><option value="packing_slip">Packing Slips</option><option value="vendor_bill">Vendor Bills</option><option value="statement">Statements</option><option value="other">Other</option></select><input id="dvSearch" class="input" type="search" placeholder="Search supplier, PO, number or notes…" style="flex:1;min-width:190px"><button class="btn btn-orange" id="dvNew">+ Upload / Add Document</button></div>
       <div id="dvList">Loading…</div>
-      <section id="dvEditor" hidden style="border:1px solid #d9dee7;border-radius:14px;padding:16px"><h3>New Document</h3><form id="dvForm" style="display:grid;gap:12px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"><label>Document Type<select name="document_type" class="input"><option value="receipt">Receipt</option><option value="packing_slip">Packing Slip</option><option value="vendor_bill">Vendor Bill</option><option value="statement">Statement</option><option value="other">Other Document</option></select></label><label>Supplier / Vendor<input class="input" name="vendor"></label><label>Document #<input class="input" name="document_number"></label><label>Date<input class="input" name="document_date" type="date"></label><label>Related PO #<input class="input" name="po_number"></label></div>
-      <details open style="border:1px solid #d9dee7;border-radius:10px;padding:12px"><summary style="cursor:pointer;font-weight:700">✨ AI Import — Upload or Paste Text</summary><div style="display:grid;gap:10px;margin-top:12px"><label>Upload document (PDF, image, Office file or text)<input class="input" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.doc,.docx,.xls,.xlsx,.csv,.txt,.rtf,.ppt,.pptx,.odt,.ods"></label><label>Or paste document text<textarea class="input" name="paste" rows="4" placeholder="Paste the packing slip, receipt, statement or bill text here…"></textarea></label><button class="btn" type="button" id="dvAnalyze">Analyze & Suggest Fields</button><p class="hint" id="dvAiStatus">AI suggestions are available for supported PDF/images. Other file types can be saved and downloaded, but are not AI-extracted.</p></div></details>
+      <section id="dvEditor" hidden style="border:1px solid #d9dee7;border-radius:14px;padding:16px"><h3>New Document</h3><form id="dvForm" style="display:grid;gap:12px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"><label>Document Type<select name="document_type" class="input"><option value="receipt">Receipt</option><option value="packing_slip">Packing Slip</option><option value="vendor_bill">Vendor Bill</option><option value="statement">Statement</option><option value="other">Other</option></select></label><label>Supplier / Vendor<input class="input" name="vendor"></label><label>Document #<input class="input" name="document_number"></label><label>Date<input class="input" name="document_date" type="date"></label><label>Related PO #<input class="input" name="po_number"></label></div>
+      <details open style="border:1px solid #d9dee7;border-radius:10px;padding:12px"><summary style="cursor:pointer;font-weight:700">✨ AI Import — Upload or Paste Text</summary><div style="display:grid;gap:10px;margin-top:12px"><label>Upload PDF or image<input class="input" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"></label><label>Or paste document text<textarea class="input" name="paste" rows="4" placeholder="Paste the packing slip, receipt, statement or bill text here…"></textarea></label><button class="btn" type="button" id="dvAnalyze">Analyze & Suggest Fields</button><p class="hint" id="dvAiStatus">AI results require review. File extraction needs the configured OpenAI API key.</p></div></details>
       <label>Notes / Extracted Text<textarea class="input" name="notes" rows="3" placeholder="Original text or review notes"></textarea></label><div style="display:flex;gap:8px"><button class="btn btn-orange" type="submit" id="dvSave">Save Document</button><button class="btn" type="button" id="dvCancel">Cancel</button></div><p id="dvStatus" role="status"></p></form></section>
     </div>`;
     const q=id=>el(id),form=q('dvForm');let records=[];
     q('dvBack').onclick=()=>backAction?backAction():platform==='pds'?renderAccountingView('hub'):renderBusinessHub(platform);
     q('dvFilter').value=initialType;
-    const types={receipt:'Receipt',packing_slip:'Packing Slip',vendor_bill:'Vendor Bill',statement:'Statement',other:'Other Document'};
-    function draw(){const filter=q('dvFilter').value,search=q('dvSearch').value.toLowerCase(),host=q('dvList');host.replaceChildren();const matching=records.filter(x=>(!filter||x.document_type===filter)&&(!search||[x.vendor,x.document_number,x.po_number,x.notes,x.original_filename,x.document_type,x.document_date].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`${matching.length} document(s) · ${filter?types[filter]:'All types'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.className='card';card.style.margin='8px 0';const title=document.createElement('strong');title.textContent=(types[item.document_type]||'Document')+' · '+(item.vendor||'Unspecified supplier')+' · '+(item.document_number||'No number');const meta=document.createElement('p');meta.className='hint';meta.textContent=[item.document_date,item.po_number?'PO '+item.po_number:'',item.original_filename||'',item.review_status].filter(Boolean).join(' · ');card.append(title,meta);if(item.attachment){const b=document.createElement('button');b.className='btn';b.textContent='Download Original';b.onclick=()=>window.open('/document-vault/'+platform+'/'+encodeURIComponent(item.id)+'/file','_blank');card.append(b);}if(item.notes){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Notes';const body=document.createElement('p');body.textContent=item.notes;details.append(summary,body);card.append(details);}host.append(card);}}
+    const types={receipt:'Receipt',packing_slip:'Packing Slip',vendor_bill:'Vendor Bill',statement:'Statement',other:'Other'};
+    function draw(){const filter=q('dvFilter').value,search=q('dvSearch').value.toLowerCase(),host=q('dvList');host.replaceChildren();const matching=records.filter(x=>(!filter||x.document_type===filter)&&(!search||[x.vendor,x.document_number,x.po_number,x.notes].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`${matching.length} document(s) · ${filter?types[filter]:'All types'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.className='card';card.style.margin='8px 0';const title=document.createElement('strong');title.textContent=(types[item.document_type]||'Document')+' · '+(item.vendor||'Unspecified supplier')+' · '+(item.document_number||'No number');const meta=document.createElement('p');meta.className='hint';meta.textContent=[item.document_date,item.po_number?'PO '+item.po_number:'',item.original_filename||'',item.review_status].filter(Boolean).join(' · ');card.append(title,meta);if(item.attachment){const b=document.createElement('button');b.className='btn';b.textContent='Download Original';b.onclick=()=>window.open('/document-vault/'+platform+'/'+encodeURIComponent(item.id)+'/file','_blank');card.append(b);}if(item.notes){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Notes';const body=document.createElement('p');body.textContent=item.notes;details.append(summary,body);card.append(details);}host.append(card);}}
     q('dvFilter').onchange=draw;q('dvSearch').oninput=draw;
     q('dvNew').onclick=()=>{form.reset();form.elements.document_type.value=q('dvFilter').value||initialType||'receipt';q('dvEditor').hidden=false;q('dvStatus').textContent='';q('dvEditor').scrollIntoView({behavior:'smooth',block:'start'});};
     q('dvCancel').onclick=()=>q('dvEditor').hidden=true;
-    q('dvAnalyze').onclick=async()=>{const status=q('dvAiStatus'),button=q('dvAnalyze'),file=form.elements.file.files[0],paste=form.elements.paste.value.trim();if(!file&&!paste){status.textContent='Select a file or paste text first.';return;}button.disabled=true;status.textContent='Analyzing…';try{let result;if(file){if(!/\.(pdf|png|jpe?g|webp)$/i.test(file.name)){status.textContent='This file can be saved in the library, but AI extraction currently supports PDF and images only.';button.disabled=false;return;}const fd=new FormData();fd.append('document_type',form.elements.document_type.value);fd.append('file',file);const response=await fetch('/document-vault/'+platform+'/preview-file',{method:'POST',body:fd,credentials:'same-origin'});result=await response.json();if(!response.ok)throw new Error(result.detail||'AI extraction failed');}else{result=await fetchJSON('/document-vault/'+platform+'/preview-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_type:form.elements.document_type.value,text:paste})});}for(const [key,value] of Object.entries(result.fields||{})){if(form.elements[key]&&value&&!form.elements[key].value)form.elements[key].value=value;}if(paste&&!form.elements.notes.value)form.elements.notes.value=paste.slice(0,4000);status.textContent=(result.source||'Suggestions')+' — '+(result.message||'Review before saving.');}catch(e){status.textContent=e.message||String(e);}finally{button.disabled=false;}};
+    q('dvAnalyze').onclick=async()=>{const status=q('dvAiStatus'),button=q('dvAnalyze'),file=form.elements.file.files[0],paste=form.elements.paste.value.trim();if(!file&&!paste){status.textContent='Select a file or paste text first.';return;}button.disabled=true;status.textContent='Analyzing…';try{let result;if(file){const fd=new FormData();fd.append('document_type',form.elements.document_type.value);fd.append('file',file);const response=await fetch('/document-vault/'+platform+'/preview-file',{method:'POST',body:fd,credentials:'same-origin'});result=await response.json();if(!response.ok)throw new Error(result.detail||'AI extraction failed');}else{result=await fetchJSON('/document-vault/'+platform+'/preview-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_type:form.elements.document_type.value,text:paste})});}for(const [key,value] of Object.entries(result.fields||{})){if(form.elements[key]&&value&&!form.elements[key].value)form.elements[key].value=value;}if(paste&&!form.elements.notes.value)form.elements.notes.value=paste.slice(0,4000);status.textContent=(result.source||'Suggestions')+' — '+(result.message||'Review before saving.');}catch(e){status.textContent=e.message||String(e);}finally{button.disabled=false;}};
     form.onsubmit=async e=>{e.preventDefault();const save=q('dvSave');save.disabled=true;q('dvStatus').textContent='Saving…';try{const fd=new FormData();for(const name of ['document_type','vendor','document_number','document_date','po_number'])fd.append(name,form.elements[name].value);fd.append('notes',form.elements.notes.value||form.elements.paste.value.slice(0,4000));if(form.elements.file.files[0])fd.append('file',form.elements.file.files[0]);const response=await fetch('/document-vault/'+platform,{method:'POST',body:fd,credentials:'same-origin'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Save failed');q('dvEditor').hidden=true;await refresh();}catch(err){q('dvStatus').textContent=err.message||String(err);}finally{save.disabled=false;}};
     async function refresh(){const result=await fetchJSON('/document-vault/'+platform);records=result.items||[];draw();}
     try{await refresh();}catch(err){q('dvList').textContent='Unable to load document library: '+(err.message||err);}
@@ -10116,7 +10081,6 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Inventory & Receiving');
     workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Received totals are not yet net available stock or accounting valuation.</p></div><button class="btn" id="receiveBack">← Business Hub</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips / AI Upload</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Received Stock by SKU</h3><div id="receiveStock" class="hint"></div></div>';
     el('receiveBack').onclick=()=>backAction?backAction():platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
-    if(platform==='sdc'&&backAction===renderSdcAccounting)el('receiveBack').textContent='← Accounting Hub';
     el('receivePacking').onclick=()=>renderDocumentVault(platform,'packing_slip',()=>renderPoReceiving(platform,backAction));
     el('receiveReceipts').onclick=()=>renderDocumentVault(platform,'receipt',()=>renderPoReceiving(platform,backAction));
     let data={orders:[],events:[],received_stock_by_sku:{}};
@@ -10257,7 +10221,6 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     q('upoTax').oninput=total;q('upoShipping').oninput=total;q('upoAddLine').onclick=()=>addLine();
     const close=()=>{q('upoEditor').hidden=true;q('upoDetails').hidden=true;};q('upoClose').onclick=close;q('upoCancel').onclick=close;q('upoDetailsClose').onclick=close;
     q('upoBack').onclick=()=>backAction?backAction():isPds?renderEstimatePage():renderBusinessHub(platform);
-    if(platform==='sdc'&&backAction===renderSdcAccounting)q('upoBack').textContent='← Accounting Hub';
     el('upoReceiving').onclick=()=>renderPoReceiving(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));
     const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
