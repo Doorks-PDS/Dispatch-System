@@ -475,7 +475,15 @@
     setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Accounts Payable');
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Accounts Payable</h2><p class="hint">Purchase order commitments and payment status. These amounts are NOT verified supplier bills or accounting liabilities.</p></div><button class="btn" id="apBack">← Accounting Hub</button></div><div id="apMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin:18px 0"></div><div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><input class="input" id="apSearch" placeholder="Search supplier, PO or status…" style="flex:1;min-width:200px"><button class="btn" id="apNewPO">+ Purchase Order</button></div><div id="apRows" style="margin-top:14px">Loading purchase orders…</div></div>';
     el('apBack').onclick=back;
-    if(platform==='sdc'){const heading=el('apBack');heading.textContent='← Accounting Hub';}
+    if(platform==='sdc'){
+      const heading=el('apBack');heading.textContent='← Accounting Hub';
+      const panel=heading.closest('.card');
+      if(panel){panel.style.maxWidth='none';panel.style.padding='24px';}
+      const metrics=el('apMetrics');
+      if(metrics){metrics.style.margin='22px 0';metrics.style.gridTemplateColumns='repeat(auto-fit,minmax(210px,1fr))';}
+      const search=el('apSearch');if(search)search.style.minHeight='48px';
+      const create=el('apNewPO');if(create){create.classList.add('btn-orange');create.textContent='+ New Purchase Order';}
+    }
     el('apNewPO').onclick=()=>platform==='pds'?renderEstimatePage('purchase_orders'):renderUnifiedPurchaseOrders(platform,true,back);
     const endpoint=platform==='pds'?'/pds-purchase-orders':'/workspaces/'+platform+'/purchase_orders';
     let orders=[];
@@ -507,7 +515,7 @@
       <h2 style="margin-bottom:8px">SDC Accounting Hub</h2>
       <p class="hint" style="margin-bottom:22px;max-width:800px">Manage Saddleback Design Co. financial records in one place. These are separate from PDS and Doorks.</p>
       <div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;width:100%;align-items:stretch"></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-orange" id="sdcQuickNew">+ New Input</button></div><div id="sdcQuickOptions"></div>
-      <p class="hint" style="margin-top:22px">Existing expenses remain in Expenses. The Document Library now saves separate attachments; bill matching and bank reconciliation remain future work.</p>
+      <p class="hint" style="margin-top:18px">Select a section to review records, purchasing activity, or supporting documents. Financial records are kept separate by workspace.</p>
     </div>`;
     const links=[
       {label:'Overview & Reports',kind:'__overview',icon:'📊',description:'Summary of expenses, receivables, inventory and purchasing.'},
@@ -524,9 +532,10 @@
   }
   function showAccountingMetrics(platform,title,entries,back){
     clearWorkspaceActions();setWorkspace(title);
-    workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button type="button" class="btn" id="accountMetricsBack">← Accounting Hub</button></div><p class="hint">Summary based on saved records. Amounts are not reconciled bank balances.</p><div id="accountMetricsGrid" class="grid2"></div></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1400px;margin:auto;padding:24px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h2>Overview & Reports</h2><button type="button" class="btn" id="accountMetricsBack">← Accounting Hub</button></div><p class="hint">Summary based on saved records. Amounts are not reconciled bank balances.</p><div id="accountMetricsGrid" class="grid2"></div></div>';
     el('accountMetricsBack').onclick=back;
     const host=el('accountMetricsGrid');
+    if(platform==='sdc'){host.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px;margin-top:20px';}
     Promise.all(entries.map(async ([label,url,amountField])=>{
       try{const data=await fetchJSON(url);const items=data.items||[];return {label,count:items.length,amount:amountField?items.reduce((n,r)=>n+Number(r[amountField]||0),0):null};}
       catch(e){return {label,count:'Unavailable',amount:null};}
@@ -751,6 +760,29 @@
     const labels=workspaceKinds[platform], fields=workspaceFields[kind];
     clearWorkspaceActions();setWorkspace(`${platform==='sdc'?'SDC':'Doorks'} — ${labels[kind]}`);
     workspaceBody.innerHTML=`<div style="max-width:1400px;margin:auto;display:grid;gap:16px"><div class="card"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2 style="margin:0">${labels[kind]}</h2><p class="hint" style="margin:8px 0 0">${platform==='sdc'&&kind==='expenses'?'Record and review Saddleback business expenses and receipts.':platform==='sdc'&&kind==='receivables'?'Track Saddleback customer balances, invoices and payments.':'Review and manage saved workspace records.'}</p></div><button class="btn" id="businessBack">← ${backAction?'Accounting Hub':'Dashboard'}</button></div></div><div class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3 style="margin:0">Saved ${labels[kind]}</h3><button class="btn btn-orange" id="businessNew">+ New ${labels[kind].replace(' & Production','')}</button></div><input class="input" id="businessSearch" type="search" placeholder="Search saved records by any field…" style="width:100%;box-sizing:border-box;margin:14px 0 4px"><div id="businessRecords" aria-live="polite">Loading records…</div></div><section class="card" id="businessEditor" hidden><div style="display:flex;align-items:center;justify-content:space-between;gap:12px"><h3 id="businessFormTitle" style="margin:0">New ${labels[kind]}</h3><button class="btn" id="businessClose" type="button">Close</button></div><form id="businessRecordForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px;margin-top:14px"></form><p id="businessSaveMessage" role="status" aria-live="polite"></p></section></div>`;
+    // SDC accounting landing pages: use the same single-panel hierarchy as Inventory & Receiving.
+    // This rearranges existing DOM nodes only; record forms, endpoints and event IDs stay intact.
+    if(platform==='sdc' && backAction && ['expenses','receivables'].includes(kind)){
+      const shell=workspaceBody.firstElementChild;
+      const headingCard=shell?.children[0];
+      const recordsCard=shell?.children[1];
+      if(headingCard && recordsCard){
+        headingCard.style.maxWidth='none';
+        headingCard.style.padding='24px';
+        headingCard.style.display='grid';
+        headingCard.style.gap='20px';
+        const intro=headingCard.firstElementChild;
+        if(intro){intro.style.alignItems='flex-start';intro.style.paddingBottom='16px';intro.style.borderBottom='1px solid #e2e8f0';}
+        const recordsTitle=recordsCard.firstElementChild;
+        if(recordsTitle){recordsTitle.style.paddingBottom='14px';recordsTitle.style.borderBottom='1px solid #e2e8f0';headingCard.append(recordsTitle);}
+        headingCard.append(el('businessSearch'),el('businessRecords'));
+        recordsCard.remove();
+        el('businessSearch').style.margin='0';
+        el('businessSearch').placeholder=kind==='expenses'?'Search expenses by supplier, category, date or notes…':'Search receivables by customer, invoice or status…';
+        const title=headingCard.querySelector('h2');
+        if(title)title.style.fontSize='28px';
+      }
+    }
     if(kind==='purchase_orders'){
       const action=document.createElement('button');action.type='button';action.className='btn';action.textContent='Receiving & Inventory';
       action.onclick=()=>renderPoReceiving(platform,()=>renderBusinessCollection(platform,'purchase_orders'));
