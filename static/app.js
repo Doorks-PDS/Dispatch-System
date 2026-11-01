@@ -511,7 +511,7 @@
   function renderSdcAccounting(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting Hub');
-    workspaceBody.innerHTML=`<div class="card" style="max-width:1160px;margin:auto">
+    workspaceBody.innerHTML=`<div class="card" style="max-width:none;margin:auto">
       <h2 style="margin-bottom:8px">SDC Accounting Hub</h2>
       <p class="hint" style="margin-bottom:22px;max-width:800px">Manage Saddleback Design Co. financial records in one place. These are separate from PDS and Doorks.</p>
       <div id="sdcAccountingLinks" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px;width:100%;align-items:stretch"></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-orange" id="sdcQuickNew">+ New Input</button></div><div id="sdcQuickOptions"></div>
@@ -770,11 +770,11 @@
         headingCard.style.maxWidth='none';
         headingCard.style.padding='24px';
         headingCard.style.display='grid';
-        headingCard.style.gap='20px';
+        headingCard.style.gap='14px';
         const intro=headingCard.firstElementChild;
-        if(intro){intro.style.alignItems='flex-start';intro.style.paddingBottom='16px';intro.style.borderBottom='1px solid #e2e8f0';}
+        if(intro){intro.style.alignItems='flex-start';intro.style.paddingBottom='8px';}
         const recordsTitle=recordsCard.firstElementChild;
-        if(recordsTitle){recordsTitle.style.paddingBottom='14px';recordsTitle.style.borderBottom='1px solid #e2e8f0';headingCard.append(recordsTitle);}
+        if(recordsTitle){recordsTitle.style.paddingBottom='8px';headingCard.append(recordsTitle);}
         headingCard.append(el('businessSearch'),el('businessRecords'));
         recordsCard.remove();
         el('businessSearch').style.margin='0';
@@ -787,6 +787,12 @@
       const action=document.createElement('button');action.type='button';action.className='btn';action.textContent='Receiving & Inventory';
       action.onclick=()=>renderPoReceiving(platform,()=>renderBusinessCollection(platform,'purchase_orders'));
       el('businessNew').parentElement.append(action);
+    }
+    // Keep SDC accounting editor readable on narrow phones; do not affect other workspaces.
+    if(platform==='sdc' && ['expenses','receivables'].includes(kind)){
+      const responsive=document.createElement('style');
+      responsive.textContent=`@media(max-width:720px){#businessRecordForm{grid-template-columns:minmax(0,1fr)!important}#businessRecordForm>label{grid-column:1/-1!important;min-width:0}#businessRecordForm .input{max-width:100%;min-width:0}#businessEditor{padding:16px!important}#businessEditor h3{font-size:22px}#businessSearch{min-width:0}}`;
+      workspaceBody.prepend(responsive);
     }
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
@@ -825,7 +831,7 @@
       }
     }
     // AI reads only a draft; the user must explicitly save the record.
-    if(['orders','work_orders','customers','vendors','customer_inquiries','vendor_assignments','software_leads','estimates_invoices','purchase_orders'].includes(kind)){
+    if(['orders','work_orders','customers','vendors','customer_inquiries','vendor_assignments','software_leads','estimates_invoices','purchase_orders','expenses','receivables'].includes(kind)){
       const ai=document.createElement('details');ai.style.cssText='grid-column:1/-1;border:1px solid #d9dee7;border-radius:12px;padding:12px 14px;background:#f8fafc';
       const heading=document.createElement('summary');heading.style.cssText='font-weight:700;cursor:pointer';heading.textContent='Read document with AI (optional)';ai.append(heading);const aiInner=document.createElement('div');aiInner.style.cssText='display:grid;gap:10px;margin-top:12px';ai.append(aiInner);
       const hint=document.createElement('p');hint.className='hint';hint.textContent='Review AI suggestions before saving.';aiInner.append(hint);
