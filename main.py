@@ -209,6 +209,8 @@ app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.include_router(pds_purchase_orders_router)
+from app.routers.document_vault import router as document_vault_router
+app.include_router(document_vault_router)
 app.include_router(calendar_router)
 app.include_router(data_router)
 app.include_router(notifications_router)
