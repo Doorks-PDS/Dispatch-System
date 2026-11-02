@@ -182,3 +182,60 @@ def payment_allocation_preview(platform: str, request: Request):
         })
     return {'items': results, 'mode': 'read_only_preview',
             'note': 'No payment allocation or bank verification is performed.'}
+
+
+@router.get('/{platform}/supplier-aging-preview')
+def supplier_aging_preview(platform: str, request: Request):
+    """Read-only AP aging from existing bills and manually entered payments.
+
+    Uses calendar dates, not bank settlement. Bills without due dates are unclassified.
+    """
+    from datetime import date
+    guard(request, platform)
+    with LOCK:
+        bills = load(path(request, platform, 'bills'))
+        payments = load(path(request, platform, 'payments'))
+    today = date.today()
+    items = []
+    for bill in bills:
+        if bill.get('status') == 'Voided':
+            continue
+        number = str(bill.get('bill_number') or '').strip().casefold()
+        supplier = str(bill.get('supplier') or '').strip().casefold()
+        candidates = [b for b in bills if b.get('status') != 'Voided'
+                      and str(b.get('bill_number') or '').strip().casefold() == number]
+        matched = []
+        ambiguous = False
+        for payment in payments:
+            if payment.get('direction') != 'sent' or str(payment.get('reference_id') or '').strip().casefold() != number:
+                continue
+            pay_supplier = str(payment.get('supplier') or '').strip().casefold()
+            if pay_supplier and pay_supplier != supplier:
+                continue
+            if not pay_supplier and len(candidates) > 1:
+                ambiguous = True
+                continue
+            matched.append(payment)
+        amount = money(bill.get('amount', 0), 'bill amount')
+        paid = sum((money(payment.get('amount', 0), 'payment amount') for payment in matched), Decimal('0'))
+        balance = amount - paid
+        due_raw = str(bill.get('due_date') or '').strip()
+        try:
+            due = date.fromisoformat(due_raw) if due_raw else None
+        except ValueError:
+            due = None
+        days_overdue = max(0, (today - due).days) if due else None
+        bucket = ('Review required' if ambiguous or balance < 0 else
+                  'Paid' if balance == 0 else
+                  'No valid due date' if due is None else
+                  'Current' if days_overdue == 0 else
+                  '1–30' if days_overdue <= 30 else
+                  '31–60' if days_overdue <= 60 else
+                  '61–90' if days_overdue <= 90 else '90+')
+        items.append({'bill_id': bill.get('id'), 'bill_number': bill.get('bill_number'),
+                      'supplier': bill.get('supplier'), 'due_date': due_raw or None,
+                      'amount': str(amount), 'matched_manual_payments': str(paid),
+                      'balance': str(balance), 'days_overdue': days_overdue,
+                      'aging_bucket': bucket})
+    return {'items': items, 'as_of': today.isoformat(), 'mode': 'read_only_preview',
+            'note': 'Manual payment matching only; no payment allocation or bank verification.'}
