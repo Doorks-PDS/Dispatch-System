@@ -67,6 +67,19 @@ def normalize(kind,data):
         data['verification']='Manual entry — unverified'
     return data
 
+@router.get('/{platform}/summary')
+def summary(platform:str,request:Request):
+    guard(request,platform)
+    with LOCK:
+        bills=load(path(request,platform,'bills'));payments=load(path(request,platform,'payments'))
+    totals={'bills':len(bills),'payments':len(payments),'billed':0.0,'paid_to_suppliers':0.0,'received_from_customers':0.0}
+    totals['billed']=round(sum(float(x['amount']) for x in bills if x.get('status')!='Voided'),2)
+    for item in payments:
+        key='paid_to_suppliers' if item['direction']=='sent' else 'received_from_customers'
+        totals[key]=round(totals[key]+float(item['amount']),2)
+    return totals
+
+
 @router.get('/{platform}/{kind}')
 def listing(platform:str,kind:str,request:Request):
     guard(request,platform)
@@ -98,14 +111,3 @@ def update_bill(platform:str,record_id:str,request:Request,payload:Payload):
                 return {'item':normalized}
     raise HTTPException(404,'Bill not found')
 
-@router.get('/{platform}/summary')
-def summary(platform:str,request:Request):
-    guard(request,platform)
-    with LOCK:
-        bills=load(path(request,platform,'bills'));payments=load(path(request,platform,'payments'))
-    totals={'bills':len(bills),'payments':len(payments),'billed':0.0,'paid_to_suppliers':0.0,'received_from_customers':0.0}
-    totals['billed']=round(sum(float(x['amount']) for x in bills if x.get('status')!='Voided'),2)
-    for item in payments:
-        key='paid_to_suppliers' if item['direction']=='sent' else 'received_from_customers'
-        totals[key]=round(totals[key]+float(item['amount']),2)
-    return totals
