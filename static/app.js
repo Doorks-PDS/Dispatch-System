@@ -606,7 +606,7 @@
     makeHubCards(el('businessHubActions'),[
       {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>renderWorkspaceEstimateInvoice(platform,true,()=>renderBusinessHub(platform))},
       {icon:'📁',label:'Document Library',description:'Search all saved library documents and upload or analyze new files.',open:()=>renderDocumentVault(platform,'',()=>renderBusinessHub(platform))},
-      {icon:'✨',label:'AI Intake',description:'Upload or paste a work order, email, drawing or document to prepare reviewed drafts for estimates, invoices, parts, vendors or customers.',open:()=>renderBusinessAiIntake(platform,()=>renderBusinessHub(platform))},
+      {icon:'✨',label:'AI Intake',description:'Upload or paste documents to create records with AI.',open:()=>renderBusinessAiIntake(platform,()=>renderBusinessHub(platform))},
       {icon:'📋',label:'Estimates',description:'Review saved estimates and create a new estimate.',open:()=>docs('Estimate')},
       {icon:'🧾',label:'Invoices',description:'Review saved invoices and create a new invoice.',open:()=>docs('Invoice')},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
@@ -806,6 +806,11 @@
       const action=document.createElement('button');action.type='button';action.className='btn';action.textContent='Receiving & Inventory';
       action.onclick=()=>renderPoReceiving(platform,()=>renderBusinessCollection(platform,'purchase_orders'));
       el('businessNew').parentElement.append(action);
+    }
+    if(kind==='inventory'){
+      const ai=document.createElement('button');ai.type='button';ai.className='btn';ai.textContent='✨ Upload / Paste with AI';
+      ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderBusinessCollection(platform,'inventory',false,backAction));
+      el('businessNew').before(ai);
     }
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
