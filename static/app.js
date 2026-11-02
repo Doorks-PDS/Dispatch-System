@@ -588,6 +588,15 @@
       ['Purchase Orders','/workspaces/sdc/purchase_orders',null]
     ],()=>renderSdcAccounting());
   }
+  async function renderBusinessAiIntake(platform,backAction=null){
+    if(activePlatform!==platform)return;
+    clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — AI Intake');
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto;display:grid;gap:14px"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2>AI Intake — Review Before Saving</h2><p class="hint">Paste an email, work order, drawing notes or supplier text; or upload a PDF/image. AI suggestions are drafts, not saved records.</p></div><button class="btn" id="baiBack">← Business Hub</button></div><label>Destination<select class="input" id="baiType"><option value="estimate">Estimate</option><option value="invoice">Invoice</option><option value="purchase_order">Purchase Order</option><option value="part">Part / Product</option><option value="vendor">Vendor / Supplier</option><option value="customer">Customer / Contact</option></select></label><label>Upload PDF / image<input class="input" id="baiFile" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"></label><label>Or paste source text<textarea class="input" id="baiText" rows="8" placeholder="Paste a work order, customer email, parts list, supplier quote or drawing notes..."></textarea></label><button class="btn btn-orange" id="baiRead">Read & Prepare Draft</button><p id="baiStatus" role="status" class="hint"></p><div id="baiReview" hidden><h3>Extracted Source — Verify Before Creating</h3><textarea class="input" id="baiExtracted" rows="10" style="width:100%"></textarea><p class="hint">The destination editor will open separately. Review the source here and transfer only verified information. No record is saved automatically.</p><button class="btn" id="baiCopy">Copy Extracted Text</button><button class="btn btn-orange" id="baiOpen">Open Destination Editor</button></div></div>`;
+    const q=id=>el(id);q('baiBack').onclick=()=>backAction?backAction():renderBusinessHub(platform);
+    q('baiRead').onclick=async()=>{const text=q('baiText').value.trim(),file=q('baiFile').files[0],status=q('baiStatus');if(!text&&!file){status.textContent='Upload a document or paste text first.';return;}q('baiRead').disabled=true;status.textContent='Reading source…';try{let result;if(file){const fd=new FormData();fd.append('document_type','other');fd.append('file',file);const r=await fetch('/document-vault/'+platform+'/preview-file',{method:'POST',body:fd,credentials:'same-origin'});result=await r.json();if(!r.ok)throw Error(result.detail||'Could not read file');}else{result=await fetchJSON('/document-vault/'+platform+'/preview-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_type:'other',text})});}const fields=result.fields||{};q('baiExtracted').value=[text,fields.notes||'',...Object.entries(fields).filter(([k])=>k!=='notes').map(([k,v])=>k+': '+v)].filter(Boolean).join('\n');q('baiReview').hidden=false;status.textContent=(result.message||'Source reviewed')+' — verify all details before using.';}catch(e){status.textContent='Import failed: '+(e.message||e);}finally{q('baiRead').disabled=false;}};
+    q('baiCopy').onclick=()=>{const t=q('baiExtracted');t.select();if(navigator.clipboard?.writeText)navigator.clipboard.writeText(t.value).catch(()=>{});};
+    q('baiOpen').onclick=()=>{const type=q('baiType').value;const draft=q('baiExtracted').value;window.__doorksAiIntakeDraft={platform,type,text:draft};if(type==='estimate'||type==='invoice')renderWorkspaceEstimateInvoice(platform,true,()=>renderBusinessAiIntake(platform,backAction),type==='invoice'?'Invoice':'Estimate');else if(type==='purchase_order')renderUnifiedPurchaseOrders(platform,true,()=>renderBusinessAiIntake(platform,backAction));else renderBusinessCollection(platform,type==='part'?(platform==='sdc'?'products':'inventory'):type==='vendor'?'vendors':'customers',true,()=>renderBusinessAiIntake(platform,backAction));};
+  }
   function renderBusinessHub(platform){
     if(activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — Business Hub');
@@ -597,10 +606,10 @@
     makeHubCards(el('businessHubActions'),[
       {icon:'📝',label:'Generator',description:'Create or edit estimate and invoice records.',open:()=>renderWorkspaceEstimateInvoice(platform,true,()=>renderBusinessHub(platform))},
       {icon:'📁',label:'Document Library',description:'Search all saved library documents and upload or analyze new files.',open:()=>renderDocumentVault(platform,'',()=>renderBusinessHub(platform))},
+      {icon:'✨',label:'AI Intake',description:'Upload or paste a work order, email, drawing or document to prepare reviewed drafts for estimates, invoices, parts, vendors or customers.',open:()=>renderBusinessAiIntake(platform,()=>renderBusinessHub(platform))},
       {icon:'📋',label:'Estimates',description:'Review saved estimates and create a new estimate.',open:()=>docs('Estimate')},
       {icon:'🧾',label:'Invoices',description:'Review saved invoices and create a new invoice.',open:()=>docs('Invoice')},
       {icon:'📦',label:'Purchase Orders',description:'Supplier orders, statuses and purchasing.',open:()=>openKind('purchase_orders')},
-      {icon:'📥',label:'Inventory & Receiving',description:'Receive purchase orders, review received stock and receiving history.',open:()=>renderPoReceiving(platform,()=>renderBusinessHub(platform))},
       ...(platform==='doorks'?[{icon:'🔩',label:'Parts List',description:'Doorks part master records; stock receiving is tracked separately.',open:()=>openKind('inventory')}]:[]),
       {icon:'🏢',label:platform==='sdc'?'Suppliers':'Vendors',description:platform==='sdc'?'Supplier profiles and contacts.':'Vendor profiles and contacts.',open:()=>openKind('vendors')},
       {icon:'👥',label:'Customers',description:'Customer profiles and contacts.',open:()=>openKind('customers')}
@@ -612,7 +621,7 @@
     const title=kind==='vendors'?(platform==='sdc'?'Suppliers':'Vendors'):'Customers & Contacts';
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — '+title);
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2>'+title+'</h2><p class="hint">Manage business records and related contact information.</p></div><button class="btn" id="directoryBack">← Business Hub</button></div><div id="directoryCards"></div></div>';
-    el('directoryBack').onclick=()=>renderBusinessHub(platform);
+    el('directoryBack').onclick=()=>renderBusinessHub(platform);const intake=document.createElement('button');intake.className='btn';intake.textContent='✨ Upload / Paste with AI';intake.onclick=()=>renderBusinessAiIntake(platform,()=>renderWorkspaceDirectory(platform,kind));el('directoryBack').before(intake);
     const open=()=>renderBusinessCollection(platform,kind,false,()=>renderWorkspaceDirectory(platform,kind));
     makeHubCards(el('directoryCards'),kind==='customers'?[
       {icon:'🏢',label:'Customer Directory',description:'Search, add and edit saved customers.',open},
@@ -638,22 +647,23 @@
       <section class="card"><div style="border-bottom:1px solid #dce3ed;padding-bottom:12px;margin-bottom:16px"><h2 style="margin:0;text-transform:uppercase">${company}</h2><p class="hint">41080 Saddleback Dr, Aguanga, CA 92536</p></div><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0" id="wedHeading">Estimates & Invoices</h2><p class="hint" id="wedIntro">Create, review and print branded documents.</p></div><button class="btn" id="wedBack">← Business Hub</button></div></section>
       <section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0" id="wedSavedHeading">Saved Documents</h3><div style="display:flex;gap:8px"><button class="btn" id="wedNewEstimate">+ New Estimate</button><button class="btn" id="wedNewInvoice">+ New Invoice</button></div></div><div style="display:flex;gap:8px;margin:12px 0"><select class="input" id="wedFilter"><option value="">All Documents</option><option>Estimate</option><option>Invoice</option></select><input class="input" id="wedSearch" type="search" placeholder="Search customer, number, job or status…" style="flex:1;min-width:0"></div><div id="wedList">Loading…</div></section>
       <section class="card" id="wedEditor" hidden><div style="display:flex;justify-content:space-between;align-items:center"><h3 id="wedEditorTitle">Document Generator</h3><button class="btn" id="wedCancel">Close</button></div>
+      <div style="padding:18px;border:1px solid #d9dee7;border-radius:16px;margin:12px 0"><h1 style="margin:0;text-transform:uppercase;letter-spacing:.025em">${company}</h1><p class="hint">41080 Saddleback Dr · Aguanga, CA 92536</p></div>
       <form id="wedForm" style="display:grid;gap:15px">
-        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px">
+        <h3 style="margin:0">Document Details</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px">
           <label>Document Type<select class="input" name="document_type"><option>Estimate</option><option>Invoice</option></select></label>
           <label>Document Number<input class="input" name="document_number" placeholder="Assigned automatically when saved" readonly></label>
           <label>Date<input class="input" type="date" name="date" required></label>
           <label>Terms<select class="input" name="terms"><option>Due on Receipt</option><option>Net 15</option><option>Net 30</option><option>Net 45</option><option>Net 60</option></select></label>
-          <label>Customer / Bill To<input class="input" name="customer" list="wedCustomers" required autocomplete="off"><datalist id="wedCustomers"></datalist></label>
-          <label>Billing Address<textarea class="input" name="address" rows="2"></textarea></label>
-          <label>Ship To / Service Location<textarea class="input" name="ship_to" rows="2" placeholder="Shipping or billing destination"></textarea></label>
+          <label>Name / Customer<input class="input" name="customer" list="wedCustomers" required autocomplete="off"><datalist id="wedCustomers"></datalist></label>
+          <label>Name / Address<textarea class="input" name="address" rows="2"></textarea></label>
+          <label>Ship To / Bill To<textarea class="input" name="ship_to" rows="2" placeholder="Shipping or billing destination"></textarea></label>
           <label>Work Order / Job #<input class="input" name="work_order_number"></label>
           <label>PO #<input class="input" name="po_number"></label>
           <label>Status<select class="input" name="status" id="wedStatus"></select></label><label id="wedPaidWrap" hidden>Manually Recorded Payments (not processor-synced)<input class="input" name="paid" type="number" min="0" step=".01" value="0"></label><label>Prepared By<input class="input" name="prepared_by" placeholder="Employee name"></label>
           <label>Sales Tax %<input class="input" name="tax_rate" type="number" step=".01" min="0" value="7.75"></label>
         </div>
-        <div style="border-top:1px solid #e2e8f0;padding-top:16px"><h3>Line Items & Pricing</h3><div id="wedCatalogHint" class="hint"></div><div style="overflow-x:auto"><table style="width:100%;min-width:760px;border-collapse:separate;border-spacing:6px"><thead><tr><th>Item / SKU</th><th>Description</th><th>Qty</th><th>Rate</th><th>Taxable</th><th>Amount</th><th></th></tr></thead><tbody id="wedLines"></tbody></table></div><button class="btn" id="wedAdd" type="button">+ Add Line Item</button></div>
-        <label>Notes / Scope of Work<textarea class="input" name="notes" rows="3"></textarea></label>
+        <div style="border-top:1px solid #e2e8f0;padding-top:16px"><h3>Items, Labor & Pricing</h3><div id="wedCatalogHint" class="hint"></div><div style="overflow-x:auto"><table style="width:100%;min-width:760px;border-collapse:separate;border-spacing:6px"><thead><tr><th>Item / SKU</th><th>Description</th><th>Qty</th><th>Rate</th><th>Taxable</th><th>Amount</th><th></th></tr></thead><tbody id="wedLines"></tbody></table></div><button class="btn" id="wedAdd" type="button">+ Add Line Item</button></div>
+        <label>Scope of Work / Notes<textarea class="input" name="notes" rows="3"></textarea></label>
         <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
         <p id="wedMessage" role="status"></p>
       </form></section>
@@ -740,6 +750,7 @@
     function open(item=null,type='Estimate'){
       editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();q('wedLines').replaceChildren();
       const data=item||{};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','ship_to','tax_rate','notes','paid','prepared_by'])if(data[key]!=null&&f(key))f(key).value=data[key];
+      if(!item&&window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type===(type==='Invoice'?'invoice':'estimate')){f('notes').value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}
       if(!item){f('document_type').value=type;f('date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);f('document_number').value='';} updateStatusOptions(f('document_type').value,data.status||'Draft');f('document_type').disabled=!!filterType;
       let lines=[];try{lines=Array.isArray(data.line_items)?data.line_items:JSON.parse(data.line_items||'[]');}catch{}
       if(!lines.length&&data.description)lines=[{description:data.description,quantity:1,rate:Number(data.amount)||0,taxable:false}];
@@ -747,6 +758,7 @@
       q('wedEditorTitle').textContent=(item?'Edit ':'New ')+f('document_type').value;
       q('wedEditor').scrollIntoView({block:'start',behavior:'smooth'});
     }
+    const aiButton=document.createElement('button');aiButton.className='btn';aiButton.textContent='✨ Upload / Paste with AI';aiButton.onclick=()=>renderBusinessAiIntake(platform,()=>renderWorkspaceEstimateInvoice(platform,false,backAction,filterType));q('wedNewInvoice').after(aiButton);
     q('wedNewEstimate').onclick=()=>open(null,'Estimate');q('wedNewInvoice').onclick=()=>open(null,'Invoice');
     f('document_type').onchange=()=>{q('wedEditorTitle').textContent=(editing?'Edit ':'New ')+f('document_type').value;updateStatusOptions(f('document_type').value);};
     q('wedCancel').onclick=()=>{q('wedEditor').hidden=true;editing=null;};
@@ -856,7 +868,7 @@
     const close=()=>{editor.hidden=true;editingId=null;form.reset();message.textContent='';};
     cancel.onclick=close;el('businessClose').onclick=close;
     el('businessBack').textContent=backAction?'← Back to Hub':'← Dashboard';el('businessBack').onclick=()=>backAction?backAction():showPlatformShell(platform);
-    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=item[f]??'';}const poSupplierSelect=el('workspacePoSupplierSelect');if(poSupplierSelect)poSupplierSelect.value=item?.vendor_id||'';el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';editor.hidden=false;editor.scrollIntoView({behavior:'smooth',block:'start'});};
+    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=item[f]??'';}const poSupplierSelect=el('workspacePoSupplierSelect');if(poSupplierSelect)poSupplierSelect.value=item?.vendor_id||'';if(!item&&window.__doorksAiIntakeDraft?.platform===platform){const draft=window.__doorksAiIntakeDraft;const expected=kind==='vendors'?'vendor':kind==='customers'?'customer':'part';if(draft.type===expected){const dest=form.elements.namedItem('notes')||form.elements.namedItem('description');if(dest)dest.value=draft.text;window.__doorksAiIntakeDraft=null;}}el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';editor.hidden=false;editor.scrollIntoView({behavior:'smooth',block:'start'});};
     el('businessNew').onclick=()=>open();
     const search=el('businessSearch');
     function draw(){const host=el('businessRecords');host.replaceChildren();const q=search.value.toLowerCase().trim();const filtered=records.filter(item=>!q||Object.values(item).some(v=>String(v??'').toLowerCase().includes(q)));
@@ -10269,10 +10281,10 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     el('upoReceiving').onclick=()=>renderPoReceiving(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));
     const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
-      if(!item){form.elements.ship_to.value=company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');}
+      if(!item){form.elements.ship_to.value=company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');if(window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type==='purchase_order'){form.elements.notes.value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}}
       supplierSelect.value=item?.supplier_id||item?.vendor_id||'';supplierSearch.value=item?.vendor||'';customerSearch.value=item?.customer||'';q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
       (item?parseLines(item):[{}]).forEach(addLine);total();q('upoMessage').textContent='';q('upoEditor').scrollIntoView({behavior:'smooth',block:'start'});};
-    q('upoNew').onclick=()=>edit(null);
+    q('upoNew').onclick=()=>edit(null);if(!isPds){const ai=document.createElement('button');ai.className='btn';ai.textContent='✨ AI Intake';ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));q('upoNew').before(ai);}
     const docHtml=item=>{const lines=parseLines(item),sub=lines.reduce((a,x)=>a+Number(x.quantity||0)*Number(x.rate||0),0),tax=Number(item.tax||0),shipping=Number(item.shipping||0),sum=sub+tax+shipping;
       const vendorAddress=item.vendor_address||suppliers.find(x=>x.id===(item.supplier_id||item.vendor_id))?.address||'';
       const header=`<div style="display:flex;justify-content:space-between;gap:30px;align-items:flex-start"><div><h2 style="margin:0 0 8px">${esc(company)}</h2><div style="white-space:pre-line">${esc(address)}</div>${isPds?'<div>760-233-5037 · www.prioritydoors.com</div>':''}</div><div style="text-align:right"><h1 style="margin:0 0 12px">Purchase Order</h1><b>Date:</b> ${esc(item.date||'')}<br><b>P.O. No.:</b> ${esc(item.po_number||'Draft')}</div></div>`;
