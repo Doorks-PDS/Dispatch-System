@@ -149,3 +149,36 @@ def bill_balances(platform: str, request: Request):
                                            'Partially paid' if paid > 0 else 'Unpaid')})
     return {'items': results, 'mode': 'read_only_preview',
             'note': 'Manual, unverified payment records; not bank settlement confirmation.'}
+
+@router.get('/{platform}/payment-allocation-preview')
+def payment_allocation_preview(platform: str, request: Request):
+    """Read-only classification of outgoing payments against supplier bills.
+
+    Never allocates, modifies, or marks a payment as bank-verified.
+    """
+    guard(request, platform)
+    with LOCK:
+        bills = load(path(request, platform, 'bills'))
+        payments = load(path(request, platform, 'payments'))
+    results = []
+    for payment in payments:
+        if payment.get('direction') != 'sent':
+            continue
+        reference = str(payment.get('reference_id') or '').strip().casefold()
+        supplier = str(payment.get('supplier') or '').strip().casefold()
+        candidates = [bill for bill in bills
+                      if bill.get('status') != 'Voided'
+                      and str(bill.get('bill_number') or '').strip().casefold() == reference
+                      and (not supplier or str(bill.get('supplier') or '').strip().casefold() == supplier)]
+        state = 'Matched for review' if len(candidates) == 1 else ('Unmatched' if not candidates else 'Ambiguous')
+        results.append({
+            'payment_id': payment.get('id'),
+            'reference_id': payment.get('reference_id'),
+            'supplier': payment.get('supplier'),
+            'amount': str(money(payment.get('amount', 0), 'payment amount')),
+            'match_status': state,
+            'candidate_bill_ids': [bill.get('id') for bill in candidates],
+            'verification': 'Manual entry — unverified',
+        })
+    return {'items': results, 'mode': 'read_only_preview',
+            'note': 'No payment allocation or bank verification is performed.'}
