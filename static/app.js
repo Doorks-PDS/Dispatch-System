@@ -669,7 +669,7 @@
         <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
         <p id="wedMessage" role="status"></p>
       </form></section>
-      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedFulfillment" hidden>Job / Product Fulfillment</button><button class="btn" id="wedConvert" hidden>Create Draft Invoice</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
+      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedCreateFulfillment" hidden>Create Job / Product Order</button><button class="btn" id="wedFulfillment" hidden>Job / Product Fulfillment</button><button class="btn" id="wedConvert" hidden>Create Draft Invoice</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
       </div>`;
     if(!filterType){const po=document.createElement('button');po.className='btn';po.textContent='+ New Purchase Order';po.onclick=()=>renderBusinessCollection(platform,'purchase_orders',true,()=>renderBusinessHub(platform));el('wedNewInvoice').after(po);}
     // Phase 2R-K: scoped document workspace styling; PDS views are untouched.
@@ -770,7 +770,22 @@
       const subtotal=lines.reduce((a,l)=>a+(Number(l.quantity)||0)*(Number(l.rate)||0),0),tax=Number(item.tax_amount)||0;
       return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:34px;background:white;line-height:1.5"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(company)}</h2><p>41080 Saddleback Dr<br>Aguanga, CA 92536</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0"><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Customer / Bill To</b><p>${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}</p></div><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Ship To / Service Location</b><p style="white-space:pre-line">${escapeHtml(item.ship_to||item.address)}</p></div></div><p><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#eaf0f6;color:#17263a"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Tax: ${fmt(tax)}</p><h2 style="border-top:2px solid #263a50;padding-top:12px">Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
     }
-    function view(item){q('wedFulfillment').hidden=item.document_type!=='Estimate';q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    function view(item){q('wedCreateFulfillment').hidden=item.document_type!=='Estimate';q('wedFulfillment').hidden=item.document_type!=='Estimate';q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    q('wedCreateFulfillment').onclick=async()=>{
+      if(!viewing||viewing.document_type!=='Estimate')return;
+      if(String(viewing.status||'').toLowerCase()!=='approved'){alert('Approve the estimate before creating a job or product order.');return;}
+      const source=viewing,button=q('wedCreateFulfillment');
+      if(!confirm(`Create or open the linked ${platform==='doorks'?'job':'product order'} for estimate ${source.document_number||''}?`))return;
+      button.disabled=true;
+      try{
+        const result=await fetchJSON(`/workspaces/${platform}/estimates/${encodeURIComponent(source.id)}/create-fulfillment`,{method:'POST'});
+        await refresh();
+        const number=result.item.job_number||result.item.order_number||result.item.id;
+        alert((result.already_exists?'Existing linked record: ':'Created linked record: ')+number);
+        renderBusinessCollection(platform,result.collection,false,()=>renderWorkspaceEstimateInvoice(platform,false,backAction,filterType));
+      }catch(err){alert('Could not create linked fulfillment record: '+(err.message||err));}
+      finally{button.disabled=false;}
+    };
     q('wedFulfillment').onclick=async()=>{
       if(!viewing||viewing.document_type!=='Estimate')return;
       if(String(viewing.status||'').toLowerCase()!=='approved'){alert('Approve the estimate first.');return;}
@@ -898,7 +913,7 @@
       if(!filtered.length){const empty=document.createElement('p');empty.className='hint';empty.textContent=q?'No matching records.':'No records saved yet. Select New to create the first one.';host.append(empty);return;}
       for(const item of filtered.slice().reverse()){
         const row=document.createElement('div');row.style.cssText='padding:16px;margin:10px 0;border:1px solid #d9dee7;border-radius:12px;background:#fff';
-        const title=document.createElement('strong');title.textContent=(kind==='work_orders'&&item.work_order_number?item.work_order_number+' · ':'')+(item.customer||item.name||item.item||item.description||item.part_number||'Record');row.append(title);
+        const title=document.createElement('strong');title.textContent=(kind==='work_orders'&&(item.job_number||item.work_order_number)?(item.job_number||item.work_order_number)+' · ':'')+(item.customer||item.name||item.item||item.description||item.part_number||'Record');row.append(title);
         const details=document.createElement('div');details.style.cssText='white-space:pre-wrap;margin:10px 0;color:#526071;font-size:14px;line-height:1.55';details.textContent=fields.filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>`${k.replaceAll('_',' ')}: ${item[k]}`).join('\n');if(['customers','vendors'].includes(kind)){const summary=document.createElement('p');summary.className='hint';summary.textContent=[item.contact,item.email,item.phone,item.service_area].filter(Boolean).join(' · ');row.append(summary);details.hidden=true;const view=document.createElement('button');view.type='button';view.className='btn';view.textContent='View Details';view.onclick=()=>{details.hidden=!details.hidden;view.textContent=details.hidden?'View Details':'Hide Details';};row.append(view);}row.append(details);
         if(kind==='expenses'){
           const status=document.createElement('div');status.className='hint';status.textContent=item.authorization_status==='Authorized'?'Authorized':'Pending Authorization';row.append(status);
@@ -914,8 +929,8 @@
             try{
               const data={customer:item.customer||'',contact:item.contact||'',email:item.email||'',phone:item.phone||'',address:item.address||'',service_type:item.service_type||'',request_source:'Customer Inquiry',scheduled_date:item.preferred_date||'',scheduled_time:item.preferred_time||'',description:item.description||'',status:'New',notes:'Created from customer inquiry '+item.id};
               const created=await fetchJSON('/workspaces/doorks/work_orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
-              await fetchJSON(endpoint+'/'+encodeURIComponent(item.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Converted',work_order_number:created.item.work_order_number}})});
-              await refresh();alert('Created '+created.item.work_order_number+'. Find it under All Work Orders.');
+              await fetchJSON(endpoint+'/'+encodeURIComponent(item.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Converted',work_order_number:created.item.job_number||created.item.work_order_number}})});
+              await refresh();alert('Created '+(created.item.job_number||created.item.work_order_number)+'. Find it under All Work Orders.');
             }catch(err){alert('Work order creation may have partially completed. Check All Work Orders before retrying. '+(err.message||err));}finally{convert.disabled=false;}
           };row.append(convert);
         }

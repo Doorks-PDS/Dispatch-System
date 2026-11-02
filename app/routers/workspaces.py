@@ -2,6 +2,7 @@
 from __future__ import annotations
 import json, os, uuid, re
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from threading import RLock
 from fastapi import APIRouter, HTTPException, Request
@@ -77,28 +78,79 @@ def create(platform:str,kind:str,payload:Record,request:Request):
                 json.dump({"last":current+1},f);f.flush();os.fsync(f.fileno())
             os.replace(tmp,counter_path)
         if platform=="doorks" and kind=="work_orders":
-            # Monotonic counter on persistent storage, never derived from list length.
-            # Keep the counter even if work orders are deleted.
-            counter_path=path.parent/"work_order_sequence.json"
-            current=0
+            # Calendar-month sequence, date prefix in workspace-local time.
+            # Reserve before writing the record to prevent number reuse after deletion.
+            now_local=datetime.now(ZoneInfo("America/Los_Angeles"))
+            month_key=now_local.strftime("%Y-%m")
+            counter_path=path.parent/"work_order_monthly_sequence.json"
+            state={}
             if counter_path.exists():
-                current=int(json.loads(counter_path.read_text(encoding="utf-8")).get("last",0))
+                state=json.loads(counter_path.read_text(encoding="utf-8"))
+                if not isinstance(state,dict):raise HTTPException(500,"Invalid work order counter")
+            current=int(state.get(month_key,0))
+            # Account for records created with this scheme even if counter was lost.
             for existing in items:
-                match=re.fullmatch(r"WO-(\d+)",str(existing.get("work_order_number", "")))
+                created=str(existing.get("created_at",""))
+                if not str(existing.get("job_number", "")).startswith(now_local.strftime("%m%y")+"-"):continue
+                match=re.fullmatch(r"\d{4}-(\d+)",str(existing.get("job_number", "")))
                 if match:current=max(current,int(match.group(1)))
+            current+=1
             data.pop("work_order_number",None)
-            data["work_order_number"]=f"WO-{current+1:04d}"
-            # Write the reservation before saving the work order; skipped numbers
-            # are preferable to reusing a number after a failed write.
-            save_counter=counter_path.with_suffix(".tmp")
-            with save_counter.open("w",encoding="utf-8") as f:
-                json.dump({"last":current+1},f);f.flush();os.fsync(f.fileno())
-            os.replace(save_counter,counter_path)
+            data.pop("job_number",None)
+            data["job_number"]=f"{now_local:%m%y}-{current:02d}"
+            state[month_key]=current
+            tmp=counter_path.with_suffix(".tmp")
+            with tmp.open("w",encoding="utf-8") as f:
+                json.dump(state,f);f.flush();os.fsync(f.fileno())
+            os.replace(tmp,counter_path)
         item={"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**data}
         
+        if kind in ("work_orders","orders") and data.get("source_estimate_id"):
+            existing=next((x for x in items if x.get("source_estimate_id")==data["source_estimate_id"]),None)
+            if existing:raise HTTPException(409,"This estimate already has a linked fulfillment record")
         if kind=="expenses":item["authorization_status"]="Pending Authorization"
         items.append(item);save(path,items)
     return {"item":item}
+
+@router.post("/{platform}/estimates/{record_id}/create-fulfillment")
+def create_estimate_fulfillment(platform:str,record_id:str,request:Request):
+    """Create one linked Doorks job or SDC product order from an approved estimate."""
+    guard(request,platform,"estimates_invoices")
+    target_kind="work_orders" if platform=="doorks" else "orders"
+    guard(request,platform,target_kind)
+    with _lock:
+        estimates=load(location(request,platform,"estimates_invoices"))
+        estimate=next((x for x in estimates if x.get("id")==record_id and str(x.get("document_type","")).casefold()=="estimate"),None)
+        if estimate is None:raise HTTPException(404,"Estimate not found")
+        if str(estimate.get("status","")).casefold()!="approved":raise HTTPException(409,"Approve estimate first")
+        target_path=location(request,platform,target_kind)
+        records=load(target_path)
+        existing=next((x for x in records if x.get("source_estimate_id")==record_id),None)
+        if existing:return {"item":existing,"already_exists":True,"collection":target_kind}
+        fields={k:estimate[k] for k in ("customer","customer_name","contact","address","description","total","amount","notes") if k in estimate and isinstance(estimate[k],(str,int,float,bool,type(None)))}
+        fields.update(source_estimate_id=record_id,source_estimate_number=str(estimate.get("document_number","")),status="Pending",fulfillment_status="Pending")
+        if platform=="doorks":
+            now_local=datetime.now(ZoneInfo("America/Los_Angeles"))
+            month_key=now_local.strftime("%Y-%m")
+            counter_path=target_path.parent/"work_order_monthly_sequence.json"
+            state=json.loads(counter_path.read_text(encoding="utf-8")) if counter_path.exists() else {}
+            if not isinstance(state,dict):raise HTTPException(500,"Invalid work order counter")
+            current=int(state.get(month_key,0))
+            for row in records:
+                if str(row.get("job_number","")).startswith(now_local.strftime("%m%y")+"-"):
+                    m=re.fullmatch(r"\d{4}-(\d+)",str(row.get("job_number","")))
+                    if m:current=max(current,int(m.group(1)))
+            current+=1
+            fields["job_number"]=f"{now_local:%m%y}-{current:02d}"
+            state[month_key]=current
+            tmp=counter_path.with_suffix(".tmp")
+            with tmp.open("w",encoding="utf-8") as f:
+                json.dump(state,f);f.flush();os.fsync(f.fileno())
+            os.replace(tmp,counter_path)
+        item={"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**fields}
+        records.append(item)
+        save(target_path,records)
+        return {"item":item,"already_exists":False,"collection":target_kind}
 
 @router.post("/{platform}/estimates/{record_id}/fulfillment")
 def set_estimate_fulfillment(platform:str,record_id:str,payload:dict,request:Request):
@@ -164,7 +216,11 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
                 data=clean(payload.data)
                 for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
                 if kind=="purchase_orders":data.pop("po_number",None)
+                if kind in ("work_orders","orders"):
+                    data.pop("source_estimate_id",None)
+                    data.pop("source_estimate_number",None)
                 if platform=="doorks" and kind=="work_orders":
+                    data.pop("job_number",None)
                     data.pop("work_order_number",None)
                     data.pop("id",None)
                     data.pop("created_at",None)
