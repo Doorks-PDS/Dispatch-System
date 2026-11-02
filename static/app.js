@@ -669,7 +669,7 @@
         <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
         <p id="wedMessage" role="status"></p>
       </form></section>
-      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedConvert" hidden>Create Invoice from Estimate</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
+      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedFulfillment" hidden>Job / Product Fulfillment</button><button class="btn" id="wedConvert" hidden>Create Draft Invoice</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
       </div>`;
     if(!filterType){const po=document.createElement('button');po.className='btn';po.textContent='+ New Purchase Order';po.onclick=()=>renderBusinessCollection(platform,'purchase_orders',true,()=>renderBusinessHub(platform));el('wedNewInvoice').after(po);}
     // Phase 2R-K: scoped document workspace styling; PDS views are untouched.
@@ -770,19 +770,34 @@
       const subtotal=lines.reduce((a,l)=>a+(Number(l.quantity)||0)*(Number(l.rate)||0),0),tax=Number(item.tax_amount)||0;
       return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:34px;background:white;line-height:1.5"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(company)}</h2><p>41080 Saddleback Dr<br>Aguanga, CA 92536</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0"><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Customer / Bill To</b><p>${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}</p></div><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Ship To / Service Location</b><p style="white-space:pre-line">${escapeHtml(item.ship_to||item.address)}</p></div></div><p><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#eaf0f6;color:#17263a"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Tax: ${fmt(tax)}</p><h2 style="border-top:2px solid #263a50;padding-top:12px">Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
     }
-    function view(item){q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
-    q('wedConvert').onclick=()=>{
+    function view(item){q('wedFulfillment').hidden=item.document_type!=='Estimate';q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    q('wedFulfillment').onclick=async()=>{
       if(!viewing||viewing.document_type!=='Estimate')return;
-      const source=viewing;
-      open({...source,id:undefined,document_type:'Invoice',document_number:'',status:'Draft',paid:0},'Invoice');
-      // Never update the original estimate; save creates a new invoice.
-      editing=null;
-      f('document_type').disabled=true;
-      f('document_type').value='Invoice';
-      updateStatusOptions('Invoice','Draft');
-      f('document_number').value='';
-      q('wedEditorTitle').textContent='New Invoice from '+(source.document_number||'Estimate');
-      q('wedMessage').textContent='Review the details and save to create a separate invoice. The estimate stays unchanged.';
+      if(String(viewing.status||'').toLowerCase()!=='approved'){alert('Approve the estimate first.');return;}
+      const track=prompt('Fulfillment type: Service or Product',viewing.fulfillment_track||'Service');
+      if(track===null)return;
+      const normalizedTrack=track.trim().toLowerCase()==='service'?'Service':track.trim().toLowerCase()==='product'?'Product':null;
+      if(!normalizedTrack){alert('Enter Service or Product.');return;}
+      const stage=prompt('Fulfillment stage: Pending, In Progress, or Completed',viewing.fulfillment_status||'Pending');
+      if(stage===null)return;
+      const normalizedStage=['Pending','In Progress','Completed'].find(x=>x.toLowerCase()===stage.trim().toLowerCase());
+      if(!normalizedStage){alert('Enter Pending, In Progress, or Completed.');return;}
+      try{const result=await fetchJSON(`/workspaces/${platform}/estimates/${encodeURIComponent(viewing.id)}/fulfillment`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({track:normalizedTrack,stage:normalizedStage})});await refresh();view(result.item);}
+      catch(err){alert('Fulfillment update failed: '+(err.message||err));}
+    };
+    q('wedConvert').onclick=async()=>{
+      if(!viewing||viewing.document_type!=='Estimate')return;
+      if(String(viewing.status||'').toLowerCase()!=='approved'){
+        alert('Approve this estimate before converting it to an invoice.');return;
+      }
+      const source=viewing,button=q('wedConvert');button.disabled=true;
+      try{
+        const result=await fetchJSON(`/workspaces/${platform}/estimates/${encodeURIComponent(source.id)}/convert-to-invoice`,{method:'POST'});
+        await refresh();
+        view(result.item);
+        if(result.already_exists)alert('An invoice already exists for this estimate. Opening the existing invoice.');
+      }catch(err){alert('Invoice conversion failed: '+(err.message||err));}
+      finally{button.disabled=false;}
     };
     q('wedEdit').onclick=()=>viewing&&open(viewing);
     q('wedDetailClose').onclick=()=>{q('wedDetails').hidden=true;viewing=null;};

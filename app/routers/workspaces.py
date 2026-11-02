@@ -100,6 +100,60 @@ def create(platform:str,kind:str,payload:Record,request:Request):
         items.append(item);save(path,items)
     return {"item":item}
 
+@router.post("/{platform}/estimates/{record_id}/fulfillment")
+def set_estimate_fulfillment(platform:str,record_id:str,payload:dict,request:Request):
+    """Record an approval-linked service or product milestone without creating an invoice."""
+    guard(request,platform,"estimates_invoices")
+    stage=payload.get("stage")
+    track=payload.get("track")
+    if track not in ("Service","Product") or stage not in ("Pending","In Progress","Completed"):
+        raise HTTPException(400,"Choose Service/Product and Pending/In Progress/Completed")
+    with _lock:
+        path=location(request,platform,"estimates_invoices");items=load(path)
+        item=next((x for x in items if x.get("id")==record_id and str(x.get("document_type","")).casefold()=="estimate"),None)
+        if item is None:raise HTTPException(404,"Estimate not found")
+        if str(item.get("status","")).casefold()!="approved":raise HTTPException(409,"Approve the estimate first")
+        item["fulfillment_track"]=track
+        item["fulfillment_status"]=stage
+        item["fulfillment_updated_at"]=datetime.now(timezone.utc).isoformat()
+        save(path,items)
+        return {"item":item}
+
+@router.post("/{platform}/estimates/{record_id}/convert-to-invoice")
+def convert_estimate_to_invoice(platform:str,record_id:str,request:Request):
+    """Atomically create one draft invoice linked to a saved approved estimate."""
+    guard(request,platform,"estimates_invoices")
+    with _lock:
+        path=location(request,platform,"estimates_invoices")
+        items=load(path)
+        source=next((x for x in items if x.get("id")==record_id),None)
+        if source is None or str(source.get("document_type","")).casefold()!="estimate":
+            raise HTTPException(404,"Estimate not found")
+        if str(source.get("status","")).casefold()!="approved":
+            raise HTTPException(409,"Approve the estimate before converting it")
+        existing=next((x for x in items if x.get("document_type","").casefold()=="invoice" and x.get("source_estimate_id")==record_id),None)
+        if existing:return {"item":existing,"already_exists":True}
+        # Use existing invoice numbers when deriving next sequence; never reuse a deleted
+        # number because the monotonic sequence file persists separately.
+        counter=path.parent/"invoice_sequence.json"
+        current=0
+        if counter.exists():current=int(json.loads(counter.read_text(encoding="utf-8")).get("last",0))
+        for row in items:
+            match=re.fullmatch(r"INV-(\d+)",str(row.get("document_number", "")))
+            if match:current=max(current,int(match.group(1)))
+        number=f"INV-{current+1:05d}"
+        tmp=counter.with_suffix(".tmp")
+        with tmp.open("w",encoding="utf-8") as f:
+            json.dump({"last":current+1},f);f.flush();os.fsync(f.fileno())
+        os.replace(tmp,counter)
+        now=datetime.now(timezone.utc).isoformat()
+        excluded={"id","created_at","updated_at","document_number","status","paid","source_estimate_id","source_estimate_number"}
+        invoice={k:v for k,v in source.items() if k not in excluded}
+        invoice.update(id=uuid.uuid4().hex,created_at=now,document_type="Invoice",document_number=number,status="Draft",paid=0,source_estimate_id=record_id,source_estimate_number=source.get("document_number", ""),fulfillment_track=source.get("fulfillment_track",""),fulfillment_status=source.get("fulfillment_status","Pending"))
+        items.append(invoice)
+        save(path,items)
+    return {"item":invoice,"already_exists":False}
+
 @router.patch("/{platform}/{kind}/{record_id}")
 def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
     guard(request,platform,kind)
