@@ -623,7 +623,7 @@
     const title=kind==='vendors'?(platform==='sdc'?'Suppliers':'Vendors'):'Customers & Contacts';
     clearWorkspaceActions();setWorkspace((platform==='sdc'?'SDC':'Doorks')+' — '+title);
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center"><div><h2>'+title+'</h2><p class="hint">Manage business records and related contact information.</p></div><button class="btn" id="directoryBack">← Business Hub</button></div><div id="directoryCards"></div></div>';
-    el('directoryBack').onclick=()=>renderBusinessHub(platform);const intake=document.createElement('button');intake.className='btn';intake.textContent='✨ Upload / Paste with AI';intake.onclick=()=>renderBusinessAiIntake(platform,()=>renderWorkspaceDirectory(platform,kind));el('directoryBack').before(intake);
+    el('directoryBack').onclick=()=>renderBusinessHub(platform);const intake=document.createElement('button');intake.className='btn';intake.textContent='✨ AI Intake';intake.onclick=()=>renderBusinessAiIntake(platform,()=>renderWorkspaceDirectory(platform,kind));el('directoryBack').before(intake);const directoryActions=document.createElement('div');directoryActions.style.cssText='display:flex;justify-content:flex-end;align-items:center;gap:8px;flex-wrap:wrap;margin-left:auto';intake.before(directoryActions);directoryActions.append(intake,el('directoryBack'));
     const open=()=>renderBusinessCollection(platform,kind,false,()=>renderWorkspaceDirectory(platform,kind));
     makeHubCards(el('directoryCards'),kind==='customers'?[
       {icon:'🏢',label:'Customer Directory',description:'Search, add and edit saved customers.',open},
@@ -647,7 +647,7 @@
     setWorkspace(company+' — '+(filterType?sectionType+'s':'Document Generator'));
     workspaceBody.innerHTML=`<div style="max-width:1260px;margin:auto;display:grid;gap:16px">
       <section class="card"><div style="border-bottom:1px solid #dce3ed;padding-bottom:12px;margin-bottom:16px"><h2 style="margin:0;text-transform:uppercase">${company}</h2><p class="hint">41080 Saddleback Dr, Aguanga, CA 92536</p></div><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0" id="wedHeading">Estimates & Invoices</h2><p class="hint" id="wedIntro">Create, review and print branded documents.</p></div><button class="btn" id="wedBack">← Business Hub</button></div></section>
-      <section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0" id="wedSavedHeading">Saved Documents</h3><div style="display:flex;gap:8px"><button class="btn" id="wedNewEstimate">+ New Estimate</button><button class="btn" id="wedNewInvoice">+ New Invoice</button></div></div><div style="display:flex;gap:8px;margin:12px 0"><select class="input" id="wedFilter"><option value="">All Documents</option><option>Estimate</option><option>Invoice</option></select><input class="input" id="wedSearch" type="search" placeholder="Search customer, number, job or status…" style="flex:1;min-width:0"></div><div id="wedList">Loading…</div></section>
+      <section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap"><h3 style="margin:0" id="wedSavedHeading">Saved Documents</h3><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end;margin-left:auto"><button class="btn btn-orange" id="wedNewEstimate">+ New Estimate</button><button class="btn btn-orange" id="wedNewInvoice">+ New Invoice</button></div></div><div style="display:flex;gap:8px;margin:12px 0"><select class="input" id="wedFilter"><option value="">All Documents</option><option>Estimate</option><option>Invoice</option></select><input class="input" id="wedSearch" type="search" placeholder="Search customer, number, job or status…" style="flex:1;min-width:0"></div><div id="wedList">Loading…</div></section>
       <section class="card" id="wedEditor" hidden><div style="display:flex;justify-content:space-between;align-items:center"><h3 id="wedEditorTitle">Document Generator</h3><button class="btn" id="wedCancel">Close</button></div>
       <div style="padding:18px;border:1px solid #d9dee7;border-radius:16px;margin:12px 0"><h1 style="margin:0;text-transform:uppercase;letter-spacing:.025em">${company}</h1><p class="hint">41080 Saddleback Dr · Aguanga, CA 92536</p></div>
       <form id="wedForm" style="display:grid;gap:15px">
@@ -760,7 +760,7 @@
       q('wedEditorTitle').textContent=(item?'Edit ':'New ')+f('document_type').value;
       q('wedEditor').scrollIntoView({block:'start',behavior:'smooth'});
     }
-    const aiButton=document.createElement('button');aiButton.className='btn';aiButton.textContent='✨ Upload / Paste with AI';aiButton.onclick=()=>renderBusinessAiIntake(platform,()=>renderWorkspaceEstimateInvoice(platform,false,backAction,filterType));q('wedNewInvoice').after(aiButton);
+    const aiButton=document.createElement('button');aiButton.className='btn';aiButton.textContent='✨ AI Intake';aiButton.onclick=()=>renderBusinessAiIntake(platform,()=>renderWorkspaceEstimateInvoice(platform,false,backAction,filterType));q('wedNewEstimate').before(aiButton);
     q('wedNewEstimate').onclick=()=>open(null,'Estimate');q('wedNewInvoice').onclick=()=>open(null,'Invoice');
     f('document_type').onchange=()=>{q('wedEditorTitle').textContent=(editing?'Edit ':'New ')+f('document_type').value;updateStatusOptions(f('document_type').value);};
     q('wedCancel').onclick=()=>{q('wedEditor').hidden=true;editing=null;};
@@ -810,7 +810,7 @@
       el('businessNew').parentElement.append(action);
     }
     if(kind==='inventory'){
-      const ai=document.createElement('button');ai.type='button';ai.className='btn';ai.textContent='✨ Upload / Paste with AI';
+      const ai=document.createElement('button');ai.type='button';ai.className='btn';ai.textContent='✨ AI Intake';
       ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderBusinessCollection(platform,'inventory',false,backAction));
       el('businessNew').before(ai);
     }
