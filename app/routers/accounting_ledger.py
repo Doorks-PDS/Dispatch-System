@@ -111,3 +111,41 @@ def update_bill(platform:str,record_id:str,request:Request,payload:Payload):
                 return {'item':normalized}
     raise HTTPException(404,'Bill not found')
 
+
+
+@router.get('/{platform}/bill-balances')
+def bill_balances(platform: str, request: Request):
+    """Read-only supplier bill reconciliation preview; no payments are posted."""
+    guard(request, platform)
+    with LOCK:
+        bills = load(path(request, platform, 'bills'))
+        payments = load(path(request, platform, 'payments'))
+    results = []
+    for bill in bills:
+        number = str(bill.get('bill_number', '')).strip().casefold()
+        supplier = str(bill.get('supplier', '')).strip().casefold()
+        amount = money(bill.get('amount', 0), 'bill amount')
+        same_number = [b for b in bills if str(b.get('bill_number', '')).strip().casefold() == number and b.get('status') != 'Voided']
+        matches, ambiguous = [], []
+        for payment in payments:
+            if payment.get('direction') != 'sent' or str(payment.get('reference_id', '')).strip().casefold() != number:
+                continue
+            ps = str(payment.get('supplier', '')).strip().casefold()
+            if ps and ps != supplier:
+                continue
+            if not ps and len(same_number) > 1:
+                ambiguous.append(payment.get('id'))
+            else:
+                matches.append(payment)
+        paid = sum((money(p.get('amount', 0), 'payment amount') for p in matches), Decimal('0'))
+        balance = amount - paid
+        results.append({'bill_id': bill.get('id'), 'supplier': bill.get('supplier'),
+                        'bill_number': bill.get('bill_number'), 'bill_status': bill.get('status'),
+                        'amount': str(amount), 'paid': str(paid), 'balance': str(balance),
+                        'matched_payments': len(matches), 'ambiguous_payment_ids': ambiguous,
+                        'payment_status': ('Voided' if bill.get('status') == 'Voided' else
+                                           'Review required' if ambiguous or balance < 0 else
+                                           'Paid' if balance == 0 else
+                                           'Partially paid' if paid > 0 else 'Unpaid')})
+    return {'items': results, 'mode': 'read_only_preview',
+            'note': 'Manual, unverified payment records; not bank settlement confirmation.'}

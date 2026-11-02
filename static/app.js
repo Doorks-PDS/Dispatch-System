@@ -812,7 +812,7 @@
     if(kind==='inventory'){
       const ai=document.createElement('button');ai.type='button';ai.className='btn';ai.textContent='✨ AI Intake';
       ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderBusinessCollection(platform,'inventory',false,backAction));
-      el('businessNew').before(ai);
+      const actionGroup=document.createElement('div');actionGroup.style.cssText='display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap;margin-left:auto';const newButton=el('businessNew');newButton.parentElement.insertBefore(actionGroup,newButton);actionGroup.append(ai,newButton);
     }
     const form=el('businessRecordForm'),message=el('businessSaveMessage'),editor=el('businessEditor');
     const endpoint=`/workspaces/${platform}/${kind}`;
