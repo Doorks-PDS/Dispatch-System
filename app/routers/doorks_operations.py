@@ -224,6 +224,15 @@ def reconciliation(request: Request):
     for bill in bills:
         if bill.get('source_po_id') and bill['source_po_id'] not in order_ids:
             issues.append(dict(type='missing_purchase_order',reference=bill.get('bill_number',''),message='Supplier bill references a missing purchase order'))
+    # Manual ledger and linked workflow bills are separate stores. Flag potential duplicates
+    # without deleting, moving, or auto-posting any financial record.
+    from app.routers import accounting_ledger as ledger
+    manual_bills=ledger.load(ledger.path(request,'doorks','bills'))
+    linked_keys={(str(b.get('vendor') or '').strip().casefold(),str(b.get('bill_number') or '').strip().casefold()) for b in bills}
+    for manual in manual_bills:
+        key=(str(manual.get('supplier') or '').strip().casefold(),str(manual.get('bill_number') or '').strip().casefold())
+        if all(key) and key in linked_keys:
+            issues.append(dict(type='possible_cross_ledger_duplicate',reference=manual.get('bill_number',''),message='Bill also exists in the linked PO workflow; review before recording payments'))
     for row in ar+bills:
         if money(row.get('paid'))>money(row.get('amount')):
             issues.append(dict(type='overpayment',reference=row.get('invoice_number') or row.get('bill_number',''),message='Payments exceed recorded total'))
@@ -233,3 +242,110 @@ def reconciliation(request: Request):
                 outstanding_supplier_bills=float(sum((max(Decimal(0),money(r.get('amount'))-money(r.get('paid'))) for r in bills),Decimal(0))),
                 inventory_intake_records=len(generic),issues=issues,
                 note='Reconciliation of internal Doorks records only; not bank reconciliation or general ledger posting.')
+
+
+# Revision 24: derived stock balances. Catalog entries remain visible when on-hand is zero.
+# The receiving journal is the source of goods received; manual changes are append-only.
+from pydantic import Field
+import uuid
+
+class StockAdjustment(BaseModel):
+    sku: str = Field(min_length=1, max_length=120)
+    quantity_delta: float
+    reason: str = Field(min_length=3, max_length=500)
+    request_id: str = Field(min_length=8, max_length=120)
+
+
+def _sku(value):
+    return str(value or '').strip().casefold()
+
+
+def stock_snapshot(request):
+    from app.routers.pds_purchase_orders import _receive_events
+    catalog = ws.load(ws.location(request, 'doorks', 'inventory'))
+    receiving = _receive_events(request, 'doorks')
+    changes = ws.load(ws.location(request, 'doorks', 'stock_adjustments'))
+    items = {}
+    for part in catalog:
+        sku = str(part.get('part_number') or part.get('sku') or '').strip()
+        if not sku: continue
+        key = _sku(sku)
+        entry = items.setdefault(key, dict(sku=sku, description='', supplier='', unit_cost=0,
+                                            received=0.0, adjustments=0.0, on_hand=0.0, catalog_id=''))
+        entry.update(description=part.get('description',''), supplier=part.get('supplier',''),
+                     unit_cost=part.get('unit_cost',0), catalog_id=part.get('id',''),
+                     opening_quantity=float(part.get('quantity') or 0))
+    for event in receiving:
+        if not event.get('to_inventory') or not _sku(event.get('sku')): continue
+        sku = str(event['sku']).strip(); key = _sku(sku)
+        entry = items.setdefault(key, dict(sku=sku, description='', supplier='', unit_cost=0,
+                                            received=0.0, adjustments=0.0, on_hand=0.0, catalog_id=''))
+        entry['received'] += float(event.get('quantity') or 0)
+    for change in changes:
+        key = _sku(change.get('sku'))
+        if not key: continue
+        entry = items.setdefault(key, dict(sku=change['sku'], description='', supplier='', unit_cost=0,
+                                            received=0.0, adjustments=0.0, on_hand=0.0, catalog_id=''))
+        entry['adjustments'] += float(change.get('quantity_delta') or 0)
+    for entry in items.values():
+        entry['on_hand'] = round(float(entry.get('opening_quantity') or 0) + entry['received'] + entry['adjustments'], 4)
+        entry['received'] = round(entry['received'], 4)
+        entry['adjustments'] = round(entry['adjustments'], 4)
+    return dict(items=sorted(items.values(), key=lambda x:x['sku'].casefold()),
+                adjustment_count=len(changes), receipt_count=len(receiving),
+                note='On-hand derives from receiving and recorded stock adjustments. No automatic usage deductions yet.')
+
+@router.get('/stock')
+def stock(request: Request):
+    guard(request)
+    return stock_snapshot(request)
+
+@router.post('/stock/adjustments')
+def adjust_stock(payload: StockAdjustment, request: Request):
+    guard(request)
+    from math import isfinite
+    if not isfinite(payload.quantity_delta) or abs(payload.quantity_delta)>1000000 or payload.quantity_delta==0:
+        raise HTTPException(400,'Enter a finite nonzero adjustment quantity')
+    with _lock:
+        path=ws.location(request,'doorks','stock_adjustments')
+        changes=ws.load(path)
+        previous=next((r for r in changes if r.get('request_id')==payload.request_id),None)
+        if previous:
+            if _sku(previous['sku'])!=_sku(payload.sku) or float(previous['quantity_delta'])!=payload.quantity_delta:
+                raise HTTPException(409,'Request ID reused for different stock adjustment')
+            return dict(item=previous,duplicate=True)
+        before=next((i for i in stock_snapshot(request)['items'] if _sku(i['sku'])==_sku(payload.sku)),None)
+        if before is None:raise HTTPException(404,'Part number not found in catalog or receiving history')
+        if before['on_hand']+payload.quantity_delta < -0.000001:
+            raise HTTPException(409,'Adjustment would make on-hand quantity negative')
+        record=dict(id=uuid.uuid4().hex,sku=before['sku'],quantity_delta=payload.quantity_delta,
+                    reason=payload.reason.strip(),request_id=payload.request_id,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    actor=str(request.state.auth_user.get('id','')))
+        changes.append(record);ws.save(path,changes)
+        return dict(item=record,duplicate=False,on_hand=round(before['on_hand']+payload.quantity_delta,4))
+
+@router.get('/financial-register')
+def financial_register(request: Request):
+    guard(request)
+    from app.routers import accounting_ledger as ledger
+    linked_bills=ac.read(ac.base(request)/'supplier_bills.json')
+    manual_bills=ledger.load(ledger.path(request,'doorks','bills'))
+    manual_payments=ledger.load(ledger.path(request,'doorks','payments'))
+    events=ws.load(ac.base(request)/'workflow_events.json')
+    ar=ac.read(ac.base(request)/'receivables.json')
+    invoices=ws.load(ws.location(request,'doorks','estimates_invoices'))
+    orders=ws.load(ws.location(request,'doorks','purchase_orders'))
+    bills=[]
+    for row in linked_bills:
+        bills.append(dict(**row,origin='linked_workflow',supplier=row.get('vendor',''),
+                          balance=round(float(row.get('amount') or 0)-float(row.get('paid') or 0),2)))
+    for row in manual_bills:
+        bills.append(dict(**row,origin='manual_ledger',balance=float(row.get('amount') or 0)))
+    payment_events=[e for e in events if e.get('action') in ('payment_sent','payment_received')]
+    return dict(supplier_bills=bills,manual_payments=manual_payments,workflow_payment_events=payment_events,
+                receivables=ar,invoice_count=sum(str(d.get('document_type','')).lower()=='invoice' for d in invoices),
+                purchase_order_count=len(orders),
+                linked_supplier_balance=round(sum(max(0,float(b['balance'])) for b in bills if b['origin']=='linked_workflow'),2),
+                manual_supplier_bill_total=round(sum(float(b.get('amount') or 0) for b in bills if b['origin']=='manual_ledger'),2),
+                note='Linked and manual bills shown separately. No automatic merging or double-counting across sources.')
