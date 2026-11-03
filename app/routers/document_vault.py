@@ -50,16 +50,18 @@ def validate_type(t):
 def trim(v,n=200):return str(v or '').strip()[:n]
 
 @router.get('/{platform}')
-def listing(platform:str,request:Request,document_type:Optional[str]=None):
+def listing(platform:str,request:Request,document_type:Optional[str]=None,library_scope:Optional[str]=None):
     guard(request,platform)
     if document_type:validate_type(document_type)
+    if library_scope is not None and library_scope not in ('business','accounting'):raise HTTPException(400,'Invalid library scope')
     with _lock:
         items=read(paths(request,platform)[1])
-    return {'items':[x for x in items if not document_type or x['document_type']==document_type]}
+    return {'items':[x for x in items if (not document_type or x['document_type']==document_type) and (not library_scope or x.get('library_scope','accounting')==library_scope)]}
 
 @router.post('/{platform}')
-async def create(platform:str,request:Request,document_type:str=Form(...),vendor:str=Form(''),document_number:str=Form(''),document_date:str=Form(''),po_number:str=Form(''),notes:str=Form(''),extracted_json:str=Form(''),file:Optional[UploadFile]=File(None)):
+async def create(platform:str,request:Request,document_type:str=Form(...),vendor:str=Form(''),document_number:str=Form(''),document_date:str=Form(''),po_number:str=Form(''),notes:str=Form(''),extracted_json:str=Form(''),library_scope:str=Form('accounting'),file:Optional[UploadFile]=File(None)):
     guard(request,platform);validate_type(document_type)
+    if library_scope not in ('business','accounting'):raise HTTPException(400,'Invalid library scope')
     if len(notes)>4000 or len(extracted_json)>12000:raise HTTPException(400,'Text too long')
     try:parsed=json.loads(extracted_json) if extracted_json else {}
     except ValueError:raise HTTPException(400,'Invalid extracted data')
@@ -73,7 +75,7 @@ async def create(platform:str,request:Request,document_type:str=Form(...),vendor
     if not raw and not notes.strip() and not parsed:raise HTTPException(400,'Upload a document or enter text')
     folder,index=paths(request,platform);identifier=uuid.uuid4().hex
     stored=identifier+suffix if raw else ''
-    record={'id':identifier,'document_type':document_type,'vendor':trim(vendor),'document_number':trim(document_number),'document_date':trim(document_date,20),'po_number':trim(po_number),'notes':notes,'extracted':parsed,'original_filename':original,'attachment':stored,'created_at':datetime.now(timezone.utc).isoformat(),'review_status':'Saved - not posted'}
+    record={'id':identifier,'library_scope':library_scope,'document_type':document_type,'vendor':trim(vendor),'document_number':trim(document_number),'document_date':trim(document_date,20),'po_number':trim(po_number),'notes':notes,'extracted':parsed,'original_filename':original,'attachment':stored,'created_at':datetime.now(timezone.utc).isoformat(),'review_status':'Saved - not posted'}
     with _lock:
         items=read(index)
         if raw:
