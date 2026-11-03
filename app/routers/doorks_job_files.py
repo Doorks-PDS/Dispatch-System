@@ -50,7 +50,7 @@ def records(job_id:str,request:Request):
 @router.post('/{job_id}/forms')
 def add_form(job_id:str,payload:Visit,request:Request):
     base=folder(request,job_id)
-    allowed={'completion_date','completion_technician','completion_labor_hours','completion_labor_rate','completion_parts_total','completion_work_performed','completion_parts_used','completion_recommendations','completion_status','completion_door_type','completion_door_location','completion_time_in','completion_time_out','completion_lunch'}
+    allowed={'completion_date','completion_technician','completion_labor_hours','completion_labor_rate','completion_parts_total','completion_work_performed','completion_parts_used','completion_recommendations','completion_status','completion_door_type','completion_door_location','completion_time_in','completion_time_out','completion_lunch','completion_job_type_other'}
     if not isinstance(payload.data,dict) or set(payload.data)-allowed:raise HTTPException(400,'Invalid completion fields')
     data={}
     for key,value in payload.data.items():
@@ -67,7 +67,7 @@ def add_form(job_id:str,payload:Visit,request:Request):
 @router.patch('/{job_id}/forms/{form_id}')
 def edit_form(job_id:str,form_id:str,payload:Visit,request:Request):
     base=folder(request,job_id)
-    allowed={'completion_date','completion_technician','completion_labor_hours','completion_labor_rate','completion_parts_total','completion_work_performed','completion_parts_used','completion_recommendations','completion_status','completion_door_type','completion_door_location','completion_time_in','completion_time_out','completion_lunch'}
+    allowed={'completion_date','completion_technician','completion_labor_hours','completion_labor_rate','completion_parts_total','completion_work_performed','completion_parts_used','completion_recommendations','completion_status','completion_door_type','completion_door_location','completion_time_in','completion_time_out','completion_lunch','completion_job_type_other'}
     if not isinstance(payload.data,dict) or set(payload.data)-allowed:raise HTTPException(400,'Invalid completion fields')
     with _lock:
         path=base/'forms.json';items=read_index(path)
