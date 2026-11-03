@@ -247,6 +247,8 @@ from app.routers.workspace_ai import router as workspace_ai_router
 app.include_router(workspace_ai_router)
 from app.routers.doorks_accounting import router as doorks_accounting_router
 app.include_router(doorks_accounting_router)
+from app.routers.doorks_workflow import router as doorks_workflow_router
+app.include_router(doorks_workflow_router)
 from app.routers.ai_data_import import router as ai_data_import_router
 app.include_router(ai_data_import_router)
 

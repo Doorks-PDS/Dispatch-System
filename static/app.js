@@ -1196,6 +1196,7 @@
     el('doorksQuickNew').onclick=()=>renderAccountingQuickMenu('doorks','doorksQuickOptions');
     makeHubCards(el('doorksAcctHubCards'),[
       {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
+      {icon:'🔗',label:'Connected Workflows',description:'Link invoices, customer payments, PO receiving and supplier bills.',open:()=>renderDoorksWorkflow()},
       {icon:'📎',label:'Document Library',description:'Search and upload documents.',open:()=>renderDocumentVault('doorks','',renderDoorksAccountingHub)},
       {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
       {icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.',open:()=>renderAccountsPayable('doorks')},
@@ -1203,6 +1204,41 @@
       {icon:'📦',label:'Inventory & Receiving',description:'Receive purchase orders and review received stock.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)},
       {icon:'🏦',label:'Statements',description:'Review financial statement records.',open:()=>renderDoorksAccounting('statements')}
     ]);
+  }
+  async function renderDoorksWorkflow(){
+    if(activePlatform!=='doorks')return;
+    clearWorkspaceActions();setWorkspace('Doorks — Connected Workflows');
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><h2>Connected Business & Accounting</h2><p class="hint">Explicit actions only. Existing links are reused. Payments and receiving require confirmation.</p><div id="dwMetrics"></div><div id="dwContent"></div><p id="dwMsg" role="status"></p><button class="btn" id="dwBack">Back to Accounting Hub</button></div>';
+    el('dwBack').onclick=renderDoorksAccountingHub;
+    const host=el('dwContent'),msg=el('dwMsg');
+    const send=(url,data)=>fetchJSON(url,{method:'POST',...(data?{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{})});
+    const amount=(label,max)=>{const v=prompt(label+' (maximum '+Number(max).toFixed(2)+')');if(v===null)return null;const n=Number(v);if(!Number.isFinite(n)||n<=0||n>Number(max))throw Error('Enter a valid amount within the remaining balance.');return n;};
+    const action=(parent,label,fn)=>{const b=document.createElement('button');b.className='btn';b.textContent=label;b.style.margin='4px';b.onclick=async()=>{b.disabled=true;msg.textContent='';try{await fn();await refresh();}catch(e){msg.textContent=e.message||String(e);}finally{b.disabled=false;}};parent.append(b);};
+    async function refresh(){
+      const [metrics,docs,orders,ar,bills]=await Promise.all([fetchJSON('/doorks-workflow/overview'),fetchJSON('/workspaces/doorks/estimates_invoices'),fetchJSON('/workspaces/doorks/purchase_orders'),fetchJSON('/doorks-accounting/receivables'),fetchJSON('/doorks-workflow/supplier-bills')]);
+      el('dwMetrics').textContent=`Invoices ${metrics.invoices} · Open A/R $${Number(metrics.open_ar).toFixed(2)} · Purchase Orders ${metrics.purchase_orders} · Open A/P $${Number(metrics.open_ap).toFixed(2)}`;
+      host.replaceChildren();
+      const section=title=>{const x=document.createElement('section');x.style.cssText='margin:16px 0;padding:16px;border:1px solid #d9dee7;border-radius:12px';const h=document.createElement('h3');h.textContent=title;x.append(h);host.append(x);return x;};
+      const line=(parent,title)=>{const x=document.createElement('div');x.style.cssText='padding:8px 0;border-bottom:1px solid #eee';const label=document.createElement('span');label.textContent=title;x.append(label);parent.append(x);return x;};
+      const estimates=section('1. Estimate → Approval → Invoice');
+      for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='estimate')){
+        const row=line(estimates,`${d.document_number||'Estimate'} · ${d.customer||''} · ${d.status||'Draft'}`);
+        if(String(d.status||'').toLowerCase()!=='approved')action(row,'Approve Estimate',async()=>{if(!confirm('Approve this estimate?'))return;await fetchJSON('/workspaces/doorks/estimates_invoices/'+encodeURIComponent(d.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Approved'}})});});
+        else action(row,'Create / Open Linked Invoice',async()=>{await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/convert-to-invoice');});
+      }
+      const invoices=section('2. Invoice → Accounts Receivable');
+      for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice')){const row=line(invoices,`${d.document_number||'Invoice'} · ${d.customer||''} · $${Number(d.total||d.amount||0).toFixed(2)}`);action(row,'Sync to A/R',async()=>{await send('/doorks-workflow/invoices/'+encodeURIComponent(d.id)+'/sync-receivable');});}
+      const customers=section('3. Customer Payments');
+      for(const r of (ar.items||[])){const balance=Number(r.amount||0)-Number(r.paid||0);const row=line(customers,`${r.invoice_number||'A/R'} · ${r.customer||''} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Payment',async()=>{const n=amount('Customer payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' received?'))return;await send('/doorks-workflow/receivables/'+encodeURIComponent(r.id)+'/payments',{amount:n,reference});});}
+      const purchasing=section('4. Purchase Order → Receiving → Supplier Bill');
+      for(const po of (orders.items||[])){const row=line(purchasing,`${po.po_number||'PO'} · ${po.vendor||''} · ${po.status||'Draft'} · Received ${po.received_quantity||0}/${po.quantity||0}`);const remaining=Number(po.quantity||0)-Number(po.received_quantity||0);
+        if(remaining>0)action(row,'Receive Goods',async()=>{const n=amount('Quantity received',remaining);if(n===null)return;if(!confirm('Receive '+n+' units?'))return;await send('/doorks-workflow/purchase-orders/'+encodeURIComponent(po.id)+'/receive',{quantity:n});});
+        action(row,'Enter Supplier Bill',async()=>{const bill_number=prompt('Supplier bill number');if(!bill_number)return;const n=amount('Supplier bill amount',999999999);if(n===null)return;if(!confirm('Create supplier bill '+bill_number+' for $'+n.toFixed(2)+'?'))return;await send('/doorks-workflow/purchase-orders/'+encodeURIComponent(po.id)+'/supplier-bill',{bill_number,amount:n});});
+      }
+      const suppliers=section('5. Supplier Bill → Payment');
+      for(const bill of (bills.items||[])){const balance=Number(bill.amount||0)-Number(bill.paid||0);const row=line(suppliers,`${bill.bill_number} · ${bill.vendor||''} · ${bill.po_number||''} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Supplier Payment',async()=>{const n=amount('Supplier payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' paid?'))return;await send('/doorks-workflow/supplier-bills/'+encodeURIComponent(bill.id)+'/payments',{amount:n,reference});});}
+    }
+    try{await refresh();}catch(e){msg.textContent='Unable to load workflows: '+(e.message||e);}
   }
   function renderDoorksAccountingOverview(){
     if(activePlatform!=='doorks')return;
