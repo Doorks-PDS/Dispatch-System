@@ -337,7 +337,7 @@
     estimates_invoices:["customer","work_order_number","document_type","document_number","date","amount","status","description","notes"],
     purchase_orders:["po_number","vendor","vendor_id","customer","work_order_number","order_number","date","expected_date","category","description","quantity","unit_cost","tax","shipping","amount","status","received_quantity","payment_status","notes"],
     software_leads:["company","contact","email","phone","package","setup_assistance","status","notes"],
-    work_orders:["customer","contact","phone","email","address","service_type","service_type_other","request_source","vendor","scheduled_date","scheduled_time","description","status","priority","priority_other","po_number","notes"],
+    work_orders:["customer","contact","phone","email","address","service_type","service_type_other","request_source","scheduled_date","scheduled_time","description","status","priority","priority_other","po_number","notes"],
     orders:["customer","item","order_date","status","total","shipping","tax","notes"],
     products:["name","sku","price","description"],
     expenses:["date","vendor","category","amount","notes"],
@@ -1083,41 +1083,61 @@
       form.__updateConditionals=()=>{updateService();updatePriority();};
       const customerField=form.elements.namedItem('customer');
       const customerLabel=customerField.closest('label');
-      const customerPicker=document.createElement('select');customerPicker.className='input';
-      customerPicker.style.cssText='width:100%;padding:9px;border-radius:9px;margin-top:5px';
-      customerPicker.append(new Option('Select saved customer / manual entry',''));
-      customerLabel.append(customerPicker);
-      const contactPicker=document.createElement('select');contactPicker.className='input';contactPicker.style.cssText=customerPicker.style.cssText;
-      contactPicker.append(new Option('Select saved contact / manual entry',''));
-      form.elements.namedItem('contact').closest('label').append(contactPicker);
-      const addressPicker=document.createElement('select');addressPicker.className='input';addressPicker.style.cssText=customerPicker.style.cssText;
-      addressPicker.append(new Option('Select saved address / manual entry',''));
-      form.elements.namedItem('address').closest('label').append(addressPicker);
-      let customers=[];
-      const populate=()=>{
-        const customer=customers.find(c=>c.name===customerField.value);
-        for(const picker of [contactPicker,addressPicker])picker.length=1;
+      // PDS-style typeahead: a single text field with matching suggestions, never a second select.
+      const contactField=form.elements.namedItem('contact'),addressField=form.elements.namedItem('address');
+      const phoneField=form.elements.namedItem('phone'),emailField=form.elements.namedItem('email');
+      const customerList=document.createElement('datalist');customerList.id='doorks-customer-suggestions';
+      const contactList=document.createElement('datalist');contactList.id='doorks-contact-suggestions';
+      const addressList=document.createElement('datalist');addressList.id='doorks-address-suggestions';
+      customerField.setAttribute('list',customerList.id);contactField.setAttribute('list',contactList.id);addressField.setAttribute('list',addressList.id);
+      form.append(customerList,contactList,addressList);
+      let customers=[],directory={contacts:[],addresses:[]},selectedCustomerId='';
+      const matchCustomer=()=>customers.find(c=>String(c.name||'').trim().toLowerCase()===customerField.value.trim().toLowerCase());
+      const option=(list,value)=>{if(value&&!Array.from(list.options).some(o=>o.value===value))list.append(new Option(value,value));};
+      const related=(kind,customer)=>{const entries=directory[kind]||[];return entries.filter(x=>x.customer_id===customer?.id||(!x.customer_id&&String(x.customer||'').toLowerCase()===String(customer?.name||'').toLowerCase()));};
+      const refreshRelated=(autofill=false)=>{
+        const customer=matchCustomer();const previous=selectedCustomerId;selectedCustomerId=customer?.id||'';
+        contactList.replaceChildren();addressList.replaceChildren();
+        if(previous!==selectedCustomerId){contactField.value='';addressField.value='';phoneField.value='';emailField.value='';}
         if(!customer)return;
-        for(const value of String(customer.contact||'').split(/[;,\n]/).map(x=>x.trim()).filter(Boolean))contactPicker.append(new Option(value,value));
-        for(const value of String(customer.address||'').split(/\n/).map(x=>x.trim()).filter(Boolean))addressPicker.append(new Option(value,value));
-        for(const field of ['contact','phone','email','address']){const input=form.elements.namedItem(field);if(input&&!input.value.trim()&&customer[field])input.value=customer[field];}
+        option(contactList,customer.contact);option(addressList,customer.address);
+        for(const c of related('contacts',customer))option(contactList,c.name);
+        for(const a of related('addresses',customer))option(addressList,a.address);
+        if(autofill){if(customer.contact)contactField.value=customer.contact;if(customer.address)addressField.value=customer.address;if(customer.phone)phoneField.value=customer.phone;if(customer.email)emailField.value=customer.email;}
       };
-      customerPicker.onchange=()=>{const c=customers.find(x=>x.id===customerPicker.value);if(!c)return;customerField.value=c.name||'';for(const field of ['contact','phone','email','address'])form.elements.namedItem(field).value=c[field]||'';populate();};
-      customerField.addEventListener('change',populate);
-      contactPicker.onchange=()=>{if(contactPicker.value)form.elements.namedItem('contact').value=contactPicker.value;};
-      addressPicker.onchange=()=>{if(addressPicker.value)form.elements.namedItem('address').value=addressPicker.value;};
-      fetchJSON('/workspaces/doorks/customers').then(result=>{customers=result.items||[];for(const c of customers)if(c.name)customerPicker.append(new Option(c.name,c.id));}).catch(err=>console.warn('Customer suggestions unavailable',err));
+      const chooseContact=()=>{const customer=matchCustomer();if(!customer)return;const contact=related('contacts',customer).find(c=>c.name.toLowerCase()===contactField.value.trim().toLowerCase());if(contact){phoneField.value=contact.phone||'';emailField.value=contact.email||'';}else if(contactField.value===customer.contact){phoneField.value=customer.phone||'';emailField.value=customer.email||'';}};
+      customerField.addEventListener('input',()=>refreshRelated(false));
+      customerField.addEventListener('change',()=>refreshRelated(true));
+      contactField.addEventListener('change',chooseContact);
+      const loadDirectory=async()=>{
+        const [c,d]=await Promise.all([fetchJSON('/workspaces/doorks/customers'),fetchJSON('/doorks-directory').catch(()=>({contacts:[],addresses:[]}))]);
+        customers=c.items||[];directory=d;
+        customerList.replaceChildren();for(const customer of customers)option(customerList,customer.name);
+        refreshRelated(false);
+      };
+      loadDirectory().catch(err=>console.warn('Customer autocomplete unavailable',err));
+      form.__refreshCustomer=()=>refreshRelated(false);
       const quick=document.createElement('div');quick.style.cssText='grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap;margin-top:4px';
+      const feedback=document.createElement('span');feedback.style.cssText='font-size:12px;color:#475569;align-self:center';
       for(const [label,field] of [['+ New Customer','customer'],['+ New Contact','contact'],['+ New Address','address']]){
-        const b=document.createElement('button');b.type='button';b.className='btn';b.style.cssText='font-size:12px;padding:7px 10px;background:#f8fafc;border:1px solid #cbd5e1;color:#475569';
-        b.textContent=label;b.onclick=()=>{
-          const value=prompt('Enter '+label.slice(6).toLowerCase());if(value===null||!value.trim())return;
-          form.elements.namedItem(field).value=value.trim();
-          if(field==='customer')customerField.dispatchEvent(new Event('change'));
-          if(field!=='customer')alert('Added to this work order. To save this '+field+' in the customer directory, open Customers in Business Hub.');
-        };quick.append(b);
+        const button=document.createElement('button');button.type='button';button.className='btn';button.style.cssText='font-size:12px;padding:7px 10px;background:#f8fafc;border:1px solid #cbd5e1;color:#475569';
+        button.textContent=label;button.onclick=async()=>{
+          const value=prompt('Enter '+label.slice(6).toLowerCase());if(!value?.trim())return;
+          if(field==='customer'){
+            customerField.value=value.trim();refreshRelated(false);
+            feedback.textContent='New customer entered. Save the work order; add a customer profile in Business Hub to make it reusable.';
+            return;
+          }
+          const customer=matchCustomer();
+          if(!customer){feedback.textContent='Choose a saved customer first to register '+field+' in their directory.';return;}
+          const input=form.elements.namedItem(field);input.value=value.trim();
+          try{
+            await fetchJSON('/doorks-directory/'+(field==='contact'?'contacts':'addresses'),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({customer_id:customer.id,customer:customer.name,...(field==='contact'?{name:value.trim(),phone:phoneField.value,email:emailField.value}:{address:value.trim()})})});
+            await loadDirectory();feedback.textContent='Saved '+field+' to '+customer.name+'.';
+          }catch(error){feedback.textContent='Entered for this job, but directory save failed: '+error.message;}
+        };quick.append(button);
       }
-      form.append(quick);
+      quick.append(feedback);form.append(quick);
     }
     if(kind==='purchase_orders'){
       const supplierField=form.elements.namedItem('vendor');
@@ -1167,7 +1187,7 @@
     const close=()=>{editor.hidden=true;editingId=null;form.reset();message.textContent='';if(kind==='work_orders'){el('businessSearch').closest('.card').hidden=false;el('businessBack').closest('.card').hidden=false;}};
     cancel.onclick=close;el('businessClose').onclick=close;
     el('businessBack').textContent=backAction?'← Back to Hub':'← Dashboard';el('businessBack').onclick=()=>backAction?backAction():showPlatformShell(platform);
-    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=(kind==='work_orders'&&f==='status'?doorksFlowStatus(item[f]):item[f])??'';}const poSupplierSelect=el('workspacePoSupplierSelect');if(poSupplierSelect)poSupplierSelect.value=item?.vendor_id||'';if(!item&&window.__doorksAiIntakeDraft?.platform===platform){const draft=window.__doorksAiIntakeDraft;const expected=kind==='vendors'?'vendor':kind==='customers'?'customer':'part';if(draft.type===expected){const dest=form.elements.namedItem('notes')||form.elements.namedItem('description');if(dest)dest.value=draft.text;window.__doorksAiIntakeDraft=null;}}el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';if(kind==='work_orders')form.__updateConditionals?.();editor.hidden=false;if(kind==='work_orders'&&!item){el('businessSearch').closest('.card').hidden=true;el('businessBack').closest('.card').hidden=true;}editor.scrollIntoView({behavior:'smooth',block:'start'});};
+    const open=(item=null)=>{form.reset();message.textContent='';editingId=item?.id||null;for(const f of fields){const input=form.elements.namedItem(f);if(input&&item)input.value=(kind==='work_orders'&&f==='status'?doorksFlowStatus(item[f]):item[f])??'';}const poSupplierSelect=el('workspacePoSupplierSelect');if(poSupplierSelect)poSupplierSelect.value=item?.vendor_id||'';if(!item&&window.__doorksAiIntakeDraft?.platform===platform){const draft=window.__doorksAiIntakeDraft;const expected=kind==='vendors'?'vendor':kind==='customers'?'customer':'part';if(draft.type===expected){const dest=form.elements.namedItem('notes')||form.elements.namedItem('description');if(dest)dest.value=draft.text;window.__doorksAiIntakeDraft=null;}}el('businessFormTitle').textContent=(item?'Edit ':'New ')+labels[kind];submit.textContent=item?'Update record':'Save record';if(kind==='work_orders'){form.__updateConditionals?.();form.__refreshCustomer?.();}editor.hidden=false;if(kind==='work_orders'&&!item){el('businessSearch').closest('.card').hidden=true;el('businessBack').closest('.card').hidden=true;}editor.scrollIntoView({behavior:'smooth',block:'start'});};
     el('businessNew').onclick=()=>open();
     const search=el('businessSearch');
     function draw(){const host=el('businessRecords');host.replaceChildren();const q=search.value.toLowerCase().trim();const filtered=records.filter(item=>!q||Object.values(item).some(v=>String(v??'').toLowerCase().includes(q)));
@@ -1278,6 +1298,9 @@
         if(String(d.status||'').toLowerCase()!=='approved')action(row,'Approve Estimate',async()=>{if(!confirm('Approve this estimate?'))return;await fetchJSON('/workspaces/doorks/estimates_invoices/'+encodeURIComponent(d.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Approved'}})});});
         else action(row,'Create / Open Linked Invoice',async()=>{await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/convert-to-invoice');});
       }
+      const arInvoices=new Set((ar.items||[]).map(x=>String(x.invoice_number||'').trim()).filter(Boolean));
+      const missingAr=(docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice'&&!arInvoices.has(String(x.document_number||'').trim()));
+      if(missingAr.length){const note=document.createElement('p');note.className='hint';note.style.cssText='padding:10px;border-left:4px solid #d97706;background:#fffbeb';note.textContent=missingAr.length+' invoice(s) have no matching A/R record. Use Sync to A/R below; verify totals before accepting payments.';host.append(note);}
       const invoices=section('2. Invoice → Accounts Receivable');
       for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice')){const row=line(invoices,`${d.document_number||'Invoice'} · ${d.customer||''} · $${Number(d.total||d.amount||0).toFixed(2)}`);action(row,'Sync to A/R',async()=>{await send('/doorks-workflow/invoices/'+encodeURIComponent(d.id)+'/sync-receivable');});}
       const customers=section('3. Customer Payments');
@@ -1347,6 +1370,53 @@
     form.onsubmit=async e=>{e.preventDefault();save.disabled=true;message.textContent='Saving…';try{const data={};for(const field of fields[kind])data[field]=String(form.elements.namedItem(field)?.value??'').trim();const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});const id=response.item.id;const original=fileInput.files?.[0]||uploadFile;if(original){const body=new FormData();body.append('file',original);try{await fetchJSON(endpoint+'/'+encodeURIComponent(id)+'/file',{method:'POST',body});}catch(err){message.textContent='Record saved, but original upload failed: '+err.message;await refresh();return;}}await refresh();editor.hidden=true;}catch(err){message.textContent='Save failed: '+(err.message||err);}finally{save.disabled=false;}};
     try{await refresh();}catch(err){el('dacRecords').textContent='Could not load records: '+(err.message||err);}
   }
+  // Isolated Doorks staff records; does not read PDS employee or payroll data.
+  async function renderDoorksStaff(kind){
+    if(activePlatform!=='doorks')return;
+    clearWorkspaceActions();setWorkspace('Doorks — '+(kind==='employees'?'Employees':'Payroll'));
+    const fields=kind==='employees'
+      ?[['name','Employee Name'],['email','Email'],['phone','Phone'],['role','Role'],['status','Employment Status'],['hourly_rate','Hourly Rate'],['pto_bank','PTO Bank (hours)'],['ot_bank','OT Bank (hours)'],['notes','Notes']]
+      :[['employee','Employee'],['period_start','Period Start'],['period_end','Period End'],['work_date','Work Date'],['time_in','Time In'],['time_out','Time Out'],['lunch_minutes','Lunch Minutes'],['regular_hours','Regular Hours'],['overtime_hours','Overtime Hours'],['pto_hours','PTO Hours'],['holiday_hours','Holiday Hours'],['supervisor_approved','Supervisor Approved'],['notes','Notes']];
+    workspaceBody.innerHTML='<div class="card" style="max-width:1250px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="dsTitle"></h2><p class="hint" id="dsHint"></p></div><button class="btn" id="dsNew">+ New Record</button></div><input class="input" id="dsSearch" placeholder="Search records" style="width:100%;margin:12px 0"><div id="dsList"></div><div id="dsEditor" hidden style="margin-top:20px"><h3 id="dsEditorTitle"></h3><form id="dsForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-orange" id="dsSave">Save</button><button class="btn" id="dsCancel">Cancel</button></div></div></div>';
+    el('dsTitle').textContent=kind==='employees'?'Employees':'Payroll & Timecards';
+    el('dsHint').textContent=kind==='employees'?'Separate Doorks employee directory. Inactive records are retained. Login deactivation requires an access-control integration.':'Doorks timecard records, pay-period tracking and supervisor review. Do not use for live payroll until calculation and approval validation are completed.';
+    let records=[],editing=null;
+    const form=el('dsForm');
+    for(const [key,title] of fields){
+      const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-weight:650';label.textContent=title;
+      let input;
+      if(key==='status'||key==='role'||key==='supervisor_approved'){
+        input=document.createElement('select');
+        const opts=key==='status'?['Active','Inactive']:key==='role'?['Technician','Lead','Office Admin','Supervisor','Other']:['No','Yes'];
+        for(const option of opts)input.add(new Option(option,option));
+      }else{
+        input=document.createElement('input');input.className='input';
+        if(['period_start','period_end','work_date'].includes(key))input.type='date';
+        if(['hourly_rate','pto_bank','ot_bank','lunch_minutes','regular_hours','overtime_hours','pto_hours','holiday_hours'].includes(key)){input.type='number';input.step='0.01';input.min='0';}
+      }
+      input.name=key;label.append(input);form.append(label);
+    }
+    const endpoint='/workspaces/doorks/'+kind;
+    const draw=()=>{const q=el('dsSearch').value.toLowerCase();const host=el('dsList');host.replaceChildren();for(const record of records.filter(r=>JSON.stringify(r).toLowerCase().includes(q))){
+      const row=document.createElement('div');row.style.cssText='padding:12px;border:1px solid #d9dee7;border-radius:10px;margin:8px 0;display:flex;justify-content:space-between;gap:10px;align-items:center';
+      const label=document.createElement('span');label.textContent=kind==='employees'?`${record.name||'Unnamed'} · ${record.status||'Active'} · ${record.role||''}`:`${record.employee||'Employee'} · ${record.work_date||record.period_start||''} · ${record.regular_hours||0} regular / ${record.overtime_hours||0} OT hours`;
+      const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>open(record);
+      row.append(label,edit);host.append(row);
+    }if(!host.children.length)host.textContent='No matching records.';};
+    const open=(record=null)=>{editing=record;form.reset();for(const [key] of fields){const input=form.elements.namedItem(key);if(record&&record[key]!==undefined)input.value=record[key];}el('dsEditorTitle').textContent=record?'Edit Record':'New Record';el('dsEditor').hidden=false;};
+    const refresh=async()=>{const data=await fetchJSON(endpoint);records=data.items||[];draw();};
+    el('dsSearch').oninput=draw;el('dsNew').onclick=()=>open();el('dsCancel').onclick=()=>el('dsEditor').hidden=true;
+    el('dsSave').onclick=async()=>{const data={};for(const [key] of fields)data[key]=form.elements.namedItem(key).value;
+      if(kind==='employees'&&!data.name.trim()){alert('Employee name is required');return;}
+      if(kind==='payroll'&&!data.employee.trim()){alert('Employee is required');return;}
+      try{
+        const url=editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint;
+        await fetchJSON(url,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
+        el('dsEditor').hidden=true;await refresh();
+      }catch(err){alert('Unable to save: '+err.message);}
+    };
+    try{await refresh();}catch(err){el('dsList').textContent='Unable to load records: '+err.message;}
+  }
   function showPlatformShell(platform,initialView='overview') {
     activePlatform=platform;
     const brand=document.querySelector('.topbar .brand');if(brand)brand.textContent=platform==='pds'?'Priority Door Systems':platform==='sdc'?'Saddleback Design Co.':'Doorks';
@@ -1371,7 +1441,13 @@
       addSdc('sdcOfficeNav','Legacy Saddleback Records',()=>renderSdcLegacyNotice());
       addSdc('sdcDevelopmentNav','Doorks Software Sales',()=>renderBusinessCollection('sdc','software_leads'));
     }
-    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbJobNav','Job Flow',renderDoorksJobFlow);add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
+    if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbJobNav','Job Flow',renderDoorksJobFlow);add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Payroll',()=>renderDoorksStaff('payroll'));add('dbOfficeNav','Employees',()=>renderDoorksStaff('employees'));add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer Inquiries',()=>renderBusinessCollection('doorks','customer_inquiries'));add('dbPortalNav','Vendor Assignments',()=>renderBusinessCollection('doorks','vendor_assignments'));}
+    if(loginPanel){
+      if(!loginPanel.__originalParent)loginPanel.__originalParent=loginPanel.parentElement;
+      if(platform==='doorks'){businessSide.appendChild(loginPanel);loginPanel.style.display='';}
+      else if(loginPanel.__originalParent){loginPanel.__originalParent.appendChild(loginPanel);}
+      if(platform==='doorks'&&loginBody&&currentUser){loginBody.style.display='none';if(loginChev)loginChev.innerHTML='&#9656;';}
+    }
     document.querySelector('main.layout')?.classList.toggle('business-platform-layout',false);
     if(headerCalendarBtn)headerCalendarBtn.style.display=currentUser && (inPds ? accessForRole(currentUser.role).calendar : currentUser.role==='office_admin') ? 'inline-flex' : 'none';
     if(inPds)return;
