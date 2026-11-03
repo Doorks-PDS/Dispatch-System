@@ -419,7 +419,7 @@ _BUSINESS_SETTINGS = {
 }
 _ACCOUNTING_SETTINGS = {
     'fiscal_year_start_month', 'default_payment_terms', 'receipt_review_required',
-    'statement_review_required', 'report_currency', 'tax_notes'
+    'statement_review_required', 'receipt_retention_years', 'statement_match_tolerance', 'tax_notes'
 }
 
 def _settings_path(request: Request, scope: str):
@@ -454,7 +454,7 @@ def put_doorks_settings(scope: str, payload: SettingsPayload, request: Request):
         if not isinstance(value, str) or len(value) > 1000:
             raise HTTPException(400, 'Invalid settings value')
         cleaned[key] = value.strip()
-    for key in ('default_sales_tax', 'trip_charge', 'fuel_surcharge', 'single_tech_labor', 'crew_labor', 'default_payment_terms'):
+    for key in ('default_sales_tax', 'trip_charge', 'fuel_surcharge', 'single_tech_labor', 'crew_labor', 'default_payment_terms', 'receipt_retention_years', 'statement_match_tolerance'):
         if cleaned.get(key):
             try:
                 val = Decimal(cleaned[key])
@@ -477,3 +477,68 @@ def put_doorks_settings(scope: str, payload: SettingsPayload, request: Request):
             _os.fsync(handle.fileno())
         _os.replace(temp, path)
     return {'settings': cleaned}
+
+# Transaction-level statement classification is stored separately from the
+# statement header. It never changes a statement's original uploaded file.
+class StatementTransactions(BaseModel):
+    transactions: list[dict[str, str]]
+
+def _statement_transactions_path(request: Request, statement_id: str):
+    import re
+    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', statement_id):
+        raise HTTPException(400, 'Invalid statement identifier')
+    return _Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / 'statement_transactions' / (statement_id + '.json')
+
+def _require_statement(request: Request, statement_id: str):
+    statements = ac.read(ac.base(request) / 'statements.json')
+    if not any(str(row.get('id')) == statement_id for row in statements):
+        raise HTTPException(404, 'Statement not found')
+
+@router.get('/accounting/statements/{statement_id}/transactions')
+def get_statement_transactions(statement_id: str, request: Request):
+    guard(request)
+    _require_statement(request, statement_id)
+    path = _statement_transactions_path(request, statement_id)
+    with _lock:
+        if not path.exists(): return {'transactions': []}
+        try:
+            records = _json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            raise HTTPException(500, 'Unable to read statement transactions')
+    if not isinstance(records, list): raise HTTPException(500, 'Invalid transaction records')
+    return {'transactions': records}
+
+@router.put('/accounting/statements/{statement_id}/transactions')
+def put_statement_transactions(statement_id: str, payload: StatementTransactions, request: Request):
+    guard(request)
+    _require_statement(request, statement_id)
+    if len(payload.transactions) > 1000: raise HTTPException(400, 'Too many transactions')
+    categories = get_expense_categories(request)['categories']
+    cleaned = []
+    for record in payload.transactions:
+        if set(record) - {'date', 'description', 'amount', 'category', 'notes'}:
+            raise HTTPException(400, 'Unknown transaction field')
+        if any(not isinstance(v, str) or len(v) > 500 for v in record.values()):
+            raise HTTPException(400, 'Invalid transaction field')
+        if record.get('category', 'Uncategorized') not in categories:
+            raise HTTPException(400, 'Unknown expense category')
+        if record.get('date'):
+            try: date.fromisoformat(record['date'])
+            except ValueError: raise HTTPException(400, 'Invalid transaction date')
+        if record.get('amount'):
+            try:
+                amount = Decimal(record['amount'])
+                if not amount.is_finite() or abs(amount) > 999999999: raise ValueError()
+            except (ValueError, InvalidOperation):
+                raise HTTPException(400, 'Invalid transaction amount')
+        cleaned.append({k: str(record.get(k, '')).strip() for k in ('date','description','amount','category','notes')})
+    path = _statement_transactions_path(request, statement_id)
+    with _lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name+'.tmp')
+        with tmp.open('w', encoding='utf-8') as f:
+            _json.dump(cleaned, f, indent=2)
+            f.flush()
+            _os.fsync(f.fileno())
+        _os.replace(tmp, path)
+    return {'transactions': cleaned}
