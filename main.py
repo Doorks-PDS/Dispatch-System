@@ -239,6 +239,8 @@ from app.routers.platforms import router as platforms_router
 app.include_router(platforms_router)
 from app.routers.workspaces import router as workspaces_router
 app.include_router(workspaces_router)
+from app.routers.doorks_job_files import router as doorks_job_files_router
+app.include_router(doorks_job_files_router)
 from app.routers.pds_takeoffs import router as pds_takeoffs_router
 app.include_router(pds_takeoffs_router)
 from app.routers.workspace_ai import router as workspace_ai_router
