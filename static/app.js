@@ -608,16 +608,33 @@
   async function renderDoorksPartsStock(){
     if(activePlatform!=='doorks')return;
     clearWorkspaceActions();setWorkspace('Doorks — Parts List & Inventory');
-    workspaceBody.innerHTML='<div style="max-width:1250px;margin:auto;display:grid;gap:14px"><section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Parts List & Inventory</h2><p class="hint">Saved parts remain visible at zero stock. Receipts and recorded adjustments determine on-hand quantity.</p></div><div style="display:flex;gap:8px"><button class="btn" id="dpsBack">← Business Hub</button><button class="btn btn-orange" id="dpsEdit">Manage Parts List</button></div></div><input id="dpsSearch" class="input" type="search" placeholder="Search part number, description or supplier…" style="width:100%;margin:12px 0"><div id="dpsRows">Loading…</div></section></div>';
+    workspaceBody.innerHTML='<div style="max-width:1250px;margin:auto;display:grid;gap:14px"><section class="card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h2 style="margin:0">Parts List & Inventory</h2><p class="hint">Saved parts remain visible at zero stock. Receipts and recorded adjustments determine in-stock quantity.</p></div><div style="display:flex;gap:8px"><button class="btn" id="dpsBack">← Business Hub</button><button class="btn btn-orange" id="dpsEdit">Manage Parts List</button></div></div><input id="dpsSearch" class="input" type="search" placeholder="Search part number, description or supplier…" style="width:100%;margin:12px 0"><div id="dpsRows">Loading…</div></section></div>';
     el('dpsBack').onclick=()=>renderBusinessHub('doorks');el('dpsEdit').onclick=()=>renderBusinessCollection('doorks','inventory',false,()=>renderDoorksPartsStock());
     let parts=[];
     const draw=()=>{const host=el('dpsRows');host.replaceChildren();const q=el('dpsSearch').value.toLowerCase();for(const part of parts.filter(x=>[x.sku,x.description,x.supplier].some(v=>String(v||'').toLowerCase().includes(q)))){
       const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0;background:#fff;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap';
       const info=document.createElement('div');const title=document.createElement('strong');title.textContent=part.sku+' · '+(part.description||'Part');const meta=document.createElement('p');meta.className='hint';meta.textContent=[part.supplier, 'Received '+part.received,'Adjustments '+part.adjustments].filter(Boolean).join(' · ');info.append(title,meta);
-      const count=document.createElement('strong');count.style.cssText='font-size:24px;color:'+(part.on_hand<=0?'#b42318':'#355a38');count.textContent=part.on_hand+' on hand';
+      const count=document.createElement('strong');count.style.cssText='font-size:24px;color:'+(part.on_hand<=0?'#b42318':'#355a38');count.textContent=part.on_hand+' in Stock';
       const adjust=document.createElement('button');adjust.className='btn';adjust.textContent='Adjust Stock';adjust.onclick=async()=>{const raw=prompt('Stock adjustment for '+part.sku+' (negative to use/remove, positive to add)');if(raw===null)return;const quantity_delta=Number(raw);if(!Number.isFinite(quantity_delta)||!quantity_delta){alert('Enter a nonzero number');return;}const reason=prompt('Reason for adjustment (required)');if(!reason||reason.trim().length<3)return;if(!confirm('Record '+quantity_delta+' units for '+part.sku+'? This creates an audit record.'))return;try{await fetchJSON('/doorks-operations/stock/adjustments',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sku:part.sku,quantity_delta,reason,request_id:(globalThis.crypto?.randomUUID?.()||String(Date.now())+'-'+Math.random())})});await refresh();}catch(e){alert(e.message||e);}};
-      card.append(info,count,adjust);host.append(card);
+      const detail=document.createElement('button');detail.className='btn';detail.textContent='View / Edit Part';detail.onclick=()=>openPart(part);
+      card.append(info,count,detail,adjust);host.append(card);
     }if(!host.children.length)host.textContent='No matching parts. Use Manage Parts List to add part numbers.';};
+    async function openPart(part){
+      const panel=document.createElement('div');panel.className='card';panel.style.cssText='position:fixed;right:0;top:0;height:100vh;width:min(510px,100vw);overflow:auto;z-index:10001;box-shadow:-12px 0 50px #0003;padding:22px;background:#fff';
+      const title=document.createElement('h2');title.textContent=part.sku;panel.append(title);
+      const note=document.createElement('p');note.className='hint';note.textContent=part.on_hand+' in Stock · Edit the part master record below. Stock quantity is changed through Adjust Stock.';panel.append(note);
+      const form=document.createElement('form');form.style.cssText='display:grid;gap:12px';
+      const fields=[['manufacturer','Manufacturer'],['supplier','Supplier'],['description','Part Description'],['image_url','Photo URL'],['notes','Additional Notes']];
+      const values={};
+      let record=null;
+      try{const r=await fetchJSON('/workspaces/doorks/inventory');record=(r.items||[]).find(x=>String(x.part_number||x.sku||'').trim().toLowerCase()===String(part.sku).trim().toLowerCase());}catch(e){}
+      for(const [key,label] of fields){const wrap=document.createElement('label');wrap.style.cssText='display:grid;gap:5px;font-weight:600';wrap.textContent=label;const input=key==='description'||key==='notes'?document.createElement('textarea'):document.createElement('input');input.className='input';input.value=String(record?.[key]||part[key]||'');input.name=key;wrap.append(input);form.append(wrap);values[key]=input;}
+      const preview=document.createElement('img');preview.style.cssText='max-width:100%;max-height:210px;object-fit:contain;border-radius:10px';preview.alt='Part photo';const showPhoto=()=>{const u=values.image_url.value.trim();preview.hidden=!/^https:\/\//i.test(u);if(!preview.hidden)preview.src=u;};values.image_url.onchange=showPhoto;showPhoto();form.append(preview);
+      const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px';const save=document.createElement('button');save.className='btn btn-orange';save.textContent='Save Part';save.type='submit';const close=document.createElement('button');close.className='btn';close.textContent='Close';close.type='button';close.onclick=()=>panel.remove();buttons.append(save,close);form.append(buttons);
+      const status=document.createElement('p');status.setAttribute('role','status');form.append(status);
+      form.onsubmit=async e=>{e.preventDefault();const data={part_number:part.sku};for(const [key,input] of Object.entries(values))data[key]=input.value.trim();try{const url='/workspaces/doorks/inventory'+(record?'/'+encodeURIComponent(record.id):'');await fetchJSON(url,{method:record?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});panel.remove();await refresh();}catch(e){status.textContent='Save failed: '+e.message;}};
+      panel.append(form);document.body.append(panel);
+    }
     async function refresh(){try{const result=await fetchJSON('/doorks-operations/stock');parts=result.items||[];draw();}catch(e){el('dpsRows').textContent='Unable to load parts: '+e.message;}}
     el('dpsSearch').oninput=draw;await refresh();
   }
@@ -1283,6 +1300,26 @@
     for(const [label,kind] of options){const b=document.createElement('button');b.type='button';b.className='btn';b.textContent=label;b.onclick=()=>kind==='__receiving'?renderPoReceiving(platform,()=>platform==='sdc'?renderSdcAccounting():renderDoorksAccountingHub()):platform==='sdc'?renderBusinessCollection('sdc',kind,true,()=>renderSdcAccounting()):renderDoorksAccounting(kind);buttons.append(b);}
     const cancel=document.createElement('button');cancel.className='btn';cancel.textContent='Cancel';cancel.onclick=()=>host.replaceChildren();buttons.append(cancel);card.append(buttons);host.append(card);
   }
+  function renderDoorksExpenseReview(){
+    if(activePlatform!=='doorks')return;
+    clearWorkspaceActions();setWorkspace('Doorks — Receipts & Statements');
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1240px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Receipts & Statements</h2><p class="hint">Review, authorize and categorize accounting documents for reporting.</p></div><button class="btn" id="derBack">← Accounting Hub</button></div><div style="display:flex;gap:10px;flex-wrap:wrap;margin:18px 0"><button class="btn btn-orange" id="derReceipts">Receipts</button><button class="btn" id="derStatements">Statements</button><button class="btn" id="derCategories">Expense Categories</button></div><div id="derHint" class="hint">Choose Receipts or Statements to review saved documents and their categories.</div></div>`;
+    el('derBack').onclick=renderDoorksAccountingHub;
+    el('derReceipts').onclick=()=>renderDoorksAccounting('receipts');
+    el('derStatements').onclick=()=>renderDoorksAccounting('statements');
+    el('derCategories').onclick=renderDoorksAccountingSettings;
+  }
+  async function renderDoorksAccountingSettings(){
+    if(activePlatform!=='doorks')return;
+    clearWorkspaceActions();setWorkspace('Doorks — Accounting Settings');
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><div><h2>Accounting Settings</h2><p class="hint">Expense categories used for Doorks receipt and statement classification. Existing records are not changed when a category is edited.</p></div><button class="btn" id="dasBack">← Accounting Hub</button></div><div id="dasCategories" style="margin:18px 0">Loading…</div><div style="display:flex;gap:8px;flex-wrap:wrap"><input class="input" id="dasNew" placeholder="New expense category" style="min-width:250px;flex:1"><button class="btn btn-orange" id="dasAdd">+ Add Category</button></div><p id="dasStatus" role="status"></p></div>`;
+    el('dasBack').onclick=renderDoorksAccountingHub;
+    let categories=[];
+    const draw=()=>{const host=el('dasCategories');host.replaceChildren();for(const [i,name] of categories.entries()){const row=document.createElement('div');row.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 0;border-bottom:1px solid #d9dee7';const text=document.createElement('strong');text.textContent=name;const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px';const edit=document.createElement('button');edit.className='btn';edit.textContent='Rename';edit.onclick=async()=>{const value=prompt('Rename category',name);if(value===null)return;const next=[...categories];next[i]=value.trim();await save(next);};const remove=document.createElement('button');remove.className='btn';remove.textContent='Remove';remove.onclick=async()=>{if(!confirm('Remove this category from future choices? Existing receipts retain their recorded category.'))return;await save(categories.filter((_,j)=>j!==i));};actions.append(edit,remove);row.append(text,actions);host.append(row);}};
+    async function save(next){try{const result=await fetchJSON('/doorks-operations/accounting/categories',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({categories:next})});categories=result.categories||[];draw();el('dasStatus').textContent='Categories saved.';}catch(e){el('dasStatus').textContent='Could not save: '+e.message;}}
+    el('dasAdd').onclick=async()=>{const value=el('dasNew').value.trim();if(!value)return;await save([...categories,value]);el('dasNew').value='';};
+    try{const r=await fetchJSON('/doorks-operations/accounting/categories');categories=r.categories||[];draw();}catch(e){el('dasCategories').textContent='Unable to load categories: '+e.message;}
+  }
   function renderDoorksAccountingHub(){
     if(activePlatform!=='doorks')return;
     clearWorkspaceActions();setWorkspace('Doorks — Accounting Hub');
@@ -1300,7 +1337,9 @@
       {icon:'🔗',label:'Connected Workflows',description:'Link estimates, invoices, purchase orders and payments.',open:()=>renderDoorksWorkflow()},
       {icon:'💳',label:'Customer Invoices & Payments',description:'Customer invoices, outstanding balances and incoming payments.',open:()=>renderDoorksAccounting('receivables')},
       {icon:'💸',label:'Supplier Bills & Payments',description:'Supplier invoices and outgoing payments.',open:()=>renderManualAccountingLedger('doorks','bills')},
-      {icon:'📦',label:'Inventory & Receiving',description:'Receive deliveries, review receiving tickets and stock by part number.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)}
+      {icon:'📦',label:'Inventory & Receiving',description:'Receive deliveries, review receiving tickets and stock by part number.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)},
+      {icon:'🧾',label:'Receipts & Statements',description:'Review receipts and statements, approve spending and assign tax categories.',open:()=>renderDoorksExpenseReview()},
+      {icon:'⚙️',label:'Settings',description:'Manage expense categories and accounting preferences.',open:()=>renderDoorksAccountingSettings()}
     ]);
     const money=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD'});
     fetchJSON('/doorks-operations/reconciliation').then(r=>{
@@ -1390,9 +1429,18 @@
     const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';form.append(cancel);cancel.onclick=()=>{editor.hidden=true;};
     const open=(item=null)=>{form.reset();uploadFile=null;editing=item?.id||null;for(const field of fields[kind]){const input=form.elements.namedItem(field);if(item&&input)input.value=item[field]??'';}el('dacTitle').textContent=item?'Edit '+names[kind]:'New '+names[kind];message.textContent='';editor.hidden=false;editor.scrollIntoView({block:'start',behavior:'smooth'});};
     el('dacNew').onclick=()=>open();
-    el('dacUpload').onclick=()=>renderBusinessAiIntake('doorks',()=>renderDoorksAccounting(kind));
+    el('dacUpload').onclick=()=>{editor.hidden=false;editing=null;form.reset();fileInput.click();message.textContent='Select a receipt or statement to extract fields, review and save.';};
     fileInput.onchange=async()=>{if(!fileInput.files?.length)return;uploadFile=fileInput.files[0];message.textContent='Reading with AI…';try{const body=new FormData();body.append('file',uploadFile);const response=await fetchJSON(endpoint+'/extract',{method:'POST',body});let count=0;for(const [field,value] of Object.entries(response.fields||{})){const input=form.elements.namedItem(field);if(input&&value!==null&&value!==undefined&&!String(input.value).trim()){input.value=String(value);count++;}}message.textContent='AI suggested '+count+' fields. Verify against the original before saving.';}catch(err){message.textContent='AI read failed: '+(err.message||err)+'. You can enter values manually.';}};
     function draw(){const q=el('dacSearch').value.trim().toLowerCase();const inPeriod=periodRecords();const shown=inPeriod.filter(r=>!q||JSON.stringify(r).toLowerCase().includes(q));el('dacCount').textContent='Showing '+shown.length+' of '+inPeriod.length+' records in period ('+records.length+' total)';const host=el('dacRecords');host.replaceChildren();const approved=inPeriod.filter(r=>r.authorization_status==='Authorized');const total=(kind==='receipts'?approved:inPeriod).reduce((sum,r)=>sum+(Number(r.amount)||0),0);const pending=inPeriod.length-approved.length;const reports=el('dacReport');reports.replaceChildren();const stats=kind==='receipts'?[['Receipts',inPeriod.length],['Authorized',approved.length],['Pending',pending],['Authorized Total','$'+total.toFixed(2)]]:[[names[kind],inPeriod.length],['Recorded Total','$'+total.toFixed(2)]];const tiles=document.createElement('div');tiles.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px';for(const [label,value] of stats){const tile=document.createElement('div');tile.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:18px;background:white;min-height:88px';const small=document.createElement('div');small.className='hint';small.textContent=label;const large=document.createElement('strong');large.style.cssText='display:block;font-size:24px;margin-top:12px';large.textContent=String(value);tile.append(small,large);tiles.append(tile);}reports.append(tiles);for(const item of shown){const box=document.createElement('div');box.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:15px;margin:10px 0';const title=document.createElement('strong');title.textContent=item.customer||item.vendor||item.supplier||item.issuer||item.invoice_number||'Record';box.append(title);const details=document.createElement('p');details.className='hint';details.style.whiteSpace='pre-wrap';details.textContent=fields[kind].filter(k=>item[k]!==undefined&&item[k]!=='').map(k=>k.replaceAll('_',' ')+': '+item[k]).join(' · ');box.append(details);
+      if(kind==='receipts'){
+        const catWrap=document.createElement('label');catWrap.style.cssText='display:inline-grid;gap:4px;margin:8px 10px 8px 0';catWrap.textContent='Expense category';
+        const catSelect=document.createElement('select');catSelect.className='input';
+        const categories=(window.__doorksExpenseCategories||[]);
+        for(const name of [...new Set([item.category||'Uncategorized',...categories])]){const opt=document.createElement('option');opt.value=name;opt.textContent=name;catSelect.append(opt);}
+        catSelect.value=item.category||'Uncategorized';
+        catSelect.onchange=async()=>{try{await fetchJSON(endpoint+'/'+encodeURIComponent(item.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{category:catSelect.value}})});await refresh();}catch(e){alert('Category update failed: '+e.message);}};
+        catWrap.append(catSelect);box.append(catWrap);
+      }
       if(kind==='receipts'){
         const summary=document.createElement('div');summary.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin:8px 0';
         const amount=document.createElement('strong');amount.style.fontSize='20px';amount.textContent='$'+Number(item.amount||0).toFixed(2);
@@ -1405,6 +1453,7 @@
     el('dacExport').onclick=()=>{const cols=['id','created_at',...fields[kind]];const esc=v=>'"'+String(v??'').replaceAll('"','""')+'"';const csv=[cols.join(','),...records.map(r=>cols.map(c=>esc(typeof r[c]==='string'&&/^[=+@-]/.test(r[c])?"'"+r[c]:r[c])).join(','))].join('\r\n');const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='doorks_'+kind+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);};
     async function refresh(){const response=await fetchJSON(endpoint);records=response.items||[];draw();}
     form.onsubmit=async e=>{e.preventDefault();save.disabled=true;message.textContent='Saving…';try{const data={};for(const field of fields[kind])data[field]=String(form.elements.namedItem(field)?.value??'').trim();const response=await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});const id=response.item.id;const original=fileInput.files?.[0]||uploadFile;if(original){const body=new FormData();body.append('file',original);try{await fetchJSON(endpoint+'/'+encodeURIComponent(id)+'/file',{method:'POST',body});}catch(err){message.textContent='Record saved, but original upload failed: '+err.message;await refresh();return;}}await refresh();editor.hidden=true;}catch(err){message.textContent='Save failed: '+(err.message||err);}finally{save.disabled=false;}};
+    if(kind==='receipts'){try{const r=await fetchJSON('/doorks-operations/accounting/categories');window.__doorksExpenseCategories=r.categories||[];}catch(e){window.__doorksExpenseCategories=[];}}
     try{await refresh();}catch(err){el('dacRecords').textContent='Could not load records: '+(err.message||err);}
   }
   // Isolated Doorks staff records; does not read PDS employee or payroll data.

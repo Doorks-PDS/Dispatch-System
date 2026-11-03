@@ -349,3 +349,60 @@ def financial_register(request: Request):
                 linked_supplier_balance=round(sum(max(0,float(b['balance'])) for b in bills if b['origin']=='linked_workflow'),2),
                 manual_supplier_bill_total=round(sum(float(b.get('amount') or 0) for b in bills if b['origin']=='manual_ledger'),2),
                 note='Linked and manual bills shown separately. No automatic merging or double-counting across sources.')
+
+# Revision 25: Doorks-only expense taxonomy. No PDS or SDC settings are changed.
+from pathlib import Path as _Path
+import json as _json
+import os as _os
+
+_DEFAULT_EXPENSE_CATEGORIES = [
+    'Uncategorized', 'Parts & Materials', 'Tools & Equipment', 'Vehicle & Fuel',
+    'Travel & Meals', 'Office Supplies', 'Software & Subscriptions',
+    'Insurance', 'Rent & Utilities', 'Payroll & Benefits',
+    'Professional Services', 'Taxes & Licenses', 'Shipping & Freight', 'Other'
+]
+
+class ExpenseCategories(BaseModel):
+    categories: list[str]
+
+def _expense_category_path(request: Request):
+    return _Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / 'accounting_expense_categories.json'
+
+@router.get('/accounting/categories')
+def get_expense_categories(request: Request):
+    guard(request)
+    path = _expense_category_path(request)
+    with _lock:
+        if not path.exists():
+            return {'categories': list(_DEFAULT_EXPENSE_CATEGORIES)}
+        try:
+            values = _json.loads(path.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            raise HTTPException(500, 'Unable to read expense categories')
+    if not isinstance(values, list):
+        raise HTTPException(500, 'Invalid category settings')
+    return {'categories': values}
+
+@router.put('/accounting/categories')
+def put_expense_categories(payload: ExpenseCategories, request: Request):
+    guard(request)
+    values = payload.categories
+    if len(values) > 100 or not values:
+        raise HTTPException(400, 'Enter 1–100 categories')
+    normalized = []
+    for item in values:
+        value = item.strip()
+        if not value or len(value) > 100:
+            raise HTTPException(400, 'Each category must be 1–100 characters')
+        if value.casefold() not in {x.casefold() for x in normalized}:
+            normalized.append(value)
+    path = _expense_category_path(request)
+    with _lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_name(path.name + '.tmp')
+        with tmp.open('w', encoding='utf-8') as handle:
+            _json.dump(normalized, handle, indent=2)
+            handle.flush()
+            _os.fsync(handle.fileno())
+        _os.replace(tmp, path)
+    return {'categories': normalized}
