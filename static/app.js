@@ -1267,15 +1267,15 @@
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><h2>Doorks Accounting Hub</h2><p class="hint">Overview of Doorks financial workflows. All records remain separate from PDS and SDC.</p><div id="doorksAcctHubCards"></div><div style="display:flex;justify-content:flex-end;margin-top:16px"><button class="btn btn-orange" id="doorksQuickNew">+ New Input</button></div><div id="doorksQuickOptions"></div></div>';
     el('doorksQuickNew').onclick=()=>renderAccountingQuickMenu('doorks','doorksQuickOptions');
     makeHubCards(el('doorksAcctHubCards'),[
-      {icon:'📊',label:'Overview & Reports',description:'View reporting and financial records.',open:()=>renderDoorksAccountingOverview()},
-      {icon:'🔗',label:'Connected Workflows',description:'Link invoices, customer payments, PO receiving and supplier bills.',open:()=>renderDoorksWorkflow()},
-      {icon:'📎',label:'Document Library',description:'Search and upload documents.',open:()=>renderDocumentVault('doorks','',renderDoorksAccountingHub)},
-      {icon:'💳',label:'Accounts Receivable',description:'Track customer invoices and payments.',open:()=>renderDoorksAccounting('receivables')},
-      {icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.',open:()=>renderAccountsPayable('doorks')},
-      {icon:'🧾',label:'Receipts & Expenses',description:'Review expense and receipt entries.',open:()=>renderDoorksAccounting('receipts')},
-      {icon:'📦',label:'Inventory & Receiving',description:'Receive purchase orders and review received stock.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)},
-      {icon:'🏦',label:'Statements',description:'Review financial statement records.',open:()=>renderDoorksAccounting('statements')}
+      {icon:'🔗',label:'Connected Workflows',description:'Follow each order from approval to payment.',open:()=>renderDoorksWorkflow()},
+      {icon:'💳',label:'Customer Invoices & Payments',description:'Outstanding customer balances and payment records.',open:()=>renderDoorksAccounting('receivables')},
+      {icon:'💸',label:'Supplier Bills & Payments',description:'Bills linked to purchase orders and payments.',open:()=>renderManualAccountingLedger('doorks','bills')},
+      {icon:'📦',label:'Inventory & Receiving',description:'Receive ordered parts and review stock history.',open:()=>renderPoReceiving('doorks',renderDoorksAccountingHub)},
+      {icon:'📎',label:'Document Library',description:'Packing slips, invoices, purchase orders and files.',open:()=>renderDocumentVault('doorks','',renderDoorksAccountingHub)},
+      {icon:'📊',label:'Financial Reports',description:'Review balances and identify missing links.',open:()=>renderDoorksAccountingOverview()}
     ]);
+    const reconciliation=document.createElement('div');reconciliation.style.cssText='margin-top:14px;padding:16px;border:1px solid #d9dee7;border-radius:12px';reconciliation.textContent='Checking financial records…';el('doorksAcctHubCards').after(reconciliation);
+    fetchJSON('/doorks-operations/reconciliation').then(r=>{reconciliation.replaceChildren();const h=document.createElement('h3');h.textContent='Financial Overview';reconciliation.append(h);const p=document.createElement('p');p.textContent=`Outstanding customer invoices: $${r.outstanding_customer_invoices.toFixed(2)} · Unpaid supplier bills: $${r.outstanding_supplier_bills.toFixed(2)} · ${r.issues.length} items need review`;reconciliation.append(p);for(const issue of r.issues.slice(0,10)){const x=document.createElement('p');x.className='hint';x.textContent=`${issue.reference||'Record'}: ${issue.message}`;reconciliation.append(x);}const note=document.createElement('p');note.className='hint';note.textContent=r.note;reconciliation.append(note);}).catch(e=>reconciliation.textContent='Financial overview unavailable: '+e.message);
   }
   async function renderDoorksWorkflow(){
     if(activePlatform!=='doorks')return;
@@ -1288,11 +1288,11 @@
     const action=(parent,label,fn)=>{const b=document.createElement('button');b.className='btn';b.textContent=label;b.style.margin='4px';b.onclick=async()=>{b.disabled=true;msg.textContent='';try{await fn();await refresh();}catch(e){msg.textContent=e.message||String(e);}finally{b.disabled=false;}};parent.append(b);};
     async function refresh(){
       const [metrics,docs,orders,ar,bills]=await Promise.all([fetchJSON('/doorks-workflow/overview'),fetchJSON('/workspaces/doorks/estimates_invoices'),fetchJSON('/workspaces/doorks/purchase_orders'),fetchJSON('/doorks-accounting/receivables'),fetchJSON('/doorks-workflow/supplier-bills')]);
-      el('dwMetrics').textContent=`Invoices ${metrics.invoices} · Open A/R $${Number(metrics.open_ar).toFixed(2)} · Purchase Orders ${metrics.purchase_orders} · Open A/P $${Number(metrics.open_ap).toFixed(2)}`;
+      el('dwMetrics').textContent=`Invoices ${metrics.invoices} · Outstanding customer invoices $${Number(metrics.open_ar).toFixed(2)} · Purchase Orders ${metrics.purchase_orders} · Unpaid supplier bills $${Number(metrics.open_ap).toFixed(2)}`;
       host.replaceChildren();
       const section=title=>{const x=document.createElement('section');x.style.cssText='margin:16px 0;padding:16px;border:1px solid #d9dee7;border-radius:12px';const h=document.createElement('h3');h.textContent=title;x.append(h);host.append(x);return x;};
       const line=(parent,title)=>{const x=document.createElement('div');x.style.cssText='padding:8px 0;border-bottom:1px solid #eee';const label=document.createElement('span');label.textContent=title;x.append(label);parent.append(x);return x;};
-      const estimates=section('1. Estimate → Approval → Invoice');
+      const estimates=section('Estimates awaiting invoicing');
       for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='estimate')){
         const row=line(estimates,`${d.document_number||'Estimate'} · ${d.customer||''} · ${d.status||'Draft'}`);
         if(String(d.status||'').toLowerCase()!=='approved')action(row,'Approve Estimate',async()=>{if(!confirm('Approve this estimate?'))return;await fetchJSON('/workspaces/doorks/estimates_invoices/'+encodeURIComponent(d.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Approved'}})});});
@@ -1301,16 +1301,16 @@
       const arInvoices=new Set((ar.items||[]).map(x=>String(x.invoice_number||'').trim()).filter(Boolean));
       const missingAr=(docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice'&&!arInvoices.has(String(x.document_number||'').trim()));
       if(missingAr.length){const note=document.createElement('p');note.className='hint';note.style.cssText='padding:10px;border-left:4px solid #d97706;background:#fffbeb';note.textContent=missingAr.length+' invoice(s) have no matching A/R record. Use Sync to A/R below; verify totals before accepting payments.';host.append(note);}
-      const invoices=section('2. Invoice → Accounts Receivable');
-      for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice')){const row=line(invoices,`${d.document_number||'Invoice'} · ${d.customer||''} · $${Number(d.total||d.amount||0).toFixed(2)}`);action(row,'Sync to A/R',async()=>{await send('/doorks-workflow/invoices/'+encodeURIComponent(d.id)+'/sync-receivable');});}
-      const customers=section('3. Customer Payments');
-      for(const r of (ar.items||[])){const balance=Number(r.amount||0)-Number(r.paid||0);const row=line(customers,`${r.invoice_number||'A/R'} · ${r.customer||''} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Payment',async()=>{const n=amount('Customer payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' received?'))return;await send('/doorks-workflow/receivables/'+encodeURIComponent(r.id)+'/payments',{amount:n,reference});});}
-      const purchasing=section('4. Purchase Order → Receiving → Supplier Bill');
+      const invoices=section('Customer invoices');
+      for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice')){const row=line(invoices,`${d.document_number||'Invoice'} · ${d.customer||''} · $${Number(d.total||d.amount||0).toFixed(2)}`);action(row,'Link to customer balance',async()=>{await send('/doorks-workflow/invoices/'+encodeURIComponent(d.id)+'/sync-receivable');});}
+      const customers=section('Customer payments');
+      for(const r of (ar.items||[])){const balance=Number(r.amount||0)-Number(r.paid||0);const row=line(customers,`${r.invoice_number||'Customer invoice'} · ${r.customer||''} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Payment',async()=>{const n=amount('Customer payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' received?'))return;await send('/doorks-workflow/receivables/'+encodeURIComponent(r.id)+'/payments',{amount:n,reference});});}
+      const purchasing=section('Purchase orders and receiving');
       for(const po of (orders.items||[])){const row=line(purchasing,`${po.po_number||'PO'} · ${po.vendor||''} · ${po.status||'Draft'} · Received ${po.received_quantity||0}/${po.quantity||0}`);const remaining=Number(po.quantity||0)-Number(po.received_quantity||0);
         if(remaining>0)action(row,'Receive Goods',async()=>{const n=amount('Quantity received',remaining);if(n===null)return;if(!confirm('Receive '+n+' units?'))return;await send('/doorks-workflow/purchase-orders/'+encodeURIComponent(po.id)+'/receive',{quantity:n});});
         action(row,'Enter Supplier Bill',async()=>{const bill_number=prompt('Supplier bill number');if(!bill_number)return;const n=amount('Supplier bill amount',999999999);if(n===null)return;if(!confirm('Create supplier bill '+bill_number+' for $'+n.toFixed(2)+'?'))return;await send('/doorks-workflow/purchase-orders/'+encodeURIComponent(po.id)+'/supplier-bill',{bill_number,amount:n});});
       }
-      const suppliers=section('5. Supplier Bill → Payment');
+      const suppliers=section('Supplier bills and payments');
       for(const bill of (bills.items||[])){const balance=Number(bill.amount||0)-Number(bill.paid||0);const row=line(suppliers,`${bill.bill_number} · ${bill.vendor||''} · ${bill.po_number||''} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Supplier Payment',async()=>{const n=amount('Supplier payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' paid?'))return;await send('/doorks-workflow/supplier-bills/'+encodeURIComponent(bill.id)+'/payments',{amount:n,reference});});}
     }
     try{await refresh();}catch(e){msg.textContent='Unable to load workflows: '+(e.message||e);}
@@ -1374,48 +1374,53 @@
   async function renderDoorksStaff(kind){
     if(activePlatform!=='doorks')return;
     clearWorkspaceActions();setWorkspace('Doorks — '+(kind==='employees'?'Employees':'Payroll'));
-    const fields=kind==='employees'
-      ?[['name','Employee Name'],['email','Email'],['phone','Phone'],['role','Role'],['status','Employment Status'],['hourly_rate','Hourly Rate'],['pto_bank','PTO Bank (hours)'],['ot_bank','OT Bank (hours)'],['notes','Notes']]
-      :[['employee','Employee'],['period_start','Period Start'],['period_end','Period End'],['work_date','Work Date'],['time_in','Time In'],['time_out','Time Out'],['lunch_minutes','Lunch Minutes'],['regular_hours','Regular Hours'],['overtime_hours','Overtime Hours'],['pto_hours','PTO Hours'],['holiday_hours','Holiday Hours'],['supervisor_approved','Supervisor Approved'],['notes','Notes']];
-    workspaceBody.innerHTML='<div class="card" style="max-width:1250px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px"><div><h2 id="dsTitle"></h2><p class="hint" id="dsHint"></p></div><button class="btn" id="dsNew">+ New Record</button></div><input class="input" id="dsSearch" placeholder="Search records" style="width:100%;margin:12px 0"><div id="dsList"></div><div id="dsEditor" hidden style="margin-top:20px"><h3 id="dsEditorTitle"></h3><form id="dsForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form><div style="display:flex;gap:8px;margin-top:12px"><button class="btn btn-orange" id="dsSave">Save</button><button class="btn" id="dsCancel">Cancel</button></div></div></div>';
-    el('dsTitle').textContent=kind==='employees'?'Employees':'Payroll & Timecards';
-    el('dsHint').textContent=kind==='employees'?'Separate Doorks employee directory. Inactive records are retained. Login deactivation requires an access-control integration.':'Doorks timecard records, pay-period tracking and supervisor review. Do not use for live payroll until calculation and approval validation are completed.';
-    let records=[],editing=null;
-    const form=el('dsForm');
+    const payroll=kind==='payroll';
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1200px;margin:auto">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>${payroll?'Payroll & Timecards':'Employees'}</h2><p class="hint">${payroll?'Daily overtime after 8 hours; approval required. Gross wages are estimates, not processed payroll.':'Employee history is retained. Login access is controlled separately and enforced by the server.'}</p></div><button class="btn btn-orange" id="dsNew">+ ${payroll?'Timecard':'Employee'}</button></div>
+      ${payroll?'<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:end;margin:12px 0"><label>Period start <input class="input" type="date" id="dsPeriodStart"></label><label>Period end <input class="input" type="date" id="dsPeriodEnd"></label><button class="btn" id="dsCalculate">Calculate Pay Period</button></div><div id="dsSummary" style="margin:10px 0"></div>':''}
+      <input class="input" id="dsSearch" placeholder="Search ${payroll?'timecards':'employees'}" style="width:100%;margin:12px 0"><div id="dsList"></div>
+      <div id="dsEditor" hidden style="border-top:1px solid #ddd;margin-top:16px;padding-top:14px"><h3 id="dsEditorTitle"></h3><form id="dsForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px"></form><div style="display:flex;gap:8px;margin-top:12px"><button type="button" class="btn btn-orange" id="dsSave">Save</button><button type="button" class="btn" id="dsCancel">Cancel</button></div></div><p id="dsMessage" role="status"></p></div>`;
+    const fields=payroll?
+      [['employee_id','Employee'],['work_date','Work Date'],['time_in','Time In (AM/PM)'],['time_out','Time Out (AM/PM)'],['lunch_minutes','Lunch Minutes'],['pto_hours','PTO Hours'],['holiday_hours','Holiday Hours'],['notes','Notes']]:
+      [['name','Employee Name'],['email','Email'],['phone','Phone'],['role','Role'],['status','Employment Status'],['hourly_rate','Hourly Rate'],['pto_bank','PTO Bank (hours)'],['ot_bank','OT Bank (hours)'],['notes','Notes']];
+    let records=[],employees=[],users=[],editing=null;
+    const form=el('dsForm'),message=el('dsMessage');
+    const makeButton=(text,fn)=>{const b=document.createElement('button');b.className='btn';b.type='button';b.textContent=text;b.onclick=fn;return b;};
     for(const [key,title] of fields){
       const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-weight:650';label.textContent=title;
       let input;
-      if(key==='status'||key==='role'||key==='supervisor_approved'){
-        input=document.createElement('select');
-        const opts=key==='status'?['Active','Inactive']:key==='role'?['Technician','Lead','Office Admin','Supervisor','Other']:['No','Yes'];
+      if(['status','role','employee_id'].includes(key)){
+        input=document.createElement('select');input.className='input';
+        const opts=key==='status'?['Active','Inactive']:key==='role'?['Technician','Lead','Office Admin','Supervisor','Other']:[];
         for(const option of opts)input.add(new Option(option,option));
-      }else{
-        input=document.createElement('input');input.className='input';
-        if(['period_start','period_end','work_date'].includes(key))input.type='date';
-        if(['hourly_rate','pto_bank','ot_bank','lunch_minutes','regular_hours','overtime_hours','pto_hours','holiday_hours'].includes(key)){input.type='number';input.step='0.01';input.min='0';}
-      }
+      }else if(key==='notes'){input=document.createElement('textarea');input.className='input';input.rows=2;}
+      else{input=document.createElement('input');input.className='input';if(key==='work_date')input.type='date';if(['hourly_rate','pto_bank','ot_bank','lunch_minutes','pto_hours','holiday_hours'].includes(key)){input.type='number';input.min='0';input.step=key==='lunch_minutes'?'1':'0.01';}if(['time_in','time_out'].includes(key))input.placeholder='e.g. 8:30 AM';}
       input.name=key;label.append(input);form.append(label);
     }
     const endpoint='/workspaces/doorks/'+kind;
-    const draw=()=>{const q=el('dsSearch').value.toLowerCase();const host=el('dsList');host.replaceChildren();for(const record of records.filter(r=>JSON.stringify(r).toLowerCase().includes(q))){
-      const row=document.createElement('div');row.style.cssText='padding:12px;border:1px solid #d9dee7;border-radius:10px;margin:8px 0;display:flex;justify-content:space-between;gap:10px;align-items:center';
-      const label=document.createElement('span');label.textContent=kind==='employees'?`${record.name||'Unnamed'} · ${record.status||'Active'} · ${record.role||''}`:`${record.employee||'Employee'} · ${record.work_date||record.period_start||''} · ${record.regular_hours||0} regular / ${record.overtime_hours||0} OT hours`;
-      const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>open(record);
-      row.append(label,edit);host.append(row);
-    }if(!host.children.length)host.textContent='No matching records.';};
-    const open=(record=null)=>{editing=record;form.reset();for(const [key] of fields){const input=form.elements.namedItem(key);if(record&&record[key]!==undefined)input.value=record[key];}el('dsEditorTitle').textContent=record?'Edit Record':'New Record';el('dsEditor').hidden=false;};
-    const refresh=async()=>{const data=await fetchJSON(endpoint);records=data.items||[];draw();};
+    function draw(){const q=el('dsSearch').value.toLowerCase(),host=el('dsList');host.replaceChildren();for(const r of records.filter(x=>JSON.stringify(x).toLowerCase().includes(q))){
+      const row=document.createElement('div');row.style.cssText='padding:12px;border:1px solid #d9dee7;border-radius:10px;margin:8px 0;display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap';
+      const label=document.createElement('span');label.textContent=payroll?`${r.employee||'Employee'} · ${r.work_date||''} · ${r.regular_hours||0} regular / ${r.overtime_hours||0} overtime · ${r.supervisor_approved==='Yes'?'Approved':'Pending approval'}${!r.calculation_version?' · Legacy entry':''}`:`${r.name||'Unnamed'} · ${r.status||'Active'} · ${r.role||''}${r.auth_user_id?' · Login linked':''}`;
+      const actions=document.createElement('div');actions.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+      if(payroll){if(r.calculation_version){actions.append(makeButton(r.supervisor_approved==='Yes'?'Revoke Approval':'Supervisor Approve',async()=>{if(!confirm('Update supervisor approval for this timecard?'))return;try{await fetchJSON('/doorks-operations/timecards/'+encodeURIComponent(r.id)+'/approval',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approved:r.supervisor_approved!=='Yes'})});await refresh();}catch(e){message.textContent=e.message;}}));}}
+      else{
+        actions.append(makeButton('Edit',()=>open(r)));
+        actions.append(makeButton('Login Access',async()=>{if(!users.length){message.textContent='No login accounts available. Create an account in the Login panel first.';return;}const list=users.map(u=>`${u.username} (${u.id})${u.active?'':' [inactive]'}`).join('\n');const chosen=prompt('Enter login account ID to link (do not use a name):\n'+list,r.auth_user_id||'');if(!chosen)return;const user=users.find(u=>String(u.id)===chosen.trim());if(!user){message.textContent='Account ID not found';return;}const enable=confirm('OK: enable this account. Cancel: disable this account.');if(!confirm(`${enable?'ENABLE':'DISABLE'} login for ${user.username} linked to ${r.name}?`))return;try{await fetchJSON('/doorks-operations/employees/'+encodeURIComponent(r.id)+'/access',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({user_id:user.id,active:enable})});message.textContent='Login access updated';await refresh();}catch(e){message.textContent=e.message;}}));
+      }
+      row.append(label,actions);host.append(row);
+    }if(!host.children.length)host.textContent='No matching records.';}
+    function open(record=null){editing=record;form.reset();if(payroll){const select=form.elements.namedItem('employee_id');select.replaceChildren(new Option('— Select employee —',''));for(const emp of employees.filter(e=>String(e.status||'Active').toLowerCase()==='active'))select.add(new Option(emp.name||emp.id,emp.id));}for(const [key] of fields){const input=form.elements.namedItem(key);if(record&&record[key]!==undefined)input.value=record[key];}el('dsEditorTitle').textContent=record?'Edit Employee':payroll?'New Timecard':'New Employee';el('dsEditor').hidden=false;}
+    async function refresh(){const data=await fetchJSON(endpoint);records=data.items||[];if(payroll){const staff=await fetchJSON('/workspaces/doorks/employees');employees=staff.items||[];}else{try{const result=await fetchJSON('/auth/users');users=result.items||result.users||[];}catch(e){users=[];}}draw();}
     el('dsSearch').oninput=draw;el('dsNew').onclick=()=>open();el('dsCancel').onclick=()=>el('dsEditor').hidden=true;
     el('dsSave').onclick=async()=>{const data={};for(const [key] of fields)data[key]=form.elements.namedItem(key).value;
-      if(kind==='employees'&&!data.name.trim()){alert('Employee name is required');return;}
-      if(kind==='payroll'&&!data.employee.trim()){alert('Employee is required');return;}
-      try{
-        const url=editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint;
-        await fetchJSON(url,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
-        el('dsEditor').hidden=true;await refresh();
-      }catch(err){alert('Unable to save: '+err.message);}
+      try{if(payroll){if(!data.employee_id)throw Error('Select an employee');await fetchJSON('/doorks-operations/timecards',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});}
+      else{if(!data.name.trim())throw Error('Employee name required');await fetchJSON(editing?endpoint+'/'+encodeURIComponent(editing.id):endpoint,{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});}
+      el('dsEditor').hidden=true;message.textContent='Saved';await refresh();}catch(e){message.textContent='Unable to save: '+e.message;}
     };
-    try{await refresh();}catch(err){el('dsList').textContent='Unable to load records: '+err.message;}
+    if(payroll){const today=new Date(),last=today.toISOString().slice(0,10),first=new Date(today.getTime()-13*86400000).toISOString().slice(0,10);el('dsPeriodStart').value=first;el('dsPeriodEnd').value=last;
+      el('dsCalculate').onclick=async()=>{try{const r=await fetchJSON('/doorks-operations/pay-period?start='+encodeURIComponent(el('dsPeriodStart').value)+'&end='+encodeURIComponent(el('dsPeriodEnd').value));const host=el('dsSummary');host.replaceChildren();const heading=document.createElement('h3');heading.textContent='Estimated gross wages: $'+r.estimated_gross_total.toFixed(2);host.append(heading);for(const e of r.employees){const line=document.createElement('p');line.textContent=`${e.employee}: ${e.regular_hours} regular · ${e.overtime_hours} overtime · ${e.pto_hours} PTO · ${e.holiday_hours} holiday · $${e.estimated_gross.toFixed(2)} · ${e.ready_for_export?'Approved':'Pending review ('+e.pending_approval+')'}`;host.append(line);}const note=document.createElement('p');note.className='hint';note.textContent=r.note;host.append(note);}catch(e){message.textContent=e.message;}};
+    }
+    try{await refresh();}catch(e){message.textContent='Unable to load: '+e.message;}
   }
   function showPlatformShell(platform,initialView='overview') {
     activePlatform=platform;

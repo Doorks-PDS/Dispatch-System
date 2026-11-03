@@ -251,6 +251,8 @@ from app.routers.doorks_workflow import router as doorks_workflow_router
 app.include_router(doorks_workflow_router)
 from app.routers.ai_data_import import router as ai_data_import_router
 app.include_router(ai_data_import_router)
+from app.routers.doorks_operations import router as doorks_operations_router
+app.include_router(doorks_operations_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):

@@ -58,6 +58,7 @@ def listing(platform:str,kind:str,request:Request):
 @router.post("/{platform}/{kind}")
 def create(platform:str,kind:str,payload:Record,request:Request):
     guard(request,platform,kind)
+    if platform=='doorks' and kind=='payroll':raise HTTPException(409,'Use calculated Doorks timecard endpoint')
     with _lock:
         path=location(request,platform,kind);items=load(path)
         data=clean(payload.data)
@@ -209,12 +210,25 @@ def convert_estimate_to_invoice(platform:str,record_id:str,request:Request):
 @router.patch("/{platform}/{kind}/{record_id}")
 def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
     guard(request,platform,kind)
+    if platform=='doorks' and kind=='payroll':raise HTTPException(409,'Calculated timecards are immutable; approval has a separate endpoint')
     with _lock:
         path=location(request,platform,kind);items=load(path)
         for item in items:
             if item.get("id")==record_id:
                 data=clean(payload.data)
                 for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
+                if platform=='doorks' and kind=='employees':
+                    # Employment records stay on disk. Disabling a linked employee
+                    # immediately revokes login access at the authentication store.
+                    data.pop('auth_user_id',None)
+                    data.pop('access_active',None)
+                    linked=item.get('auth_user_id')
+                    if linked and str(data.get('status',item.get('status','Active'))).lower()!='active':
+                        if linked==request.state.auth_user.get('id'):
+                            raise HTTPException(409,'Cannot deactivate your own login')
+                        try:request.app.state.users_store.set_active(linked,False)
+                        except ValueError as exc:raise HTTPException(409,str(exc))
+                        item['access_active']=False
                 if kind=="purchase_orders":data.pop("po_number",None)
                 if kind in ("work_orders","orders"):
                     data.pop("source_estimate_id",None)
@@ -271,6 +285,8 @@ def set_status(platform:str,kind:str,record_id:str,payload:dict,request:Request)
 @router.delete("/{platform}/{kind}/{record_id}")
 def delete(platform:str,kind:str,record_id:str,request:Request):
     guard(request,platform,kind)
+    if platform=='doorks' and kind in ('payroll','employees'):
+        raise HTTPException(409,'Retain employee and payroll history; deactivate employee access instead')
     with _lock:
         path=location(request,platform,kind);items=load(path)
         if kind in ("customers","vendors"):
