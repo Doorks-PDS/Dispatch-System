@@ -414,12 +414,12 @@ class SettingsPayload(BaseModel):
 
 _BUSINESS_SETTINGS = {
     'business_name', 'business_address', 'business_phone', 'business_email', 'website',
-    'tax_id_label', 'default_sales_tax', 'trip_charge', 'fuel_surcharge',
+    'tax_id_label', 'license_number', 'remit_to_address', 'default_ship_to', 'default_sales_tax', 'trip_charge', 'fuel_surcharge',
     'single_tech_labor', 'crew_labor', 'estimate_terms', 'invoice_terms'
 }
 _ACCOUNTING_SETTINGS = {
     'fiscal_year_start_month', 'default_payment_terms', 'receipt_review_required',
-    'statement_review_required', 'receipt_retention_years', 'statement_match_tolerance', 'tax_notes'
+    'statement_review_required', 'receipt_retention_years', 'statement_match_tolerance', 'expense_approval_threshold', 'invoice_prefix', 'po_prefix', 'tax_notes'
 }
 
 def _settings_path(request: Request, scope: str):
