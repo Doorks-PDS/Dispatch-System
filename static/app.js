@@ -691,6 +691,27 @@
     ]);
   }
 
+  // Doorks-only Moses draft assistant. It never writes records without the user's Save action.
+  function attachDoorksMoses(host,kind,applyDraft){
+    if(!host)return;
+    const details=document.createElement('details');details.style.cssText='margin:12px 0;border:1px solid #cbd5e1;border-radius:12px;padding:14px;background:#f8fafc';
+    const summary=document.createElement('summary');summary.style.cssText='cursor:pointer;font-weight:800';summary.textContent='✨ Moses AI Assistant — Draft '+(kind==='purchase_order'?'Purchase Order':kind==='invoice'?'Invoice':'Estimate');details.append(summary);
+    const hint=document.createElement('p');hint.className='hint';hint.textContent='Describe the job, parts, quantities, prices, customer or supplier. Moses prepares a draft; review and apply it before saving. Existing fields are not automatically overwritten.';details.append(hint);
+    const notes=document.createElement('textarea');notes.className='input';notes.rows=4;notes.style.width='100%';notes.placeholder='Example: Customer ABC, job 123, replace two closers, 3 hours single tech labor, trip and fuel…';details.append(notes);
+    const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:10px 0';details.append(actions);
+    const speak=document.createElement('button');speak.type='button';speak.className='btn';speak.textContent='🎙 Dictate';actions.append(speak);
+    const prepare=document.createElement('button');prepare.type='button';prepare.className='btn';prepare.textContent='✨ Prepare Draft';actions.append(prepare);
+    const apply=document.createElement('button');apply.type='button';apply.className='btn btn-orange';apply.textContent='Apply Reviewed Draft';apply.disabled=true;actions.append(apply);
+    const status=document.createElement('p');status.className='hint';status.setAttribute('role','status');details.append(status);
+    const preview=document.createElement('pre');preview.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 inherit;max-height:260px;overflow:auto';details.append(preview);
+    let draft=null;const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;
+    if(!Speech){speak.disabled=true;speak.title='Dictation not available in this browser';}
+    else{let recognition=null,active=false;speak.onclick=()=>{if(active){recognition.stop();return;}recognition=new Speech();recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;let base=notes.value.trim(),final='';recognition.onresult=e=>{let interim='';for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';else interim+=e.results[i][0].transcript;}notes.value=[base,final,interim].filter(Boolean).join(' ');};recognition.onend=()=>{active=false;speak.textContent='🎙 Dictate';};recognition.onerror=e=>{status.textContent='Microphone: '+e.error+'. You can type notes instead.';};try{recognition.start();active=true;speak.textContent='Stop Dictation';}catch(e){status.textContent=e.message;}};}
+    prepare.onclick=async()=>{const transcript=notes.value.trim();if(!transcript){status.textContent='Enter or dictate a description first.';return;}prepare.disabled=true;apply.disabled=true;draft=null;status.textContent='Preparing a draft…';try{const result=await fetchJSON('/moses/document-assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript,document_type:kind})});draft=result.fields||null;if(!draft)throw new Error('No draft returned');preview.textContent=JSON.stringify(draft,null,2);apply.disabled=false;status.textContent='Review every field, price, quantity and taxable selection, then choose Apply Reviewed Draft.';}catch(e){status.textContent='Moses unavailable: '+(e.message||e)+'. Your notes remain here.';}finally{prepare.disabled=false;}};
+    apply.onclick=()=>{if(!draft)return;applyDraft(draft);status.textContent='Draft applied to editable fields. Check all amounts, tax and addresses before saving.';};
+    host.prepend(details);return details;
+  }
+
   // Phase 2R-J-B: workspace-specific estimate/invoice builder.
   // Existing collection and stored records remain the source of truth.
   async function renderWorkspaceEstimateInvoice(platform,openNew=false,backAction=null,filterType=''){
@@ -807,6 +828,13 @@
     for(const item of catalog){for(const value of [item.sku||item.part_number||item.name])if(value){const opt=document.createElement('option');opt.value=value;opt.label=item.description||item.name||'';datalist.append(opt);}}
     q('wedLines').after(datalist);
     q('wedAdd').onclick=()=>addLine();
+    if(platform==='doorks')attachDoorksMoses(form,filterType==='Invoice'?'invoice':'estimate',draft=>{
+      const set=(key,value)=>{if(value!==undefined&&value!==null&&String(value).trim()&&!f(key).value.trim())f(key).value=String(value);};
+      for(const key of ['customer','address','ship_to','work_order_number','po_number','notes','prepared_by'])set(key,draft[key]);
+      if(draft.terms&&!f('terms').value){f('terms').value=draft.terms;}
+      if(Array.isArray(draft.line_items))for(const line of draft.line_items.slice(0,30)){if(!line||(!line.description&&!line.item))continue;addLine({item:String(line.item||''),description:String(line.description||''),quantity:Math.max(0,Number(line.quantity)||1),rate:Math.max(0,Number(line.rate)||0),taxable:line.taxable===true});}
+      calculate();
+    });
     if(platform==='doorks'){
       q('wedServiceTools').hidden=false;
       const chargeDefs=[['wedTrip','TRIP','Trip Charge','trip_charge'],['wedFuel','FUEL','Fuel Surcharge','fuel_surcharge']];
@@ -10924,6 +10952,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const amount=document.createElement('td');amount.style.cssText='padding:8px;text-align:right;white-space:nowrap';amount.className='upoAmount';tr.append(amount);
       const remove=document.createElement('td');const btn=document.createElement('button');btn.type='button';btn.className='btn';btn.textContent='×';btn.setAttribute('aria-label','Remove line');btn.onclick=()=>{tr.remove();total();};remove.append(btn);tr.append(remove);q('upoLines').append(tr);total();};
     const getLines=()=>[...q('upoLines').children].map(tr=>{const o={};tr.querySelectorAll('[data-key]').forEach(input=>o[input.dataset.key]=input.value);return {item:String(o.item||''),description:String(o.description||''),quantity:Number(o.quantity||0),unit:String(o.unit||''),rate:Number(o.rate||0),...(tr.dataset.partId?{part_id:tr.dataset.partId}:{})};});
+    if(platform==='doorks')attachDoorksMoses(form,'purchase_order',draft=>{
+      for(const key of ['vendor','vendor_address','ship_to','customer','work_order_number','notes']){const field=form.elements.namedItem(key);if(field&&draft[key]&&!field.value.trim())field.value=String(draft[key]);}
+      if(Array.isArray(draft.line_items))for(const line of draft.line_items.slice(0,30)){if(line&&(line.item||line.description))addLine({item:String(line.item||''),description:String(line.description||''),quantity:Math.max(0,Number(line.quantity)||1),unit:String(line.unit||''),rate:Math.max(0,Number(line.rate)||0)});}
+      total();
+    });
     const total=()=>{let sum=0;for(const tr of q('upoLines').children){const vals={};tr.querySelectorAll('[data-key]').forEach(x=>vals[x.dataset.key]=x.value);const amount=Number(vals.quantity||0)*Number(vals.rate||0);tr.querySelector('.upoAmount').textContent=money(amount);sum+=amount;}sum+=Number(q('upoTax').value||0)+Number(q('upoShipping').value||0);q('upoTotal').textContent=money(sum);return sum;};
     if(platform==='doorks'){
       const list=document.createElement('datalist');list.id='upoDoorksParts';for(const part of doorksParts){const opt=document.createElement('option');opt.value=part.sku||part.part_number||part.name||'';opt.label=part.description||'';list.append(opt);}q('upoLines').after(list);
