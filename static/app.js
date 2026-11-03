@@ -719,6 +719,7 @@
           <label>Status<select class="input" name="status" id="wedStatus"></select></label><label id="wedPaidWrap" hidden>Manually Recorded Payments (not processor-synced)<input class="input" name="paid" type="number" min="0" step=".01" value="0"></label><label>Prepared By<input class="input" name="prepared_by" placeholder="Employee name"></label>
           <label>Sales Tax %<input class="input" name="tax_rate" type="number" step=".01" min="0" value="7.75"></label>
         </div>
+        <div id="wedServiceTools" style="border:1px solid #d7e1d5;border-radius:12px;padding:14px;background:#f7faf6" hidden><h3 style="margin:0 0 8px">Service Charges & Labor</h3><p class="hint">Add saved business rates as editable line items. Charges are inserted only when selected; existing lines are not duplicated.</p><div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><label style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="wedTrip"> Trip charge</label><label style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="wedFuel"> Fuel surcharge</label><label style="display:flex;align-items:center;gap:5px">Labor type <select class="input" id="wedLaborType" style="width:auto"><option value="">None</option><option value="single_tech_labor">Single technician</option><option value="crew_labor">Crew</option></select></label><label style="display:flex;align-items:center;gap:5px">Hours <input class="input" id="wedLaborHours" type="number" min="0" step=".25" value="1" style="width:80px"></label><button class="btn" type="button" id="wedInsertCharges">+ Insert Selected Charges</button></div><p id="wedChargeStatus" class="hint"></p></div>
         <div style="border-top:1px solid #e2e8f0;padding-top:16px"><h3>Items, Labor & Pricing</h3><div id="wedCatalogHint" class="hint"></div><div style="overflow-x:auto"><table style="width:100%;min-width:760px;border-collapse:separate;border-spacing:6px"><thead><tr><th>Item / SKU</th><th>Description</th><th>Qty</th><th>Rate</th><th>Taxable</th><th>Amount</th><th></th></tr></thead><tbody id="wedLines"></tbody></table></div><button class="btn" id="wedAdd" type="button">+ Add Line Item</button></div>
         <label>Scope of Work / Notes<textarea class="input" name="notes" rows="3"></textarea></label>
         <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
@@ -784,7 +785,7 @@
     }catch(e){console.warn('Document lookup unavailable',e);}
     f('customer').addEventListener('change',()=>{
       const c=customers.find(x=>String(x.name||'').toLowerCase()===f('customer').value.toLowerCase());
-      if(c&&!f('address').value)f('address').value=c.address||'';
+      if(c){if(!f('address').value)f('address').value=c.billing_address||c.address||'';if(!f('ship_to').value)f('ship_to').value=c.ship_to||c.shipping_address||c.service_address||c.address||'';}
     });
     function getLines(){return [...q('wedLines').children].map(tr=>({item:tr.querySelector('[data-k="item"]').value,description:tr.querySelector('[data-k="description"]').value,quantity:Number(tr.querySelector('[data-k="quantity"]').value)||0,rate:Number(tr.querySelector('[data-k="rate"]').value)||0,taxable:tr.querySelector('[data-k="taxable"]').checked}));}
     function calculate(){const lines=getLines(),subtotal=lines.reduce((a,l)=>a+l.quantity*l.rate,0),taxable=lines.filter(l=>l.taxable).reduce((a,l)=>a+l.quantity*l.rate,0),tax=taxable*(Number(f('tax_rate').value)||0)/100;q('wedTotal').textContent='Total: '+fmt(subtotal+tax);return {subtotal,tax,total:subtotal+tax};}
@@ -806,14 +807,44 @@
     for(const item of catalog){for(const value of [item.sku||item.part_number||item.name])if(value){const opt=document.createElement('option');opt.value=value;opt.label=item.description||item.name||'';datalist.append(opt);}}
     q('wedLines').after(datalist);
     q('wedAdd').onclick=()=>addLine();
+    if(platform==='doorks'){
+      q('wedServiceTools').hidden=false;
+      const chargeDefs=[['wedTrip','TRIP','Trip Charge','trip_charge'],['wedFuel','FUEL','Fuel Surcharge','fuel_surcharge']];
+      q('wedInsertCharges').onclick=()=>{
+        const current=getLines();let inserted=0;
+        for(const [check,code,description,key] of chargeDefs){
+          if(!q(check).checked)continue;
+          if(current.some(x=>x.item===code)){continue;}
+          const rate=Number(doorksBusinessDefaults[key]);if(!Number.isFinite(rate)||rate<0){continue;}
+          addLine({item:code,description,quantity:1,rate,taxable:false});inserted++;
+        }
+        const laborKey=q('wedLaborType').value,hours=Number(q('wedLaborHours').value);
+        if(laborKey&&hours>0&&Number.isFinite(hours)){
+          const code=laborKey==='crew_labor'?'CREW-LABOR':'TECH-LABOR';
+          if(!getLines().some(x=>x.item===code)){
+            const rate=Number(doorksBusinessDefaults[laborKey]);
+            if(Number.isFinite(rate)&&rate>=0){addLine({item:code,description:code==='CREW-LABOR'?'Crew Labor':'Single Technician Labor',quantity:hours,rate,taxable:false});inserted++;}
+          }
+        }
+        q('wedChargeStatus').textContent=inserted+' charge line(s) inserted. Verify quantities, rates and tax treatment before saving.';
+      };
+    }
     f('tax_rate').oninput=calculate;
     function open(item=null,type='Estimate'){
-      editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();q('wedLines').replaceChildren();
+      editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();q('wedLines').replaceChildren();if(platform==='doorks'){q('wedTrip').checked=false;q('wedFuel').checked=false;q('wedLaborType').value='';q('wedLaborHours').value='1';q('wedChargeStatus').textContent='';}
       const data=item||{};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','ship_to','tax_rate','notes','paid','prepared_by'])if(data[key]!=null&&f(key))f(key).value=data[key];
       if(!item&&platform==='doorks'&&window.__doorksJobDraft){const job=window.__doorksJobDraft;for(const [key,value] of Object.entries({customer:job.customer,address:job.address,work_order_number:job.job_number,notes:job.description}))if(f(key))f(key).value=value;window.__doorksJobDraft=null;}
       if(!item&&window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type===(type==='Invoice'?'invoice':'estimate')){f('notes').value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}
+      if(!item&&platform==='doorks'&&!f('ship_to').value.trim()){
+        const c=customers.find(x=>String(x.name||'').toLowerCase()===f('customer').value.toLowerCase());
+        f('ship_to').value=c?.ship_to||c?.shipping_address||c?.service_address||c?.address||f('address').value||doorksBusinessDefaults.default_ship_to||doorksBusinessDefaults.business_address||'';
+      }
       if(!item&&platform==='doorks'){const rate=Number(doorksBusinessDefaults.default_sales_tax);if(doorksBusinessDefaults.default_sales_tax!==undefined&&Number.isFinite(rate))f('tax_rate').value=String(rate);const terms=type==='Invoice'?doorksBusinessDefaults.invoice_terms:doorksBusinessDefaults.estimate_terms;if(terms){if([...f('terms').options].some(x=>x.value===terms))f('terms').value=terms;else{f('terms').value='Other';f('custom_terms').hidden=false;f('custom_terms').value=terms;}}else if(type==='Invoice'&&doorksBusinessDefaults.default_payment_terms){const value='Net '+doorksBusinessDefaults.default_payment_terms;if([...f('terms').options].some(x=>x.value===value))f('terms').value=value;}}
       if(item&&data.terms&&![...f('terms').options].some(o=>o.value===data.terms)){f('terms').value='Other';f('custom_terms').hidden=false;f('custom_terms').value=data.terms;}else if(item)f('custom_terms').hidden=true;
+      if(!item&&platform==='doorks'){
+        const c=customers.find(x=>String(x.name||'').toLowerCase()===f('customer').value.toLowerCase());
+        if(c&&!f('address').value)f('address').value=c.billing_address||c.address||'';
+      }
       if(!item){f('document_type').value=type;f('date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);f('document_number').value='';} updateStatusOptions(f('document_type').value,data.status||'Draft');f('document_type').disabled=!!filterType;
       let lines=[];try{lines=Array.isArray(data.line_items)?data.line_items:JSON.parse(data.line_items||'[]');}catch{}
       if(!lines.length&&data.description)lines=[{description:data.description,quantity:1,rate:Number(data.amount)||0,taxable:false}];
@@ -829,7 +860,7 @@
       let lines=[];try{lines=Array.isArray(item.line_items)?item.line_items:JSON.parse(item.line_items||'[]');}catch{}
       if(!lines.length&&item.description)lines=[{description:item.description,quantity:1,rate:Number(item.amount)||0,taxable:false}];
       const subtotal=lines.reduce((a,l)=>a+(Number(l.quantity)||0)*(Number(l.rate)||0),0),tax=Number(item.tax_amount)||0;
-      return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:34px;background:white;line-height:1.5"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(platform==='doorks'?(doorksBusinessDefaults.business_name||company):company)}</h2><p style="white-space:pre-line">${escapeHtml(platform==='doorks'?(doorksBusinessDefaults.business_address||''): '41080 Saddleback Dr\nAguanga, CA 92536')}</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0"><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Customer / Bill To</b><p>${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}</p></div><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Ship To / Service Location</b><p style="white-space:pre-line">${escapeHtml(item.ship_to||item.address)}</p></div></div><p><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#eaf0f6;color:#17263a"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Tax: ${fmt(tax)}</p><h2 style="border-top:2px solid #263a50;padding-top:12px">Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
+      return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:34px;background:white;line-height:1.5"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(platform==='doorks'?(doorksBusinessDefaults.business_name||company):company)}</h2><p style="white-space:pre-line">${escapeHtml(platform==='doorks'?(doorksBusinessDefaults.business_address||''): '41080 Saddleback Dr\nAguanga, CA 92536')}</p></div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0"><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Customer / Bill To</b><p>${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}</p></div><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Ship To / Service Location</b><p style="white-space:pre-line">${escapeHtml(item.ship_to||item.address)}</p></div></div><p><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#eaf0f6;color:#17263a"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Tax</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${l.taxable===false?'No':'Yes'}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Sales Tax (${escapeHtml(item.tax_rate||0)}% on taxable lines): ${fmt(tax)}</p><h2 style="border-top:2px solid #263a50;padding-top:12px">Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
     }
     function view(item){q('wedCreateFulfillment').hidden=item.document_type!=='Estimate';q('wedFulfillment').hidden=item.document_type!=='Estimate';q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
     q('wedCreateFulfillment').onclick=async()=>{
@@ -1380,6 +1411,19 @@
     clearWorkspaceActions();setWorkspace('Doorks — Connected Workflows');
     workspaceBody.innerHTML='<div class="card" style="max-width:1450px;margin:auto"><h2>Connected Business & Accounting</h2><p class="hint">Explicit actions only. Existing links are reused. Payments and receiving require confirmation.</p><div id="dwMetrics"></div><div id="dwContent"></div><p id="dwMsg" role="status"></p><button class="btn" id="dwBack">Back to Accounting Hub</button></div>';
     el('dwBack').onclick=renderDoorksAccountingHub;
+    document.getElementById('dwRecordPanel')?.remove();const panel=document.createElement('aside');panel.id='dwRecordPanel';panel.hidden=true;panel.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(520px,100vw);background:white;box-shadow:-12px 0 48px #0004;z-index:10003;overflow-y:auto;padding:24px;box-sizing:border-box';document.body.append(panel);
+    const closePanel=()=>{panel.hidden=true;};
+    const showPanel=(kind,record)=>{
+      panel.replaceChildren();panel.hidden=false;
+      const header=document.createElement('div');header.style.cssText='display:flex;justify-content:space-between;gap:12px;align-items:center';const title=document.createElement('h2');title.textContent=kind+' Details';const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=closePanel;header.append(title,close);panel.append(header);
+      const subtitle=document.createElement('p');subtitle.className='hint';subtitle.textContent='Saved Doorks record · Read only. Use the workflow action on the ticket to make changes.';panel.append(subtitle);
+      for(const [key,value] of Object.entries(record||{})){
+        if(value===null||value===undefined||value===''||typeof value==='object'||key==='line_items')continue;
+        const line=document.createElement('div');line.style.cssText='padding:12px 0;border-bottom:1px solid #e1e5eb;overflow-wrap:anywhere';const label=document.createElement('div');label.className='hint';label.textContent=key.replaceAll('_',' ').replace(/\b\w/g,c=>c.toUpperCase());const detail=document.createElement('strong');detail.textContent=String(value);line.append(label,detail);panel.append(line);
+      }
+      if(record?.line_items){try{const items=Array.isArray(record.line_items)?record.line_items:JSON.parse(record.line_items);const h=document.createElement('h3');h.textContent='Line Items';panel.append(h);for(const item of items){const p=document.createElement('p');p.textContent=[item.item,item.description,'Qty '+item.quantity,'Rate '+item.rate].filter(Boolean).join(' · ');panel.append(p);}}catch{}}
+    };
+    const originalBack=el('dwBack').onclick;el('dwBack').onclick=()=>{panel.remove();originalBack();};
     const host=el('dwContent'),msg=el('dwMsg');
     const send=(url,data)=>fetchJSON(url,{method:'POST',...(data?{headers:{'Content-Type':'application/json'},body:JSON.stringify(data)}:{})});
     const amount=(label,max)=>{const v=prompt(label+' (maximum '+Number(max).toFixed(2)+')');if(v===null)return null;const n=Number(v);if(!Number.isFinite(n)||n<=0||n>Number(max))throw Error('Enter a valid amount within the remaining balance.');return n;};
@@ -1390,10 +1434,10 @@
       for(const [label,value,open] of [['Invoices',metrics.invoices,()=>renderWorkspaceEstimateInvoice('doorks',false,()=>renderDoorksWorkflow(),'Invoice')],['Outstanding Customer Invoices','$'+Number(metrics.open_ar).toFixed(2),()=>renderDoorksAccounting('receivables')],['Purchase Orders',metrics.purchase_orders,()=>renderUnifiedPurchaseOrders('doorks',false,()=>renderDoorksWorkflow())],['Unpaid Supplier Bills','$'+Number(metrics.open_ap).toFixed(2),()=>renderDoorksWorkflow()],['Estimates',(docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='estimate').length,()=>renderWorkspaceEstimateInvoice('doorks',false,()=>renderDoorksWorkflow(),'Estimate')],['Pending Receipts',(orders.items||[]).filter(x=>Number(x.quantity||0)>Number(x.received_quantity||0)).length,()=>renderPoReceiving('doorks')],['Customer Payments Recorded','$'+(ar.items||[]).reduce((n,x)=>n+Number(x.paid||0),0).toFixed(2),()=>renderDoorksAccounting('receivables')],['Supplier Payments Recorded','$'+(bills.items||[]).reduce((n,x)=>n+Number(x.paid||0),0).toFixed(2),()=>renderDoorksWorkflow()]]){const tile=document.createElement('div');tile.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px';const heading=document.createElement('div');heading.className='hint';heading.textContent=label;const number=document.createElement('div');number.style.cssText='font-size:24px;font-weight:800;margin-top:7px';number.textContent=String(value);tile.append(heading,number);tile.style.cursor='pointer';tile.setAttribute('role','button');tile.tabIndex=0;tile.onclick=open;tile.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};metricHost.append(tile);}
       host.replaceChildren();host.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,510px),1fr));gap:16px;align-items:start';
       const section=title=>{const x=document.createElement('section');x.style.cssText='margin:0;padding:20px;border:1px solid #d9dee7;border-radius:14px;background:#fff;min-width:0';const h=document.createElement('h3');h.textContent=title;x.append(h);host.append(x);return x;};
-      const line=(parent,title)=>{const x=document.createElement('div');x.style.cssText='padding:18px;margin:12px 0;border:1px solid #d9dee7;border-radius:12px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;background:#fafbfd';const label=document.createElement('strong');label.style.cssText='font-size:15px;line-height:1.6;flex:1 1 360px';label.textContent=title;x.append(label);parent.append(x);return x;};
+      const line=(parent,title,kind,record)=>{const x=document.createElement('div');x.style.cssText='padding:18px;margin:12px 0;border:1px solid #d9dee7;border-radius:12px;display:flex;align-items:flex-start;justify-content:space-between;gap:14px;flex-wrap:wrap;background:#fafbfd';const label=document.createElement('strong');label.style.cssText='font-size:15px;line-height:1.6;flex:1 1 360px';label.textContent=title;x.append(label);if(record){const view=document.createElement('button');view.className='btn';view.textContent='↗ View Details';view.onclick=()=>showPanel(kind,record);x.append(view);}parent.append(x);return x;};
       const estimates=section('Estimates awaiting invoicing');
       for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='estimate')){
-        const row=line(estimates,`${d.document_number||'Estimate'} · ${d.customer||'Customer not specified'} · Status: ${d.status||'Draft'} · Total: $${Number(d.total||d.amount||0).toFixed(2)}`);
+        const row=line(estimates,`${d.document_number||'Estimate'} · ${d.customer||'Customer not specified'} · Status: ${d.status||'Draft'} · Total: $${Number(d.total||d.amount||0).toFixed(2)}`,'Estimate',d);
         if(String(d.status||'').toLowerCase()!=='approved')action(row,'Approve Estimate',async()=>{if(!confirm('Approve this estimate?'))return;await fetchJSON('/workspaces/doorks/estimates_invoices/'+encodeURIComponent(d.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Approved'}})});});
         else action(row,'Create / Open Linked Invoice',async()=>{await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/convert-to-invoice');});
       }
@@ -1401,16 +1445,16 @@
       const missingAr=(docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice'&&!arInvoices.has(String(x.document_number||'').trim()));
       if(missingAr.length){const note=document.createElement('p');note.className='hint';note.style.cssText='padding:10px;border-left:4px solid #d97706;background:#fffbeb';note.textContent=missingAr.length+' invoice(s) have no matching A/R record. Use Sync to A/R below; verify totals before accepting payments.';host.append(note);}
       const invoices=section('Customer invoices');
-      for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice')){const row=line(invoices,`${d.document_number||'Invoice'} · ${d.customer||'Customer not specified'} · Total: $${Number(d.total||d.amount||0).toFixed(2)} · ${arInvoices.has(String(d.document_number||'').trim())?'Customer balance linked':'Customer balance not linked'}`);action(row,'Link to customer balance',async()=>{await send('/doorks-workflow/invoices/'+encodeURIComponent(d.id)+'/sync-receivable');});}
+      for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='invoice')){const row=line(invoices,`${d.document_number||'Invoice'} · ${d.customer||'Customer not specified'} · Total: $${Number(d.total||d.amount||0).toFixed(2)} · ${arInvoices.has(String(d.document_number||'').trim())?'Customer balance linked':'Customer balance not linked'}`,'Invoice',d);action(row,'Link to customer balance',async()=>{await send('/doorks-workflow/invoices/'+encodeURIComponent(d.id)+'/sync-receivable');});}
       const customers=section('Customer payments');
-      for(const r of (ar.items||[])){const balance=Number(r.amount||0)-Number(r.paid||0);const row=line(customers,`${r.invoice_number||'Customer invoice'} · ${r.customer||'Customer not specified'} · Invoice $${Number(r.amount||0).toFixed(2)} · Paid $${Number(r.paid||0).toFixed(2)} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Payment',async()=>{const n=amount('Customer payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' received?'))return;await send('/doorks-workflow/receivables/'+encodeURIComponent(r.id)+'/payments',{amount:n,reference});});}
+      for(const r of (ar.items||[])){const balance=Number(r.amount||0)-Number(r.paid||0);const row=line(customers,`${r.invoice_number||'Customer invoice'} · ${r.customer||'Customer not specified'} · Invoice $${Number(r.amount||0).toFixed(2)} · Paid $${Number(r.paid||0).toFixed(2)} · Balance $${balance.toFixed(2)}`,'Customer Invoice Balance',r);if(balance>0)action(row,'Record Payment',async()=>{const n=amount('Customer payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' received?'))return;await send('/doorks-workflow/receivables/'+encodeURIComponent(r.id)+'/payments',{amount:n,reference});});}
       const purchasing=section('Purchase orders and receiving');
-      for(const po of (orders.items||[])){const row=line(purchasing,`${po.po_number||'PO'} · ${po.vendor||'Supplier not specified'} · ${po.status||'Draft'} · Ordered ${po.quantity||0} · Received ${po.received_quantity||0} · Remaining ${Math.max(0,Number(po.quantity||0)-Number(po.received_quantity||0))} · Total $${Number(po.total||po.amount||0).toFixed(2)}`);const remaining=Number(po.quantity||0)-Number(po.received_quantity||0);
+      for(const po of (orders.items||[])){const row=line(purchasing,`${po.po_number||'PO'} · ${po.vendor||'Supplier not specified'} · ${po.status||'Draft'} · Ordered ${po.quantity||0} · Received ${po.received_quantity||0} · Remaining ${Math.max(0,Number(po.quantity||0)-Number(po.received_quantity||0))} · Total $${Number(po.total||po.amount||0).toFixed(2)}`,'Purchase Order',po);const remaining=Number(po.quantity||0)-Number(po.received_quantity||0);
         if(remaining>0)action(row,'Receive Goods',async()=>{const n=amount('Quantity received',remaining);if(n===null)return;if(!confirm('Receive '+n+' units?'))return;await send('/doorks-workflow/purchase-orders/'+encodeURIComponent(po.id)+'/receive',{quantity:n});});
         action(row,'Enter Supplier Bill',async()=>{const bill_number=prompt('Supplier bill number');if(!bill_number)return;const n=amount('Supplier bill amount',999999999);if(n===null)return;if(!confirm('Create supplier bill '+bill_number+' for $'+n.toFixed(2)+'?'))return;await send('/doorks-workflow/purchase-orders/'+encodeURIComponent(po.id)+'/supplier-bill',{bill_number,amount:n});});
       }
       const suppliers=section('Supplier bills and payments');
-      for(const bill of (bills.items||[])){const balance=Number(bill.amount||0)-Number(bill.paid||0);const row=line(suppliers,`${bill.bill_number||'Unnumbered bill'} · ${bill.vendor||'Supplier not specified'} · ${bill.po_number||'No linked PO'} · Billed $${Number(bill.amount||0).toFixed(2)} · Paid $${Number(bill.paid||0).toFixed(2)} · Balance $${balance.toFixed(2)}`);if(balance>0)action(row,'Record Supplier Payment',async()=>{const n=amount('Supplier payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' paid?'))return;await send('/doorks-workflow/supplier-bills/'+encodeURIComponent(bill.id)+'/payments',{amount:n,reference});});}
+      for(const bill of (bills.items||[])){const balance=Number(bill.amount||0)-Number(bill.paid||0);const row=line(suppliers,`${bill.bill_number||'Unnumbered bill'} · ${bill.vendor||'Supplier not specified'} · ${bill.po_number||'No linked PO'} · Billed $${Number(bill.amount||0).toFixed(2)} · Paid $${Number(bill.paid||0).toFixed(2)} · Balance $${balance.toFixed(2)}`,'Supplier Bill',bill);if(balance>0)action(row,'Record Supplier Payment',async()=>{const n=amount('Supplier payment',balance);if(n===null)return;const reference=prompt('Payment reference (optional)')||'';if(!confirm('Record $'+n.toFixed(2)+' paid?'))return;await send('/doorks-workflow/supplier-bills/'+encodeURIComponent(bill.id)+'/payments',{amount:n,reference});});}
     }
     try{await refresh();}catch(e){msg.textContent='Unable to load workflows: '+(e.message||e);}
   }
@@ -10778,7 +10822,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   async function renderUnifiedPurchaseOrders(platform,openNew=false,backAction=null,container=null){
     if(platform!=='pds'&&activePlatform!==platform)return;
     const isPds=platform==='pds',company=platform==='pds'?'Priority Door Systems':platform==='sdc'?'Saddleback Design Co.':'Doorks';
-    let address=isPds?'836 W. Washington Ave.\nEscondido, CA 92025':'41080 Saddleback Dr\nAguanga, CA 92536';if(platform==='doorks'){try{const defaults=(await fetchJSON('/doorks-operations/settings/business')).settings||{};if(defaults.business_address)address=defaults.business_address;}catch(e){console.warn('PO business defaults unavailable',e);}}
+    let address=isPds?'836 W. Washington Ave.\nEscondido, CA 92025':'41080 Saddleback Dr\nAguanga, CA 92536';let poDefaults={};if(platform==='doorks'){try{poDefaults=(await fetchJSON('/doorks-operations/settings/business')).settings||{};if(poDefaults.business_address)address=poDefaults.business_address;}catch(e){console.warn('PO business defaults unavailable',e);}}
     const endpoint=isPds?'/pds-purchase-orders':'/workspaces/'+platform+'/purchase_orders';
     const supplierEndpoint=isPds?'/pds-purchase-orders/suppliers':'/workspaces/'+platform+'/vendors';
     if(!container){clearWorkspaceActions();setWorkspace(company+' — Purchase Orders');container=workspaceBody;}
@@ -10816,18 +10860,22 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const supplierOptions=document.createElement('datalist');supplierOptions.id='upoSupplierOptions';
     selectLabel.insertBefore(supplierSearch,supplierSelect);selectLabel.append(supplierOptions);supplierSelect.style.display='none';
     supplierSearch.oninput=()=>{const name=supplierSearch.value.trim().toLowerCase();const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===name);supplierSelect.value=supplier?.id||'';if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||'';}};
-    form.elements.vendor.addEventListener('input',()=>{supplierSelect.value='';});
+    form.elements.vendor.addEventListener('input',()=>{supplierSelect.value='';const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===form.elements.vendor.value.trim().toLowerCase());if(supplier)form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||'';});
     const customerSearch=document.createElement('input');customerSearch.type='search';customerSearch.className='input';customerSearch.placeholder='Type to find a saved customer…';customerSearch.setAttribute('list','upoCustomerOptions');
     const customerOptions=document.createElement('datalist');customerOptions.id='upoCustomerOptions';
     const customerField=form.elements.customer;customerField.parentElement.insertBefore(customerSearch,customerField);customerField.style.display='none';customerField.parentElement.append(customerOptions);
     let customers=[];
-    customerSearch.oninput=()=>{const name=customerSearch.value.trim().toLowerCase();const customer=customers.find(x=>String(x.name||x.customer||'').toLowerCase()===name);customerField.value=customer?.name||customer?.customer||customerSearch.value;if(customer&&!form.elements.ship_to.value.trim())form.elements.ship_to.value=customer.ship_to||customer.shipping_address||customer.address||'';};
+    customerSearch.oninput=()=>{const name=customerSearch.value.trim().toLowerCase();const customer=customers.find(x=>String(x.name||x.customer||'').toLowerCase()===name);customerField.value=customer?.name||customer?.customer||customerSearch.value;if(customer)form.elements.ship_to.value=customer.ship_to||customer.shipping_address||customer.service_address||customer.address||form.elements.ship_to.value;};
 
     const parseLines=item=>{try{const parsed=JSON.parse(item.line_items||'[]');if(Array.isArray(parsed)&&parsed.length)return parsed;}catch(e){}
       const qty=Number(item.quantity||0),rate=Number(item.unit_cost||0);
       return [{item:item.item_type||'',description:item.description||'',quantity:qty||1,unit:item.unit||'',rate:rate||Number(item.amount||item.total||0)/(qty||1)}];};
     // PDS catalog is a lookup only. PO rates are vendor purchase costs, not sales prices.
-    let pdsCatalog=[];
+    let pdsCatalog=[],doorksParts=[];
+    if(platform==='doorks'){
+      try{const result=await fetchJSON('/workspaces/doorks/inventory');doorksParts=result.items||[];}catch(e){console.warn('Doorks inventory lookup unavailable',e);}
+      const hint=document.createElement('p');hint.className='hint';hint.textContent='Enter a saved SKU to fill its description and supplier rate. Purchase orders use supplier cost, not customer price.';q('upoAddLine').before(hint);
+    }
     if(isPds){
       const hint=document.createElement('p');hint.className='hint';
       hint.textContent='PDS Parts List: select an existing part to populate its number and description. Enter the supplier purchase cost separately; no inventory is changed when a PO is saved.';
@@ -10835,6 +10883,17 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
     const addLine=(item={})=>{const tr=document.createElement('tr');for(const [key,width] of [['item','140px'],['description','260px'],['quantity','75px'],['unit','65px'],['rate','100px']]){
       const td=document.createElement('td');td.style.padding='5px';const input=document.createElement(key==='description'?'textarea':'input');input.className='input';input.dataset.key=key;input.style.cssText='width:100%;min-width:'+width+';box-sizing:border-box';if(key==='quantity'||key==='rate'){input.type='number';input.step='any';input.min='0';}input.value=item[key]??(key==='quantity'?1:'');input.oninput=total;td.append(input);tr.append(td);}
+      if(platform==='doorks'){
+        const first=tr.querySelector('[data-key="item"]');
+        first.setAttribute('list','upoDoorksParts');
+        first.addEventListener('change',()=>{
+          const part=doorksParts.find(x=>[x.sku,x.part_number,x.name].some(v=>String(v||'').toLowerCase()===first.value.trim().toLowerCase()));
+          if(!part)return;
+          tr.querySelector('[data-key="description"]').value=part.description||part.name||'';
+          tr.querySelector('[data-key="rate"]').value=part.supplier_rate??part.supplier_price??part.cost??'';
+          total();
+        });
+      }
       if(isPds){
         const first=tr.querySelector('[data-key="item"]');
         const description=tr.querySelector('[data-key="description"]');
@@ -10866,6 +10925,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const remove=document.createElement('td');const btn=document.createElement('button');btn.type='button';btn.className='btn';btn.textContent='×';btn.setAttribute('aria-label','Remove line');btn.onclick=()=>{tr.remove();total();};remove.append(btn);tr.append(remove);q('upoLines').append(tr);total();};
     const getLines=()=>[...q('upoLines').children].map(tr=>{const o={};tr.querySelectorAll('[data-key]').forEach(input=>o[input.dataset.key]=input.value);return {item:String(o.item||''),description:String(o.description||''),quantity:Number(o.quantity||0),unit:String(o.unit||''),rate:Number(o.rate||0),...(tr.dataset.partId?{part_id:tr.dataset.partId}:{})};});
     const total=()=>{let sum=0;for(const tr of q('upoLines').children){const vals={};tr.querySelectorAll('[data-key]').forEach(x=>vals[x.dataset.key]=x.value);const amount=Number(vals.quantity||0)*Number(vals.rate||0);tr.querySelector('.upoAmount').textContent=money(amount);sum+=amount;}sum+=Number(q('upoTax').value||0)+Number(q('upoShipping').value||0);q('upoTotal').textContent=money(sum);return sum;};
+    if(platform==='doorks'){
+      const list=document.createElement('datalist');list.id='upoDoorksParts';for(const part of doorksParts){const opt=document.createElement('option');opt.value=part.sku||part.part_number||part.name||'';opt.label=part.description||'';list.append(opt);}q('upoLines').after(list);
+    }
     q('upoTax').oninput=total;q('upoShipping').oninput=total;q('upoAddLine').onclick=()=>addLine();
     const close=()=>{q('upoEditor').hidden=true;q('upoDetails').hidden=true;};q('upoClose').onclick=close;q('upoCancel').onclick=close;q('upoDetailsClose').onclick=close;
     q('upoBack').onclick=()=>backAction?backAction():isPds?renderEstimatePage():renderBusinessHub(platform);
@@ -10873,7 +10935,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
       if(!item&&platform==='doorks'&&window.__doorksJobDraft){const job=window.__doorksJobDraft;form.elements.customer.value=job.customer;form.elements.work_order_number.value=job.job_number;form.elements.notes.value=job.description;customerSearch.value=job.customer;window.__doorksJobDraft=null;}
-      if(!item){form.elements.ship_to.value=company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');if(window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type==='purchase_order'){form.elements.notes.value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}}
+      if(!item){form.elements.ship_to.value=platform==='doorks'?(poDefaults.default_ship_to||poDefaults.business_address||company+'\n'+address):company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');if(window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type==='purchase_order'){form.elements.notes.value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}}
       supplierSelect.value=item?.supplier_id||item?.vendor_id||'';supplierSearch.value=item?.vendor||'';customerSearch.value=item?.customer||(platform==='doorks'?form.elements.customer.value:'');q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
       (item?parseLines(item):[{}]).forEach(addLine);total();q('upoMessage').textContent='';q('upoEditor').scrollIntoView({behavior:'smooth',block:'start'});};
     q('upoNew').onclick=()=>edit(null);if(!isPds){const ai=document.createElement('button');ai.className='btn';ai.textContent='✨ AI Intake';ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));q('upoNew').before(ai);}
