@@ -406,3 +406,74 @@ def put_expense_categories(payload: ExpenseCategories, request: Request):
             _os.fsync(handle.fileno())
         _os.replace(tmp, path)
     return {'categories': normalized}
+
+
+# Revision 26: configuration only. Does not rewrite or migrate existing documents.
+class SettingsPayload(BaseModel):
+    settings: dict[str, str]
+
+_BUSINESS_SETTINGS = {
+    'business_name', 'business_address', 'business_phone', 'business_email', 'website',
+    'tax_id_label', 'default_sales_tax', 'trip_charge', 'fuel_surcharge',
+    'single_tech_labor', 'crew_labor', 'estimate_terms', 'invoice_terms'
+}
+_ACCOUNTING_SETTINGS = {
+    'fiscal_year_start_month', 'default_payment_terms', 'receipt_review_required',
+    'statement_review_required', 'report_currency', 'tax_notes'
+}
+
+def _settings_path(request: Request, scope: str):
+    if scope not in ('business', 'accounting'):
+        raise HTTPException(404, 'Unknown settings area')
+    return _Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / (scope + '_preferences.json')
+
+@router.get('/settings/{scope}')
+def get_doorks_settings(scope: str, request: Request):
+    guard(request)
+    path = _settings_path(request, scope)
+    with _lock:
+        if not path.exists():
+            return {'settings': {}}
+        try:
+            settings = _json.loads(path.read_text(encoding='utf-8'))
+        except (ValueError, OSError):
+            raise HTTPException(500, 'Unable to read settings')
+    if not isinstance(settings, dict):
+        raise HTTPException(500, 'Invalid settings storage')
+    return {'settings': settings}
+
+@router.put('/settings/{scope}')
+def put_doorks_settings(scope: str, payload: SettingsPayload, request: Request):
+    guard(request)
+    path = _settings_path(request, scope)
+    allowed = _BUSINESS_SETTINGS if scope == 'business' else _ACCOUNTING_SETTINGS
+    if set(payload.settings) - allowed:
+        raise HTTPException(400, 'Unknown settings field')
+    cleaned = {}
+    for key, value in payload.settings.items():
+        if not isinstance(value, str) or len(value) > 1000:
+            raise HTTPException(400, 'Invalid settings value')
+        cleaned[key] = value.strip()
+    for key in ('default_sales_tax', 'trip_charge', 'fuel_surcharge', 'single_tech_labor', 'crew_labor', 'default_payment_terms'):
+        if cleaned.get(key):
+            try:
+                val = Decimal(cleaned[key])
+                if not val.is_finite() or val < 0 or val > 1000000 or (key == 'default_sales_tax' and val > 100):
+                    raise ValueError()
+            except (InvalidOperation, ValueError):
+                raise HTTPException(400, 'Invalid nonnegative value for ' + key)
+    if cleaned.get('fiscal_year_start_month'):
+        try:
+            month = int(cleaned['fiscal_year_start_month'])
+            if not 1 <= month <= 12: raise ValueError()
+        except ValueError:
+            raise HTTPException(400, 'Fiscal year start must be 1–12')
+    with _lock:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temp = path.with_name(path.name + '.tmp')
+        with temp.open('w', encoding='utf-8') as handle:
+            _json.dump(cleaned, handle, indent=2)
+            handle.flush()
+            _os.fsync(handle.fileno())
+        _os.replace(temp, path)
+    return {'settings': cleaned}
