@@ -211,7 +211,7 @@ async def part_from_url(request: Request, payload: dict):
                 chunks=[];size=0
                 async for chunk in resp.aiter_bytes():
                     size+=len(chunk)
-                    if size>350000:raise HTTPException(413,'Product page exceeds the safe reading limit')
+                    if size>2_500_000:break  # large Shopify pages: parse bounded initial HTML rather than rejecting
                     chunks.append(chunk)
         html=b''.join(chunks).decode('utf-8','replace')
     except httpx.HTTPError as exc:
@@ -274,9 +274,19 @@ async def part_from_url(request: Request, payload: dict):
                 if candidate.startswith('https://'):fields['image_url']=candidate[:1500]
         # SECLOCK's public product description is often the sentence following
         # the product heading; prefer that over a generic catalog page title.
-        if not fields['description'] or 'SECLOCK' in fields['description'].upper():
+        if not fields['description'] or 'SECLOCK' in fields['description'].upper() or fields['description'].strip().lower()==product_code.lower():
             m=re.search(r'<h1[^>]*>\s*'+re.escape(product_code)+r'\s*</h1>\s*<[^>]+>(.*?)</',html,re.I|re.S)
             if m:fields['description']=unescape(re.sub('<[^>]+>','',m.group(1))).strip()[:1500]
+    # Prefer useful product text over a bare SKU, catalog title, or empty description.
+    if not fields['description'] or fields['description'].strip().lower() in (fields['part_number'].lower(), 'seclock'):
+        candidates=[]
+        for pattern in (r'<h1\b[^>]*>(.*?)</h1>',r'<h2\b[^>]*>(.*?)</h2>',r'<div\b[^>]*class=[\"\'][^\"\']*(?:product-description|product__description)[^\"\']*[\"\'][^>]*>(.*?)</div>'):
+            for match in re.finditer(pattern,html,re.I|re.S):
+                candidate=unescape(re.sub(r'<[^>]+>',' ',match.group(1)))
+                candidate=' '.join(candidate.split())
+                if len(candidate)>12 and candidate.lower()!=fields['part_number'].lower():candidates.append(candidate)
+        if candidates:fields['description']=max(candidates,key=lambda x:len(x) if len(x)<350 else 0)[:1500]
+    if not fields['description'] and title:fields['description']=title[:1500]
     return {'ok':True,'fields':fields,'source':'public product metadata; review before saving'}
 
 @router.post('/part-image')
