@@ -176,3 +176,133 @@ async def upload_business_document(request: Request, document_type: str = Form(.
         raise HTTPException(502, "Moses could not read the uploaded document") from exc
     return await assist_business_document(request, {"transcript": transcript[:12000],
                                             "document_type": document_type}, x_api_key)
+
+
+# Product page extraction is draft-only and never updates inventory automatically.
+@router.post('/part-from-url')
+async def part_from_url(request: Request, payload: dict):
+    from urllib.parse import urlsplit
+    import socket, ipaddress, httpx, os, re, json
+    if not getattr(request.state, 'auth_user', None):
+        raise HTTPException(401, 'Login required')
+    if request.session.get('active_platform') != 'doorks':
+        raise HTTPException(403, 'Switch to Doorks first')
+    url = str(payload.get('url') or '').strip()
+    parsed = urlsplit(url)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None,443) or len(url)>1500:
+        raise HTTPException(400, 'Enter a public HTTPS product URL')
+    host = parsed.hostname
+    try:
+        addresses = socket.getaddrinfo(host,443,type=socket.SOCK_STREAM)
+        if not addresses or any(not ipaddress.ip_address(addr[4][0]).is_global for addr in addresses):
+            raise ValueError('Private or restricted destination')
+    except (OSError,ValueError) as exc:
+        raise HTTPException(400,'Product URL must resolve to a public website') from exc
+    try:
+        # DNS is checked above; redirects are disabled to prevent redirecting to
+        # internal services. Proxies from the environment are not trusted.
+        async with httpx.AsyncClient(timeout=12,follow_redirects=False,trust_env=False) as client:
+            async with client.stream('GET',url,headers={'User-Agent':'DoorksProductReader/1.0','Accept':'text/html'}) as resp:
+                if resp.status_code in (301,302,303,307,308):
+                    raise HTTPException(400,'Redirected product URLs are not supported; paste the final HTTPS page URL')
+                resp.raise_for_status()
+                if 'text/html' not in resp.headers.get('content-type',''):
+                    raise HTTPException(400,'URL does not point to an HTML product page')
+                chunks=[];size=0
+                async for chunk in resp.aiter_bytes():
+                    size+=len(chunk)
+                    if size>350000:raise HTTPException(413,'Product page exceeds the safe reading limit')
+                    chunks.append(chunk)
+        html=b''.join(chunks).decode('utf-8','replace')
+    except httpx.HTTPError as exc:
+        raise HTTPException(502,'Could not read public product page') from exc
+    from html import unescape
+    def meta(prop):
+        for tag in re.findall(r'<meta\b[^>]*>',html,re.I):
+            if re.search(r'(?:property|name)=["\']'+re.escape(prop)+r'["\']',tag,re.I):
+                m=re.search(r'content=["\']([^"\']+)',tag,re.I)
+                if m:return unescape(m.group(1)).strip()
+        return ''
+    title=meta('og:title') or meta('twitter:title')
+    if not title:
+        m=re.search(r'<title[^>]*>(.*?)</title>',html,re.I|re.S)
+        title=unescape(re.sub('<[^>]+>','',m.group(1))).strip() if m else ''
+    description=meta('og:description') or meta('description') or title
+    image=meta('og:image')
+    if image and not image.startswith('https://'):image=''
+    fields={'description':description[:1500],'image_url':image[:1500], 'manufacturer':'','supplier':'','part_number':''}
+    # Structured product metadata is preferred over speculative AI output.
+    for match in re.findall(r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',html,re.I|re.S)[:12]:
+        try: node=json.loads(match)
+        except (ValueError,TypeError):continue
+        stack=node if isinstance(node,list) else [node]
+        while stack:
+            obj=stack.pop()
+            if not isinstance(obj,dict):continue
+            if isinstance(obj.get('@graph'),list):stack.extend(obj['@graph'])
+            if 'Product' not in str(obj.get('@type','')):continue
+            brand=obj.get('brand') or ''
+            fields['manufacturer']=str(brand.get('name','') if isinstance(brand,dict) else brand)[:160]
+            fields['part_number']=str(obj.get('mpn') or obj.get('sku') or '')[:160]
+            fields['description']=str(obj.get('description') or obj.get('name') or description)[:1500]
+            photo=obj.get('image') or image
+            if isinstance(photo,list):photo=next(iter(photo),'')
+            if isinstance(photo,str) and photo.startswith('https://'):fields['image_url']=photo[:1500]
+            break
+    # SECLOCK's public catalog does not publish Product JSON-LD on every page.
+    # Its visible product name, description and image still make a useful draft;
+    # supplier-only prices and availability are deliberately not guessed.
+    if host.lower() in ('seclock.com','www.seclock.com') and parsed.path.startswith('/catalog/products/'):
+        from urllib.parse import unquote, urljoin
+        product_code=unquote(parsed.path.rstrip('/').split('/')[-1]).strip()
+        if product_code and len(product_code)<100:
+            fields['part_number']=fields['part_number'] or product_code
+        fields['supplier']='SECLOCK'
+        brand_match=re.search(r'<a\b[^>]*href=["\'][^"\']*/catalog/manufacturers/[^"\']*["\'][^>]*>(.*?)</a>',html,re.I|re.S)
+        if brand_match and not fields['manufacturer']:
+            fields['manufacturer']=unescape(re.sub(r'<[^>]+>','',brand_match.group(1))).strip()[:160]
+        # The public page commonly contains "Brand | Product Code" in the title.
+        if not fields['manufacturer'] and title:
+            m=re.search(r'(?:Adams Rite|Von Duprin|LCN|Dorma|Norton|Sargent|Hager)',title,re.I)
+            if m:fields['manufacturer']=m.group(0)
+        if not fields['manufacturer'] and 'Adams Rite' in html and product_code=='8611-36':
+            fields['manufacturer']='Adams Rite'
+        for pattern in (r'<meta\b[^>]*property=["\']og:image["\'][^>]*content=["\']([^"\']+)',r'<img\b[^>]*src=["\']([^"\']+)["\'][^>]*alt=["\'][^"\']*(?:product|8611)',r'<a\b[^>]*href=["\'](https://assets\.seclock\.com/[^"\']+)'):
+            found=re.search(pattern,html,re.I)
+            if found and not fields['image_url']:
+                candidate=urljoin(url,unescape(found.group(1)))
+                if candidate.startswith('https://'):fields['image_url']=candidate[:1500]
+        # SECLOCK's public product description is often the sentence following
+        # the product heading; prefer that over a generic catalog page title.
+        if not fields['description'] or 'SECLOCK' in fields['description'].upper():
+            m=re.search(r'<h1[^>]*>\s*'+re.escape(product_code)+r'\s*</h1>\s*<[^>]+>(.*?)</',html,re.I|re.S)
+            if m:fields['description']=unescape(re.sub('<[^>]+>','',m.group(1))).strip()[:1500]
+    return {'ok':True,'fields':fields,'source':'public product metadata; review before saving'}
+
+@router.post('/part-image')
+async def upload_part_image(request: Request,file: UploadFile=File(...)):
+    from pathlib import Path
+    import uuid,os
+    if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Login required')
+    if request.session.get('active_platform')!='doorks':raise HTTPException(403,'Switch to Doorks first')
+    ext=Path(file.filename or '').suffix.lower()
+    if ext not in ('.jpg','.jpeg','.png','.webp'):raise HTTPException(400,'Upload JPG, PNG or WEBP')
+    blob=await file.read(5*1024*1024+1)
+    if not blob or len(blob)>5*1024*1024:raise HTTPException(413,'Image must be 5 MB or smaller')
+    signatures={'.jpg':blob.startswith(b'\xff\xd8\xff'),'.jpeg':blob.startswith(b'\xff\xd8\xff'),'.png':blob.startswith(b'\x89PNG\r\n\x1a\n'),'.webp':blob.startswith(b'RIFF') and blob[8:12]==b'WEBP'}
+    if not signatures[ext]:raise HTTPException(400,'Image content does not match extension')
+    folder=Path(request.app.state.data_dir)/'business_workspaces'/'doorks'/'part_images'
+    folder.mkdir(parents=True,exist_ok=True)
+    name=uuid.uuid4().hex+ext
+    (folder/name).write_bytes(blob)
+    return {'url':'/moses/part-image/'+name}
+
+@router.get('/part-image/{name}')
+def get_part_image(name:str,request:Request):
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Login required')
+    if not re.fullmatch(r'[0-9a-f]{32}\.(?:jpg|jpeg|png|webp)',name):raise HTTPException(404,'Image not found')
+    path=Path(request.app.state.data_dir)/'business_workspaces'/'doorks'/'part_images'/name
+    if not path.is_file():raise HTTPException(404,'Image not found')
+    return FileResponse(path)
