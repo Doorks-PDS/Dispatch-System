@@ -49,12 +49,21 @@ def workspace_items(request, kind):
     if not isinstance(items, list): raise HTTPException(500, 'Invalid workspace collection')
     return [item for item in items if isinstance(item, dict)]
 
+def vendor_is_suspended(request, record_id):
+    if not record_id:
+        return False
+    return any(str(v.get('id') or '') == record_id and
+               str(v.get('onboarding_status') or '').strip().lower() == 'suspended'
+               for v in workspace_items(request, 'vendors'))
+
 def verify_invitation_link(request, kind, record_id):
     """Fail closed for nonexistent customer/vendor IDs; blank ID allows requests only."""
     if not record_id: return
     collection = 'customers' if kind == 'customer' else 'vendors'
     if not any(str(x.get('id') or '') == record_id for x in workspace_items(request, collection)):
         raise HTTPException(400, 'Record ID not found in Doorks ' + collection)
+    if kind == 'vendor' and vendor_is_suspended(request, record_id):
+        raise HTTPException(409, 'Vendor is suspended; portal access cannot be issued')
 
 def digest(token): return hashlib.sha256(token.encode()).hexdigest()
 def access(request, token):
@@ -64,6 +73,16 @@ def access(request, token):
         invite=next((i for i in obj['invites'] if hmac.compare_digest(i['token_hash'],digest(token))),None)
         if not invite or invite['revoked'] or datetime.fromisoformat(invite['expires_at'])<=now():
             raise HTTPException(401,'Portal link expired or revoked')
+        # Rev 48: fail closed when a linked vendor is suspended or a linked
+        # customer/vendor has been removed. Unlinked links remain message-only.
+        rid = str(invite.get('record_id') or '').strip()
+        if rid:
+            kind = invite.get('kind')
+            collection = 'vendors' if kind == 'vendor' else 'customers'
+            if not any(str(x.get('id') or '') == rid for x in workspace_items(request, collection)):
+                raise HTTPException(403, 'Linked portal account is no longer active')
+            if kind == 'vendor' and vendor_is_suspended(request, rid):
+                raise HTTPException(403, 'Vendor portal access is suspended')
         return invite
 
 class Invite(BaseModel):
@@ -99,6 +118,21 @@ def overview(request:Request):
         obj=read(store(request))
         return {'invitations':[{k:v for k,v in i.items() if k!='token_hash'} for i in obj['invites']],
                 'submissions':obj['submissions'], 'payment_links':obj['payment_links'], 'notifications':obj['notifications']}
+
+@router.get('/admin/link-options')
+def portal_link_options(request: Request):
+    """Limited contact details for the invitation picker, office admin only."""
+    admin(request)
+    output = {}
+    for kind, collection in (('customer', 'customers'), ('vendor', 'vendors')):
+        output[kind] = [{
+            'id': str(x.get('id') or ''),
+            'name': str(x.get('name') or x.get('company') or x.get('customer') or x.get('vendor') or '')[:160],
+            'contact': str(x.get('contact') or x.get('contact_name') or '')[:120],
+            'email': str(x.get('email') or '')[:250],
+            'status': str(x.get('onboarding_status') or '')[:40] if kind == 'vendor' else '',
+        } for x in workspace_items(request, collection) if str(x.get('id') or '').strip()]
+    return output
 
 @router.post('/admin/invitations/{invite_id}/revoke')
 def revoke(invite_id:str,request:Request):
@@ -294,9 +328,11 @@ def portal_security_check(request: Request):
         if not rid:
             issues.append({'invitation_id': invite['id'], 'issue': 'Unlinked invitation: submissions only'})
         else:
-            try: verify_invitation_link(request, invite['kind'], rid)
-            except HTTPException:
-                issues.append({'invitation_id': invite['id'], 'issue': 'Linked customer/vendor record no longer exists'})
+            try:
+                verify_invitation_link(request, invite['kind'], rid)
+            except HTTPException as exc:
+                issue = 'Suspended vendor with active invitation' if exc.status_code == 409 else 'Linked customer/vendor record no longer exists'
+                issues.append({'invitation_id': invite['id'], 'issue': issue})
     return {'active_invitations': sum(not x.get('revoked') and datetime.fromisoformat(x['expires_at']) > now() for x in obj['invites']),
             'pending_submissions': sum(x.get('status') == 'pending_review' for x in obj['submissions']),
             'issues': issues, 'ok': not issues}
@@ -307,10 +343,7 @@ def customer_document_response(payload:DocumentResponse,request:Request):
         raise HTTPException(400,'Invalid decision')
     with _lock:
         p=store(request);obj=read(p)
-        invite=next((i for i in obj['invites'] if len(payload.token)==64 and
-            hmac.compare_digest(i['token_hash'],digest(payload.token))),None)
-        if not invite or invite['revoked'] or datetime.fromisoformat(invite['expires_at'])<=now():
-            raise HTTPException(401,'Portal access expired')
+        invite=access(request,payload.token)
         docs=customer_documents(request,invite)
         doc=next((d for d in docs if d['id']==payload.document_id),None)
         if not doc or doc['document_type']!='Estimate':
@@ -338,8 +371,7 @@ class Submission(BaseModel):
 def submit(payload:Submission,request:Request):
     with _lock:
         p=store(request);obj=read(p)
-        i=next((i for i in obj['invites'] if hmac.compare_digest(i['token_hash'],digest(payload.token)) ),None) if len(payload.token)==64 else None
-        if not i or i['revoked'] or datetime.fromisoformat(i['expires_at'])<=now():raise HTTPException(401,'Portal access expired')
+        i=access(request,payload.token)
         # Never trust user-supplied company or entity IDs; derive identity from the invitation.
         item={'id':str(uuid.uuid4()),'invite_id':i['id'],'kind':i['kind'],'company':i['company'],
               'record_id':i['record_id'],'contact_name':i['contact_name'],'contact_email':i['contact_email'],
@@ -396,10 +428,7 @@ class VendorUpdate(BaseModel):
 def vendor_update(payload:VendorUpdate,request:Request):
     with _lock:
         p=store(request);obj=read(p)
-        invite=next((i for i in obj['invites'] if len(payload.token)==64 and
-            hmac.compare_digest(i['token_hash'],digest(payload.token))),None)
-        if not invite or invite['revoked'] or datetime.fromisoformat(invite['expires_at'])<=now():
-            raise HTTPException(401,'Portal access expired')
+        invite=access(request,payload.token)
         records=vendor_records(request,invite)
         collection=records['assignments' if payload.record_type=='assignment' else 'purchase_orders']
         record=next((r for r in collection if r['id']==payload.record_id),None)

@@ -97,6 +97,49 @@ async def ai_preview(platform:str,kind:str,request:Request,file:UploadFile=File(
     return {"token":token,"filename":stage["filename"],"columns":stage["headers"],
             "count":1,"sample":[row],"note":"AI proposed one record. Review carefully before approving; no data has changed."}
 
+class ColumnMapping(BaseModel):
+    token: str
+    mapping: dict[str, str]
+
+@router.post("/{platform}/{kind}/map-preview")
+def map_preview(platform: str, kind: str, request: Request, payload: ColumnMapping):
+    guard(request, platform, kind)
+    if len(payload.token)!=32 or any(c not in '0123456789abcdef' for c in payload.token):
+        raise HTTPException(400,'Invalid preview token')
+    with lock, workspaces._lock:
+        path=base_dir(request,platform)/(payload.token+'.json')
+        if not path.exists():raise HTTPException(404,'Preview not found')
+        stage=workspaces.load(path)[0]
+        user=str((getattr(request.state,'auth_user',None) or {}).get('id',''))
+        if stage.get('platform')!=platform or stage.get('kind')!=kind or stage.get('user')!=user:
+            raise HTTPException(403,'Preview ownership mismatch')
+        from datetime import timedelta
+        if datetime.now(timezone.utc)-datetime.fromisoformat(stage['created_at'])>timedelta(hours=12):
+            path.unlink(missing_ok=True);raise HTTPException(410,'Preview expired')
+        sources=set(stage.get('headers',[])); forbidden={'id','created_at','updated_at','authorization_status','authorized_by','authorized_at','unauthorized_by','unauthorized_at'}
+        mapping={s:t for s,t in payload.mapping.items() if t}
+        if not mapping or set(mapping)-sources or len(set(mapping.values()))!=len(mapping):
+            raise HTTPException(400,'Invalid or duplicate column mapping')
+        permitted={
+            'customers':{'name','contact','email','phone','address','customer_type','preferred_visit_type','notes'},
+            'vendors':{'name','contact','email','phone','address','service_area','trade','vendor_type','onboarding_status','license_number','license_expiration','insurance_expiration','payment_terms','tax_form_status','notes'},
+            'inventory':{'supplier','part_number','description','quantity','unit_cost','notes'},
+            'products':{'name','sku','price','description'},
+            'work_orders':{'customer','contact','phone','email','address','service_type','scheduled_date','scheduled_time','description','status','priority','notes'},
+            'estimates_invoices':{'customer','work_order_number','document_type','document_number','date','amount','status','description','notes'},
+            'purchase_orders':{'po_number','vendor','vendor_id','customer','work_order_number','date','expected_date','description','quantity','unit_cost','amount','status','notes'},
+            'orders':{'customer','item','order_date','status','total','shipping','tax','notes'}
+        }.get(kind,set())
+        if set(mapping.values())-permitted or set(mapping.values())&forbidden:
+            raise HTTPException(400,'Unsupported or protected destination fields')
+        identity=IDENTITY.get(kind)
+        if identity and identity not in mapping.values():
+            raise HTTPException(400,'Map required identity field: '+identity)
+        rows=[{dest:str(row.get(source,'')).strip() for source,dest in mapping.items()} for row in stage['rows']]
+        stage['headers']=list(mapping.values());stage['rows']=rows
+        workspaces.save(path,[stage])
+        return {'token':payload.token,'columns':stage['headers'],'count':len(rows),'sample':rows[:8],'note':'Mapped preview saved; no records imported'}
+
 class PreviewEdit(BaseModel):
     token: str
     rows: list[dict[str, str]]
@@ -136,6 +179,62 @@ def edit_preview(platform: str, kind: str, request: Request, payload: PreviewEdi
         workspaces.save(stage_path, [stage])
         return {"ok": True, "updated_rows": len(payload.rows), "message": "Preview corrected; no records imported"}
 
+
+# Revision 50: read-only duplicate preflight and durable import batch history.
+def _identity_value(row, key):
+    return str(row.get(key, "") or "").strip().casefold()
+
+def _preview_status(stage, existing, kind):
+    key = IDENTITY.get(kind)
+    seen = {_identity_value(r, key) for r in existing} if key else set()
+    seen.discard("")
+    valid, duplicates, missing = 0, [], []
+    for index, row in enumerate(stage.get("rows", []), 1):
+        value = _identity_value(row, key) if key else ""
+        if key and not value:
+            missing.append(index)
+        elif value and value in seen:
+            duplicates.append(index)
+        else:
+            valid += 1
+            if value: seen.add(value)
+    return {"count": len(stage.get("rows", [])), "eligible": valid,
+            "duplicate_count": len(duplicates), "duplicate_rows": duplicates[:100],
+            "missing_identity_count": len(missing), "missing_identity_rows": missing[:100],
+            "identity_field": key, "numbered_preview_only": kind in {"work_orders","purchase_orders","estimates_invoices","orders"}}
+
+def _history_path(request, platform):
+    return base_dir(request, platform) / "import_history.json"
+
+@router.get("/{platform}/history")
+def import_history(platform: str, request: Request):
+    if platform not in ALLOWED: raise HTTPException(400, "Invalid workspace")
+    guard(request, platform, next(iter(ALLOWED[platform])))
+    with lock, workspaces._lock:
+        items = workspaces.load(_history_path(request, platform))
+        return {"items": list(reversed(items[-100:]))}
+
+class Preflight(BaseModel):
+    token: str
+
+@router.post("/{platform}/{kind}/preflight")
+def import_preflight(platform: str, kind: str, request: Request, payload: Preflight):
+    guard(request, platform, kind)
+    if len(payload.token) != 32 or any(c not in "0123456789abcdef" for c in payload.token):
+        raise HTTPException(400, "Invalid preview token")
+    with lock, workspaces._lock:
+        path = base_dir(request, platform) / (payload.token + ".json")
+        if not path.exists(): raise HTTPException(404, "Preview not found")
+        stage = workspaces.load(path)[0]
+        user = str((getattr(request.state, "auth_user", None) or {}).get("id", ""))
+        if stage.get("platform") != platform or stage.get("kind") != kind or stage.get("user") != user:
+            raise HTTPException(403, "Preview ownership mismatch")
+        from datetime import timedelta
+        if datetime.now(timezone.utc) - datetime.fromisoformat(stage["created_at"]) > timedelta(hours=12):
+            path.unlink(missing_ok=True)
+            raise HTTPException(410, "Preview expired")
+        return _preview_status(stage, workspaces.load(workspaces.location(request, platform, kind)), kind)
+
 class Approval(BaseModel):
     token:str
     confirm:bool=False
@@ -174,6 +273,25 @@ def approve(platform:str,kind:str,request:Request,payload:Approval):
             if value:seen.add(value)
             existing.append({"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**row})
             added+=1
-        workspaces.save(dest,existing)
-        stage_path.unlink()
-        return {"added":added,"duplicates_skipped":duplicates,"destination":kind}
+        # Save the destination first. If history cannot be written, do not claim
+        # that the import failed (and invite a second submission); return a warning.
+        batch_id = uuid.uuid4().hex
+        added_ids = [r["id"] for r in existing[-added:]] if added else []
+        workspaces.save(dest, existing)
+        history_warning = None
+        try:
+            history_path = _history_path(request, platform)
+            history = workspaces.load(history_path)
+            history.append({"batch_id": batch_id, "platform": platform, "kind": kind,
+                            "filename": stage.get("filename", ""),
+                            "completed_at": datetime.now(timezone.utc).isoformat(),
+                            "user": stage.get("user", ""), "added": added,
+                            "duplicates_skipped": duplicates,
+                            "created_record_ids": added_ids,
+                            "recovery_note": "Review IDs before any manual recovery. No automatic destructive rollback."})
+            workspaces.save(history_path, history)
+        except Exception:
+            history_warning = "Records were saved, but import history could not be written. Do not retry without checking the destination."
+        stage_path.unlink(missing_ok=True)
+        return {"added": added, "duplicates_skipped": duplicates,
+                "destination": kind, "batch_id": batch_id, "warning": history_warning}
