@@ -84,6 +84,8 @@ def calculate(data: Timecard):
             raise HTTPException(400, 'Lunch exceeds shift length')
     if not data.time_in and pto == 0 and holiday == 0:
         raise HTTPException(400, 'Enter shift times or PTO/holiday hours')
+    if worked + pto + holiday > Decimal(24):
+        raise HTTPException(400, 'Total work, PTO and holiday hours cannot exceed 24 per day')
     regular = min(worked, Decimal(8))
     overtime = max(Decimal(0), worked-Decimal(8))
     rounded = lambda x: float(x.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP))
@@ -119,9 +121,33 @@ def create_timecard(data: Timecard, request: Request):
         ws.save(ws.location(request,'doorks','payroll'),rows)
         return {'item':record}
 
+@router.put('/timecards/{item_id}')
+def update_timecard(item_id: str, data: Timecard, request: Request):
+    guard(request)
+    with _lock:
+        rows = cards(request)
+        row = next((r for r in rows if r.get('id') == item_id), None)
+        if row is None:
+            raise HTTPException(404, 'Timecard not found')
+        employee = next((e for e in staff(request) if e.get('id') == data.employee_id), None)
+        if employee is None:
+            raise HTTPException(404, 'Employee not found')
+        if any(r.get('id') != item_id and r.get('employee_id') == data.employee_id and r.get('work_date') == data.work_date for r in rows):
+            raise HTTPException(409, 'Timecard already exists for this employee and date')
+        result = calculate(data)
+        now = datetime.now(timezone.utc).isoformat()
+        row.update(employee_id=data.employee_id, employee=employee.get('name', ''), work_date=data.work_date,
+                   time_in=data.time_in, time_out=data.time_out, lunch_minutes=data.lunch_minutes,
+                   notes=data.notes[:4000], **result, supervisor_approved='No', approved_by='',
+                   approved_at='', updated_at=now, calculation_version=1)
+        ws.save(ws.location(request, 'doorks', 'payroll'), rows)
+        return {'item': row, 'approval_reset': True}
+
 @router.post('/timecards/{item_id}/approval')
 def approve_timecard(item_id: str, data: Approval, request: Request):
     guard(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Office Admin required for supervisor approval')
     with _lock:
         rows=cards(request)
         row=next((r for r in rows if r.get('id')==item_id),None)
@@ -154,15 +180,19 @@ def pay_period(start: str, end: str, request: Request):
         rate=money(emp.get('hourly_rate',0))
         totals={k:sum(Decimal(str(r.get(k,0) or 0)) for r in records) for k in ('regular_hours','overtime_hours','pto_hours','holiday_hours')}
         pending=sum(r.get('supervisor_approved')!='Yes' or not r.get('calculation_version') for r in records)
+        # Advisory only: PTO bank is not debited automatically. Do not silently modify employee records.
+        pto_bank = hours(emp.get('pto_bank', 0)) if emp else Decimal(0)
+        pto_exceeds_bank = totals['pto_hours'] > pto_bank
         gross=(totals['regular_hours']+totals['pto_hours']+totals['holiday_hours'])*rate+totals['overtime_hours']*rate*Decimal('1.5')
         output.append(dict(employee_id=employee_id,employee=emp.get('name') or records[0].get('employee',''),
                            hourly_rate=float(rate), **{k:float(v) for k,v in totals.items()},
                            pending_approval=pending, timecards=len(records),
                            estimated_gross=float(gross.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP)),
-                           ready_for_export=pending==0 and bool(emp)))
+                           pto_bank_hours=float(pto_bank), pto_exceeds_bank=pto_exceeds_bank,
+                           ready_for_export=pending==0 and bool(emp) and not pto_exceeds_bank))
     return {'start':start,'end':end,'employees':output,
             'estimated_gross_total':round(sum(e['estimated_gross'] for e in output),2),
-            'note':'Gross wages estimate only; taxes, deductions, wage rules and payroll transmission are not included.'}
+            'note':'Gross wages estimate only. PTO balances are advisory and not automatically debited. Taxes, deductions, jurisdiction-specific wage rules and payroll transmission are not included.'}
 
 @router.post('/employees/{employee_id}/access')
 def change_access(employee_id: str, data: AccessChange, request: Request):
@@ -254,6 +284,8 @@ class StockAdjustment(BaseModel):
     quantity_delta: float
     reason: str = Field(min_length=3, max_length=500)
     request_id: str = Field(min_length=8, max_length=120)
+    job_number: str = Field(default="", max_length=120)
+    reference: str = Field(default="", max_length=120)
 
 
 def _sku(value):
@@ -311,7 +343,8 @@ def adjust_stock(payload: StockAdjustment, request: Request):
         changes=ws.load(path)
         previous=next((r for r in changes if r.get('request_id')==payload.request_id),None)
         if previous:
-            if _sku(previous['sku'])!=_sku(payload.sku) or float(previous['quantity_delta'])!=payload.quantity_delta:
+            if (_sku(previous['sku'])!=_sku(payload.sku) or float(previous['quantity_delta'])!=payload.quantity_delta
+                or str(previous.get('job_number',''))!=payload.job_number.strip() or str(previous.get('reference',''))!=payload.reference.strip()):
                 raise HTTPException(409,'Request ID reused for different stock adjustment')
             return dict(item=previous,duplicate=True)
         before=next((i for i in stock_snapshot(request)['items'] if _sku(i['sku'])==_sku(payload.sku)),None)
@@ -320,10 +353,19 @@ def adjust_stock(payload: StockAdjustment, request: Request):
             raise HTTPException(409,'Adjustment would make on-hand quantity negative')
         record=dict(id=uuid.uuid4().hex,sku=before['sku'],quantity_delta=payload.quantity_delta,
                     reason=payload.reason.strip(),request_id=payload.request_id,
+                    job_number=payload.job_number.strip(),reference=payload.reference.strip(),
                     created_at=datetime.now(timezone.utc).isoformat(),
                     actor=str(request.state.auth_user.get('id','')))
         changes.append(record);ws.save(path,changes)
         return dict(item=record,duplicate=False,on_hand=round(before['on_hand']+payload.quantity_delta,4))
+
+@router.get('/stock/adjustments')
+def stock_adjustments(request: Request):
+    """Read-only append-only stock movement journal; never modifies inventory."""
+    guard(request)
+    with _lock:
+        rows = ws.load(ws.location(request, 'doorks', 'stock_adjustments'))
+        return dict(items=list(reversed(rows[-500:])), total=len(rows))
 
 @router.get('/financial-register')
 def financial_register(request: Request):
@@ -349,196 +391,3 @@ def financial_register(request: Request):
                 linked_supplier_balance=round(sum(max(0,float(b['balance'])) for b in bills if b['origin']=='linked_workflow'),2),
                 manual_supplier_bill_total=round(sum(float(b.get('amount') or 0) for b in bills if b['origin']=='manual_ledger'),2),
                 note='Linked and manual bills shown separately. No automatic merging or double-counting across sources.')
-
-# Revision 25: Doorks-only expense taxonomy. No PDS or SDC settings are changed.
-from pathlib import Path as _Path
-import json as _json
-import os as _os
-
-_DEFAULT_EXPENSE_CATEGORIES = [
-    'Uncategorized', 'Parts & Materials', 'Tools & Equipment', 'Vehicle & Fuel',
-    'Travel & Meals', 'Office Supplies', 'Software & Subscriptions',
-    'Insurance', 'Rent & Utilities', 'Payroll & Benefits',
-    'Professional Services', 'Taxes & Licenses', 'Shipping & Freight', 'Other'
-]
-
-class ExpenseCategories(BaseModel):
-    categories: list[str]
-
-def _expense_category_path(request: Request):
-    return _Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / 'accounting_expense_categories.json'
-
-@router.get('/accounting/categories')
-def get_expense_categories(request: Request):
-    guard(request)
-    path = _expense_category_path(request)
-    with _lock:
-        if not path.exists():
-            return {'categories': list(_DEFAULT_EXPENSE_CATEGORIES)}
-        try:
-            values = _json.loads(path.read_text(encoding='utf-8'))
-        except (ValueError, OSError):
-            raise HTTPException(500, 'Unable to read expense categories')
-    if not isinstance(values, list):
-        raise HTTPException(500, 'Invalid category settings')
-    return {'categories': values}
-
-@router.put('/accounting/categories')
-def put_expense_categories(payload: ExpenseCategories, request: Request):
-    guard(request)
-    values = payload.categories
-    if len(values) > 100 or not values:
-        raise HTTPException(400, 'Enter 1–100 categories')
-    normalized = []
-    for item in values:
-        value = item.strip()
-        if not value or len(value) > 100:
-            raise HTTPException(400, 'Each category must be 1–100 characters')
-        if value.casefold() not in {x.casefold() for x in normalized}:
-            normalized.append(value)
-    path = _expense_category_path(request)
-    with _lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name + '.tmp')
-        with tmp.open('w', encoding='utf-8') as handle:
-            _json.dump(normalized, handle, indent=2)
-            handle.flush()
-            _os.fsync(handle.fileno())
-        _os.replace(tmp, path)
-    return {'categories': normalized}
-
-
-# Revision 26: configuration only. Does not rewrite or migrate existing documents.
-class SettingsPayload(BaseModel):
-    settings: dict[str, str]
-
-_BUSINESS_SETTINGS = {
-    'business_name', 'business_address', 'business_phone', 'business_email', 'website',
-    'tax_id_label', 'license_number', 'remit_to_address', 'default_ship_to', 'default_sales_tax', 'trip_charge', 'fuel_surcharge',
-    'single_tech_labor', 'crew_labor', 'estimate_terms', 'invoice_terms'
-}
-_ACCOUNTING_SETTINGS = {
-    'fiscal_year_start_month', 'default_payment_terms', 'receipt_review_required',
-    'statement_review_required', 'receipt_retention_years', 'statement_match_tolerance', 'expense_approval_threshold', 'invoice_prefix', 'po_prefix', 'tax_notes'
-}
-
-def _settings_path(request: Request, scope: str):
-    if scope not in ('business', 'accounting'):
-        raise HTTPException(404, 'Unknown settings area')
-    return _Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / (scope + '_preferences.json')
-
-@router.get('/settings/{scope}')
-def get_doorks_settings(scope: str, request: Request):
-    guard(request)
-    path = _settings_path(request, scope)
-    with _lock:
-        if not path.exists():
-            return {'settings': {}}
-        try:
-            settings = _json.loads(path.read_text(encoding='utf-8'))
-        except (ValueError, OSError):
-            raise HTTPException(500, 'Unable to read settings')
-    if not isinstance(settings, dict):
-        raise HTTPException(500, 'Invalid settings storage')
-    return {'settings': settings}
-
-@router.put('/settings/{scope}')
-def put_doorks_settings(scope: str, payload: SettingsPayload, request: Request):
-    guard(request)
-    path = _settings_path(request, scope)
-    allowed = _BUSINESS_SETTINGS if scope == 'business' else _ACCOUNTING_SETTINGS
-    if set(payload.settings) - allowed:
-        raise HTTPException(400, 'Unknown settings field')
-    cleaned = {}
-    for key, value in payload.settings.items():
-        if not isinstance(value, str) or len(value) > 1000:
-            raise HTTPException(400, 'Invalid settings value')
-        cleaned[key] = value.strip()
-    for key in ('default_sales_tax', 'trip_charge', 'fuel_surcharge', 'single_tech_labor', 'crew_labor', 'default_payment_terms', 'receipt_retention_years', 'statement_match_tolerance'):
-        if cleaned.get(key):
-            try:
-                val = Decimal(cleaned[key])
-                if not val.is_finite() or val < 0 or val > 1000000 or (key == 'default_sales_tax' and val > 100):
-                    raise ValueError()
-            except (InvalidOperation, ValueError):
-                raise HTTPException(400, 'Invalid nonnegative value for ' + key)
-    if cleaned.get('fiscal_year_start_month'):
-        try:
-            month = int(cleaned['fiscal_year_start_month'])
-            if not 1 <= month <= 12: raise ValueError()
-        except ValueError:
-            raise HTTPException(400, 'Fiscal year start must be 1–12')
-    with _lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        temp = path.with_name(path.name + '.tmp')
-        with temp.open('w', encoding='utf-8') as handle:
-            _json.dump(cleaned, handle, indent=2)
-            handle.flush()
-            _os.fsync(handle.fileno())
-        _os.replace(temp, path)
-    return {'settings': cleaned}
-
-# Transaction-level statement classification is stored separately from the
-# statement header. It never changes a statement's original uploaded file.
-class StatementTransactions(BaseModel):
-    transactions: list[dict[str, str]]
-
-def _statement_transactions_path(request: Request, statement_id: str):
-    import re
-    if not re.fullmatch(r'[A-Za-z0-9_-]{1,100}', statement_id):
-        raise HTTPException(400, 'Invalid statement identifier')
-    return _Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / 'statement_transactions' / (statement_id + '.json')
-
-def _require_statement(request: Request, statement_id: str):
-    statements = ac.read(ac.base(request) / 'statements.json')
-    if not any(str(row.get('id')) == statement_id for row in statements):
-        raise HTTPException(404, 'Statement not found')
-
-@router.get('/accounting/statements/{statement_id}/transactions')
-def get_statement_transactions(statement_id: str, request: Request):
-    guard(request)
-    _require_statement(request, statement_id)
-    path = _statement_transactions_path(request, statement_id)
-    with _lock:
-        if not path.exists(): return {'transactions': []}
-        try:
-            records = _json.loads(path.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
-            raise HTTPException(500, 'Unable to read statement transactions')
-    if not isinstance(records, list): raise HTTPException(500, 'Invalid transaction records')
-    return {'transactions': records}
-
-@router.put('/accounting/statements/{statement_id}/transactions')
-def put_statement_transactions(statement_id: str, payload: StatementTransactions, request: Request):
-    guard(request)
-    _require_statement(request, statement_id)
-    if len(payload.transactions) > 1000: raise HTTPException(400, 'Too many transactions')
-    categories = get_expense_categories(request)['categories']
-    cleaned = []
-    for record in payload.transactions:
-        if set(record) - {'date', 'description', 'amount', 'category', 'notes'}:
-            raise HTTPException(400, 'Unknown transaction field')
-        if any(not isinstance(v, str) or len(v) > 500 for v in record.values()):
-            raise HTTPException(400, 'Invalid transaction field')
-        if record.get('category', 'Uncategorized') not in categories:
-            raise HTTPException(400, 'Unknown expense category')
-        if record.get('date'):
-            try: date.fromisoformat(record['date'])
-            except ValueError: raise HTTPException(400, 'Invalid transaction date')
-        if record.get('amount'):
-            try:
-                amount = Decimal(record['amount'])
-                if not amount.is_finite() or abs(amount) > 999999999: raise ValueError()
-            except (ValueError, InvalidOperation):
-                raise HTTPException(400, 'Invalid transaction amount')
-        cleaned.append({k: str(record.get(k, '')).strip() for k in ('date','description','amount','category','notes')})
-    path = _statement_transactions_path(request, statement_id)
-    with _lock:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_name(path.name+'.tmp')
-        with tmp.open('w', encoding='utf-8') as f:
-            _json.dump(cleaned, f, indent=2)
-            f.flush()
-            _os.fsync(f.fileno())
-        _os.replace(tmp, path)
-    return {'transactions': cleaned}
