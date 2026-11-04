@@ -138,34 +138,35 @@ async def ai_preview(platform:str,kind:str,request:Request,file:UploadFile=File(
 
 # Historical work orders retain their original identifiers and technician notes in
 # the review draft. They are NEVER written to active work orders by this importer.
-LEGACY_JOB_FIELDS = ("job_number", "date_job_performed", "customer", "contact", "technician", "arrival_time", "departure_time", "description_of_problem", "material_used", "work_performed", "additional_repairs_needed_recommended", "address", "phone", "email", "status", "po_number", "service_type", "scheduled_date", "scheduled_time", "description", "notes")
+LEGACY_JOB_FIELDS = ("job_number", "date", "date_job_performed", "customer", "contact", "technician", "arrival_time", "departure_time", "description_of_problem", "material_used", "work_performed", "additional_repairs_needed_recommended", "door_type", "door_location", "door_opening_size", "job_completed", "proposal_number", "invoice_number", "post_repair_comments", "billable_time", "address", "phone", "email", "status", "po_number", "service_type", "scheduled_date", "scheduled_time", "description", "notes")
 FIELD_ALIASES = {
     "job_number":"job_number", "job_no":"job_number", "job":"job_number", "work_order_number":"job_number",
     "date_job_performed":"date_job_performed", "date_performed":"date_job_performed", "job_date":"date_job_performed",
-    "company_name":"customer", "customer_name":"customer", "customer":"customer", "contact_name":"contact",
+    "job_site_address":"address", "contact_email":"email", "p_o_number":"po_number", "contact_customer_company_name":"customer", "company_name":"customer", "customer_name":"customer", "customer":"customer", "contact_name":"contact",
     "technician":"technician", "tech":"technician", "arrival_time":"arrival_time", "departure_time":"departure_time",
     "description_of_problem":"description_of_problem", "problem_description":"description_of_problem",
     "material_used":"material_used", "materials_used":"material_used", "work_performed":"work_performed",
     "additional_repairs_needed_recommended":"additional_repairs_needed_recommended",
     "additional_repairs":"additional_repairs_needed_recommended", "recommendations":"additional_repairs_needed_recommended",
     "po":"po_number", "purchase_order":"po_number", "customer_company_name":"name", "company":"name",
-    "primary_contact":"contact", "email_address":"email", "phone_number":"phone", "street_address":"address",
+    "contact_name":"contact", "cell_phone":"cell_phone", "primary_contact":"contact", "email_address":"email", "phone_number":"phone", "street_address":"address",
 }
 def suggested_mapping(kind, headers):
     permitted={
         "work_orders":set(LEGACY_JOB_FIELDS),
-        "customers":{"name","contact","email","phone","address","customer_type","preferred_visit_type","notes"},
+        "customers":{"name","contact","email","phone","cell_phone","address","customer_type","preferred_visit_type","notes"},
         "vendors":{"name","contact","email","phone","address","service_area","trade","vendor_type","onboarding_status","license_number","license_expiration","insurance_expiration","payment_terms","tax_form_status","notes"},
         "inventory":{"supplier","part_number","description","quantity","unit_cost","notes"},
         "products":{"name","sku","price","description"},
-        "purchase_orders":{"po_number","vendor","vendor_id","customer","work_order_number","date","expected_date","description","quantity","unit_cost","amount","status","notes"},
-        "estimates_invoices":{"customer","work_order_number","document_type","document_number","date","amount","status","description","notes"},
+        "purchase_orders":{"po_number","vendor","vendor_id","customer","work_order_number","date","expected_date","description","quantity","unit_cost","amount","status","notes","ship_to","shipping","tax","total"},
+        "estimates_invoices":{"customer","work_order_number","document_type","document_number","date","amount","status","description","notes","po_number","address","contact","tax","total","subtotal","terms"},
         "orders":{"customer","item","order_date","status","total","shipping","tax","notes"}
     }.get(kind,set())
     proposed={};used=set()
     for header in headers:
         target=FIELD_ALIASES.get(header,header)
-        if kind=="customers" and header in {"company_name","customer_name","customer"}:target="name"
+        if kind=="customers" and header in {"company_name","customer_name","customer","customer_company_name"}:target="name"
+        if kind=="customers" and header in {"column_1","name","contact_name"} and any(h in headers for h in ("customer_company_name","company_name","customer_name")):target="contact"
         if kind=="vendors" and header in {"company_name","vendor_name","vendor"}:target="name"
         if kind=="work_orders" and header=="date_job_performed":target="date_job_performed"
         if target in permitted and target not in used:
@@ -196,13 +197,13 @@ def map_preview(platform: str, kind: str, request: Request, payload: ColumnMappi
         if not mapping or set(mapping)-sources or len(set(mapping.values()))!=len(mapping):
             raise HTTPException(400,'Invalid or duplicate column mapping')
         permitted={
-            'customers':{'name','contact','email','phone','address','customer_type','preferred_visit_type','notes'},
+            'customers':{'name','contact','email','phone','cell_phone','address','customer_type','preferred_visit_type','notes'},
             'vendors':{'name','contact','email','phone','address','service_area','trade','vendor_type','onboarding_status','license_number','license_expiration','insurance_expiration','payment_terms','tax_form_status','notes'},
             'inventory':{'supplier','part_number','description','quantity','unit_cost','notes'},
             'products':{'name','sku','price','description'},
             'work_orders':set(LEGACY_JOB_FIELDS),
-            'estimates_invoices':{'customer','work_order_number','document_type','document_number','date','amount','status','description','notes'},
-            'purchase_orders':{'po_number','vendor','vendor_id','customer','work_order_number','date','expected_date','description','quantity','unit_cost','amount','status','notes'},
+            'estimates_invoices':{'customer','work_order_number','document_type','document_number','date','amount','status','description','notes','po_number','address','contact','tax','total','subtotal','terms'},
+            'purchase_orders':{'po_number','vendor','vendor_id','customer','work_order_number','date','expected_date','description','quantity','unit_cost','amount','status','notes','ship_to','shipping','tax','total'},
             'orders':{'customer','item','order_date','status','total','shipping','tax','notes'}
         }.get(kind,set())
         if set(mapping.values())-permitted or set(mapping.values())&forbidden:
@@ -214,7 +215,7 @@ def map_preview(platform: str, kind: str, request: Request, payload: ColumnMappi
             raise HTTPException(400,'Map required identity field: '+identity)
         rows=[{dest:str(row.get(source,'')).strip() for source,dest in mapping.items()} for row in stage['rows']]
         stage['headers']=list(mapping.values());stage['rows']=rows
-        stage['legacy_preview_only'] = kind == 'work_orders'
+        stage['legacy_preview_only'] = False
         workspaces.save(path,[stage])
         return {'token':payload.token,'columns':stage['headers'],'count':len(rows),'sample':rows[:8],'note':'Mapped preview saved; no records imported'}
 
@@ -260,16 +261,29 @@ def edit_preview(platform: str, kind: str, request: Request, payload: PreviewEdi
 
 # Revision 50: read-only duplicate preflight and durable import batch history.
 def _identity_value(row, key):
-    return str(row.get(key, "") or "").strip().casefold()
+    return " ".join(str(row.get(key, "") or "").split()).casefold()
+
+def _dedupe_key(row, kind):
+    if kind == 'customers':
+        company = _identity_value(row, 'name')
+        contact = _identity_value(row, 'contact')
+        # A customer with multiple named contacts is not a duplicate merely
+        # because the company is the same. Identical company/contact pairs are.
+        return (company, contact)
+    if kind == 'work_orders':
+        return _identity_value(row, 'job_number') or _identity_value(row, 'work_order_number')
+    if kind == 'estimates_invoices':
+        return (_identity_value(row, 'document_type'), _identity_value(row, 'document_number'))
+    return _identity_value(row, IDENTITY.get(kind))
 
 def _preview_status(stage, existing, kind):
     key = IDENTITY.get(kind)
-    seen = {_identity_value(r, key) for r in existing} if key else set()
+    seen = {_dedupe_key(r, kind) for r in existing} if key else set()
     seen.discard("")
     valid, duplicates, missing = 0, [], []
     for index, row in enumerate(stage.get("rows", []), 1):
-        value = _identity_value(row, key) if key else ""
-        if key and not value:
+        value = _dedupe_key(row, kind) if key else ""
+        if key and (not value or value == ("", "")):
             missing.append(index)
         elif value and value in seen:
             duplicates.append(index)
@@ -279,7 +293,7 @@ def _preview_status(stage, existing, kind):
     return {"count": len(stage.get("rows", [])), "eligible": valid,
             "duplicate_count": len(duplicates), "duplicate_rows": duplicates[:100],
             "missing_identity_count": len(missing), "missing_identity_rows": missing[:100],
-            "identity_field": key, "numbered_preview_only": kind in {"work_orders","purchase_orders","estimates_invoices","orders"}}
+            "identity_field": key, "numbered_preview_only": False}
 
 def _history_path(request, platform):
     return base_dir(request, platform) / "import_history.json"
@@ -333,24 +347,36 @@ def approve(platform:str,kind:str,request:Request,payload:Approval):
         if datetime.now(timezone.utc)-datetime.fromisoformat(stage["created_at"])>timedelta(hours=12):
             stage_path.unlink(missing_ok=True)
             raise HTTPException(410,"Preview expired; upload again")
-        # Preserve existing numbering and business logic: generated identifiers
-        # are not imported into active numbered collections.
-        if kind in {"work_orders","purchase_orders","estimates_invoices","orders"}:
-            raise HTTPException(400,"Numbered business records require a dedicated mapping workflow; preview is available but direct import is disabled")
+        # Historical numbers are preserved, never generated or overwritten. Only
+        # unique identifiers are imported; existing rows and counters are untouched.
+        if kind == "orders":
+            raise HTTPException(400, "SDC historical order migration is not enabled")
+        if kind == "estimates_invoices":
+            for row in stage['rows']:
+                if str(row.get('document_type','')).strip().casefold() not in ('estimate','invoice'):
+                    raise HTTPException(422, "Every document must specify Estimate or Invoice before migration")
+        if kind == "work_orders" and not all(str(row.get('job_number','')).strip() for row in stage['rows']):
+            raise HTTPException(422, "Every historical job must have its original job number")
         dest=workspaces.location(request,platform,kind)
         existing=workspaces.load(dest)
         key=IDENTITY.get(kind)
-        seen={str(r.get(key,"")).strip().casefold() for r in existing if r.get(key)} if key else set()
+        seen={_dedupe_key(r,kind) for r in existing if _dedupe_key(r,kind)} if key else set()
         added=0;duplicates=0;added_ids=[]
         for row in stage["rows"]:
-            value=str(row.get(key,"")).strip().casefold() if key else ""
-            if key and not value:
+            value=_dedupe_key(row,kind) if key else ""
+            if key and (not value or value == ("", "")):
                 duplicates+=1;continue
             if value and value in seen:
                 duplicates+=1;continue
             if value:seen.add(value)
             new_id=uuid.uuid4().hex
-            existing.append({"id":new_id,"created_at":datetime.now(timezone.utc).isoformat(),**row})
+            migrated = {"id":new_id,"created_at":datetime.now(timezone.utc).isoformat(),**row}
+            if kind in {"work_orders","estimates_invoices","purchase_orders"}:
+                migrated["historical_import"] = True
+                migrated["historical_source_file"] = str(stage.get("filename", ""))[:200]
+                if kind == "work_orders":
+                    migrated["work_order_number"] = migrated["job_number"]
+            existing.append(migrated)
             added_ids.append(new_id)
             added+=1
         # Save the destination first. If history cannot be written, do not claim
@@ -375,3 +401,25 @@ def approve(platform:str,kind:str,request:Request,payload:Approval):
         stage_path.unlink(missing_ok=True)
         return {"added": added, "duplicates_skipped": duplicates,
                 "destination": kind, "batch_id": batch_id, "warning": history_warning}
+
+
+@router.get("/{platform}/{kind}/duplicate-review")
+def duplicate_review(platform: str, kind: str, request: Request):
+    """Read-only exact-identity groups. Never merges records or breaks links."""
+    guard(request, platform, kind)
+    with lock, workspaces._lock:
+        rows = workspaces.load(workspaces.location(request, platform, kind))
+        groups = {}
+        for row in rows:
+            identity = _dedupe_key(row, kind)
+            if identity and identity != ("", ""):
+                groups.setdefault(identity, []).append(row)
+        matches = []
+        for identity, entries in groups.items():
+            if len(entries) < 2: continue
+            matches.append({"identity": list(identity) if isinstance(identity, tuple) else identity,
+                            "records": [{"id": x.get("id"), "name": x.get("name"),
+                                         "contact": x.get("contact"), "number": x.get(IDENTITY.get(kind, "")),
+                                         "created_at": x.get("created_at")} for x in entries]})
+        return {"total_records": len(rows), "duplicate_groups": len(matches),
+                "groups": matches[:250], "note": "Read-only exact matches. No automatic deletion or merging; linked records require manual review."}
