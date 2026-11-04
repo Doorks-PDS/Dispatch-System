@@ -333,6 +333,19 @@ async def part_from_url(request: Request, payload: dict):
             slug=parsed.path.strip('/').split('/')[-1]
             m=re.search(r'(TDE[-_ ]?2000R[-_ ]?L)',slug,re.I)
             if m:fields['part_number']=m.group(1).replace('_','-').upper()
+    # Reject store-wide SEO copy: it is not a product description.
+    if host.lower().endswith('doorcontrolsusa.com'):
+        generic=('one-stop-shop','door replacement parts','discover the variety','products we carry','shop for automatic')
+        if any(x in fields['description'].lower() for x in generic):
+            headings=[clean_text(m.group(1)) for m in re.finditer(r'<h1\b[^>]*>(.*?)</h1>',html,re.I|re.S)]
+            headings=[h for h in headings if len(h)>12 and not any(x in h.lower() for x in generic)]
+            candidate=(headings[0] if headings else title).strip()
+            if candidate and not any(x in candidate.lower() for x in generic):fields['description']=candidate[:1500]
+            else:fields['description']=''
+        if not fields['manufacturer']:
+            slug=parsed.path.lower()
+            for term,brand in (('besam','BESAM'),('record','Record'),('stanley','Stanley'),('dorma','Dorma'),('horton','Horton')):
+                if term in slug:fields['manufacturer']=brand;break
     if host.lower().endswith('doorcontrolsusa.com'):
         fields['supplier']='Door Controls USA'
         if 'mc521' in parsed.path.lower() and not fields['part_number']:fields['part_number']='MC521-PRO'
