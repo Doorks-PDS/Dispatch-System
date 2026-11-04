@@ -355,12 +355,12 @@
     const collections=platform==='sdc'
       ? [['customers','Customers & Contacts'],['vendors','Suppliers'],['orders','Orders (preview only)'],['products','Products'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']]
       : [['customers','Customers & Contacts'],['vendors','Vendors'],['work_orders','Legacy Work Orders (preview only)'],['estimates_invoices','Estimates & Invoices (preview only)'],['inventory','Inventory'],['purchase_orders','Purchase Orders (preview only)']];
-    workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><h2>Data Import Center</h2>
-      <p class="hint">Revision 50: review-first CSV and AI document importer with duplicate preflight and import history. Upload CSV for multiple records or PDF/image for an AI-extracted draft. AI document extraction currently proposes one record per file. Review every field before approval. No existing records are overwritten. Purchase orders and other numbered documents can be analyzed and edited, but cannot be imported yet; numbering and links remain protected.</p>
-      <div class="grid2"><label>Destination <select class="input" id="diKind"></select></label><label>Source file <input class="input" id="diFile" type="file" accept=".csv,.pdf,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"></label></div>
-      <button class="btn btn-orange" id="diPreview" style="margin-top:12px">Analyze & Preview File</button>
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1100px;margin:auto"><h2>📥 Data Import Center</h2>
+      <p class="hint">Revision 51: CSV migration with duplicate preflight and import history. Accepts one-column customer lists, Excel-exported CSV, and up to 32 MB / 50,000 records per batch. Upload CSV for multiple records or PDF/image for an AI-extracted draft. AI document extraction currently proposes one record per file. Review every field before approval. No existing records are overwritten. Purchase orders and other numbered documents can be analyzed and edited, but cannot be imported yet; numbering and links remain protected.</p>
+      <div class="grid2"><label>📂 Destination <select class="input" id="diKind"></select></label><label>📄 Source file <input class="input" id="diFile" type="file" accept=".csv,.pdf,.png,.jpg,.jpeg,.webp,text/csv,application/pdf,image/*"></label></div>
+      <button class="btn btn-orange" id="diPreview" style="margin-top:12px">🔎 Analyze & Preview File</button>
       <p id="diStatus" class="hint" role="status"></p>
-      <details style="margin:16px 0;padding:12px 16px;border:1px solid #d6dfe9;border-radius:12px"><summary style="cursor:pointer;font-weight:700">Import History</summary><div id="diHistory" style="padding-top:12px" class="hint">Open to load recent completed imports.</div></details>
+      <details style="margin:16px 0;padding:12px 16px;border:1px solid #d6dfe9;border-radius:12px"><summary style="cursor:pointer;font-weight:700">🕘 Import History</summary><div id="diHistory" style="padding-top:12px" class="hint">Open to load recent completed imports.</div></details>
       <div id="diResults"></div></div>`;
     const kind=el('diKind'),file=el('diFile'),status=el('diStatus'),results=el('diResults');
     for(const [value,label] of collections){const o=document.createElement('option');o.value=value;o.textContent=label;kind.append(o);}

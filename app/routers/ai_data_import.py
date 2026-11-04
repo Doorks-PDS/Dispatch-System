@@ -38,34 +38,73 @@ def base_dir(request,platform):
     path.mkdir(parents=True,exist_ok=True)
     return path
 
+# CSV migration: accept UTF-8 BOM, Excel-style Windows exports and one-column lists.
+# Keep the upload bounded while supporting real customer and job exports.
+MAX_CSV_BYTES = 32 * 1024 * 1024
+MAX_CSV_ROWS = 50000
+
 def csv_rows(blob):
+    import re
     try:
-        text=blob.decode("utf-8-sig")
-        dialect=csv.Sniffer().sniff(text[:8192],delimiters=",;\\t")
-        reader=csv.DictReader(io.StringIO(text),dialect=dialect)
-        if not reader.fieldnames:raise ValueError("Missing headers")
-        headers=[str(h or "").strip().lower().replace(" ","_") for h in reader.fieldnames]
-        if len(headers)!=len(set(headers)) or any(not h.replace("_","").isalnum() or len(h)>40 for h in headers):
-            raise ValueError("Invalid or repeated column names")
-        rows=[]
+        try:
+            text = blob.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            # Older Excel/Quickbase exports can use Windows-1252.
+            text = blob.decode("cp1252")
+        if not text.strip():
+            raise ValueError("CSV is empty")
+        sample = text[:16384]
+        try:
+            dialect = csv.Sniffer().sniff(sample, delimiters=",;\t|")
+            delimiter = dialect.delimiter
+        except csv.Error:
+            # One-column customer lists are valid; otherwise prefer the most
+            # common separator in the first nonempty physical header line.
+            first = next((line for line in sample.splitlines() if line.strip()), "")
+            delimiter = max((",", ";", "\t", "|"), key=lambda c: first.count(c))
+        reader = csv.reader(io.StringIO(text, newline=""), delimiter=delimiter)
+        original = next(reader, None)
+        if not original or not any(str(h).strip() for h in original):
+            raise ValueError("Missing CSV headers")
+        # Do not reject real-world headings such as 'Customer - Company Name'.
+        # Disambiguate colliding normalized names rather than dropping data.
+        headers = []
+        used = set()
+        for index, heading in enumerate(original, 1):
+            name = re.sub(r"[^a-z0-9]+", "_", str(heading).strip().casefold()).strip("_")[:70]
+            name = name or "column_" + str(index)
+            unique = name
+            suffix = 2
+            while unique in used:
+                unique = name[:65] + "_" + str(suffix)
+                suffix += 1
+            headers.append(unique)
+            used.add(unique)
+        protected = {"id", "created_at", "updated_at", "authorization_status", "authorized_by", "authorized_at", "unauthorized_by", "unauthorized_at"}
+        rows = []
         for row in reader:
-            if None in row:raise ValueError("Unexpected extra columns")
-            mapped={headers[i]:str(row.get(h) or "").strip()[:4000] for i,h in enumerate(reader.fieldnames) if headers[i] not in {"id","created_at","updated_at","authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"}}
-            if any(mapped.values()):rows.append(workspaces.clean(mapped))
-            if len(rows)>1000:raise ValueError("Maximum 1000 rows per upload")
-        if not rows:raise ValueError("No data rows found")
-        headers=[h for h in headers if h not in {"id","created_at","updated_at","authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"}]
-        return headers,rows
-    except (UnicodeDecodeError,csv.Error,ValueError) as exc:
-        raise HTTPException(400,str(exc))
+            if not any(str(v).strip() for v in row):
+                continue
+            if len(row) > len(headers):
+                raise ValueError("Row " + str(reader.line_num) + " has more fields than the header. Check the file delimiter or quotation marks")
+            mapped = {key: str(row[i]).strip()[:4000] if i < len(row) else "" for i, key in enumerate(headers) if key not in protected}
+            if any(mapped.values()):
+                rows.append(workspaces.clean(mapped))
+            if len(rows) > MAX_CSV_ROWS:
+                raise ValueError("More than 50,000 records; split into batches of 50,000 rows")
+        if not rows:
+            raise ValueError("No nonempty data rows found")
+        return [h for h in headers if h not in protected], rows
+    except (UnicodeDecodeError, csv.Error, ValueError) as exc:
+        raise HTTPException(400, str(exc))
 
 @router.post("/{platform}/{kind}/preview")
 async def preview(platform:str,kind:str,request:Request,file:UploadFile=File(...)):
     guard(request,platform,kind)
     if not (file.filename or "").lower().endswith(".csv"):
         raise HTTPException(400,"This first import phase accepts CSV files only")
-    blob=await file.read(2_000_001)
-    if len(blob)>2_000_000:raise HTTPException(413,"File exceeds 2 MB")
+    blob=await file.read(MAX_CSV_BYTES + 1)
+    if len(blob)>MAX_CSV_BYTES:raise HTTPException(413,"CSV exceeds 32 MB. Split the file into smaller batches")
     headers,rows=csv_rows(blob)
     token=uuid.uuid4().hex
     stage={"platform":platform,"kind":kind,"filename":Path(file.filename or "").name,
@@ -263,7 +302,7 @@ def approve(platform:str,kind:str,request:Request,payload:Approval):
         existing=workspaces.load(dest)
         key=IDENTITY.get(kind)
         seen={str(r.get(key,"")).strip().casefold() for r in existing if r.get(key)} if key else set()
-        added=0;duplicates=0
+        added=0;duplicates=0;added_ids=[]
         for row in stage["rows"]:
             value=str(row.get(key,"")).strip().casefold() if key else ""
             if key and not value:
@@ -271,12 +310,14 @@ def approve(platform:str,kind:str,request:Request,payload:Approval):
             if value and value in seen:
                 duplicates+=1;continue
             if value:seen.add(value)
-            existing.append({"id":uuid.uuid4().hex,"created_at":datetime.now(timezone.utc).isoformat(),**row})
+            new_id=uuid.uuid4().hex
+            existing.append({"id":new_id,"created_at":datetime.now(timezone.utc).isoformat(),**row})
+            added_ids.append(new_id)
             added+=1
         # Save the destination first. If history cannot be written, do not claim
         # that the import failed (and invite a second submission); return a warning.
         batch_id = uuid.uuid4().hex
-        added_ids = [r["id"] for r in existing[-added:]] if added else []
+        
         workspaces.save(dest, existing)
         history_warning = None
         try:
