@@ -114,7 +114,7 @@ async def preview(platform:str,kind:str,request:Request,file:UploadFile=File(...
     path=base_dir(request,platform)/(token+".json")
     workspaces.save(path,[stage])
     return {"token":token,"filename":stage["filename"],"columns":headers,"count":len(rows),"sample":rows[:8],
-            "note":"Preview only. No records have been changed."}
+            "suggested_mapping":suggested_mapping(kind,headers),"note":"Preview only. No records have been changed."}
 
 @router.post("/{platform}/{kind}/ai-preview")
 async def ai_preview(platform:str,kind:str,request:Request,file:UploadFile=File(...)):
@@ -135,6 +135,42 @@ async def ai_preview(platform:str,kind:str,request:Request,file:UploadFile=File(
     workspaces.save(base_dir(request,platform)/(token+".json"),[stage])
     return {"token":token,"filename":stage["filename"],"columns":stage["headers"],
             "count":1,"sample":[row],"note":"AI proposed one record. Review carefully before approving; no data has changed."}
+
+# Historical work orders retain their original identifiers and technician notes in
+# the review draft. They are NEVER written to active work orders by this importer.
+LEGACY_JOB_FIELDS = ("job_number", "date_job_performed", "customer", "contact", "technician", "arrival_time", "departure_time", "description_of_problem", "material_used", "work_performed", "additional_repairs_needed_recommended", "address", "phone", "email", "status", "po_number", "service_type", "scheduled_date", "scheduled_time", "description", "notes")
+FIELD_ALIASES = {
+    "job_number":"job_number", "job_no":"job_number", "job":"job_number", "work_order_number":"job_number",
+    "date_job_performed":"date_job_performed", "date_performed":"date_job_performed", "job_date":"date_job_performed",
+    "company_name":"customer", "customer_name":"customer", "customer":"customer", "contact_name":"contact",
+    "technician":"technician", "tech":"technician", "arrival_time":"arrival_time", "departure_time":"departure_time",
+    "description_of_problem":"description_of_problem", "problem_description":"description_of_problem",
+    "material_used":"material_used", "materials_used":"material_used", "work_performed":"work_performed",
+    "additional_repairs_needed_recommended":"additional_repairs_needed_recommended",
+    "additional_repairs":"additional_repairs_needed_recommended", "recommendations":"additional_repairs_needed_recommended",
+    "po":"po_number", "purchase_order":"po_number", "customer_company_name":"name", "company":"name",
+    "primary_contact":"contact", "email_address":"email", "phone_number":"phone", "street_address":"address",
+}
+def suggested_mapping(kind, headers):
+    permitted={
+        "work_orders":set(LEGACY_JOB_FIELDS),
+        "customers":{"name","contact","email","phone","address","customer_type","preferred_visit_type","notes"},
+        "vendors":{"name","contact","email","phone","address","service_area","trade","vendor_type","onboarding_status","license_number","license_expiration","insurance_expiration","payment_terms","tax_form_status","notes"},
+        "inventory":{"supplier","part_number","description","quantity","unit_cost","notes"},
+        "products":{"name","sku","price","description"},
+        "purchase_orders":{"po_number","vendor","vendor_id","customer","work_order_number","date","expected_date","description","quantity","unit_cost","amount","status","notes"},
+        "estimates_invoices":{"customer","work_order_number","document_type","document_number","date","amount","status","description","notes"},
+        "orders":{"customer","item","order_date","status","total","shipping","tax","notes"}
+    }.get(kind,set())
+    proposed={};used=set()
+    for header in headers:
+        target=FIELD_ALIASES.get(header,header)
+        if kind=="customers" and header in {"company_name","customer_name","customer"}:target="name"
+        if kind=="vendors" and header in {"company_name","vendor_name","vendor"}:target="name"
+        if kind=="work_orders" and header=="date_job_performed":target="date_job_performed"
+        if target in permitted and target not in used:
+            proposed[header]=target;used.add(target)
+    return proposed
 
 class ColumnMapping(BaseModel):
     token: str
@@ -164,7 +200,7 @@ def map_preview(platform: str, kind: str, request: Request, payload: ColumnMappi
             'vendors':{'name','contact','email','phone','address','service_area','trade','vendor_type','onboarding_status','license_number','license_expiration','insurance_expiration','payment_terms','tax_form_status','notes'},
             'inventory':{'supplier','part_number','description','quantity','unit_cost','notes'},
             'products':{'name','sku','price','description'},
-            'work_orders':{'customer','contact','phone','email','address','service_type','scheduled_date','scheduled_time','description','status','priority','notes'},
+            'work_orders':set(LEGACY_JOB_FIELDS),
             'estimates_invoices':{'customer','work_order_number','document_type','document_number','date','amount','status','description','notes'},
             'purchase_orders':{'po_number','vendor','vendor_id','customer','work_order_number','date','expected_date','description','quantity','unit_cost','amount','status','notes'},
             'orders':{'customer','item','order_date','status','total','shipping','tax','notes'}
@@ -172,10 +208,13 @@ def map_preview(platform: str, kind: str, request: Request, payload: ColumnMappi
         if set(mapping.values())-permitted or set(mapping.values())&forbidden:
             raise HTTPException(400,'Unsupported or protected destination fields')
         identity=IDENTITY.get(kind)
-        if identity and identity not in mapping.values():
+        if kind == 'work_orders' and 'job_number' not in mapping.values():
+            raise HTTPException(400,'Map the original legacy job_number field before previewing')
+        if identity and kind != 'work_orders' and identity not in mapping.values():
             raise HTTPException(400,'Map required identity field: '+identity)
         rows=[{dest:str(row.get(source,'')).strip() for source,dest in mapping.items()} for row in stage['rows']]
         stage['headers']=list(mapping.values());stage['rows']=rows
+        stage['legacy_preview_only'] = kind == 'work_orders'
         workspaces.save(path,[stage])
         return {'token':payload.token,'columns':stage['headers'],'count':len(rows),'sample':rows[:8],'note':'Mapped preview saved; no records imported'}
 
