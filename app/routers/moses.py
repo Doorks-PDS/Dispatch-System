@@ -181,13 +181,16 @@ async def upload_business_document(request: Request, document_type: str = Form(.
 # Product page extraction is draft-only and never updates inventory automatically.
 @router.post('/part-from-url')
 async def part_from_url(request: Request, payload: dict):
-    from urllib.parse import urlsplit
+    from urllib.parse import urlsplit, urlunsplit
     import socket, ipaddress, httpx, os, re, json
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Login required')
     if request.session.get('active_platform') != 'doorks':
         raise HTTPException(403, 'Switch to Doorks first')
     url = str(payload.get('url') or '').strip()
+    parsed = urlsplit(url)
+    # Marketing query parameters are not needed for product metadata.
+    url = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, '', ''))
     parsed = urlsplit(url)
     if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password or parsed.port not in (None,443) or len(url)>1500:
         raise HTTPException(400, 'Enter a public HTTPS product URL')
@@ -202,7 +205,7 @@ async def part_from_url(request: Request, payload: dict):
         # DNS is checked above; redirects are disabled to prevent redirecting to
         # internal services. Proxies from the environment are not trusted.
         async with httpx.AsyncClient(timeout=12,follow_redirects=False,trust_env=False) as client:
-            async with client.stream('GET',url,headers={'User-Agent':'DoorksProductReader/1.0','Accept':'text/html'}) as resp:
+            async with client.stream('GET',url,headers={'User-Agent':'Mozilla/5.0 (compatible; DoorksProductReader/2.0; +https://www.doorks.com)','Accept':'text/html,application/xhtml+xml'}) as resp:
                 if resp.status_code in (301,302,303,307,308):
                     raise HTTPException(400,'Redirected product URLs are not supported; paste the final HTTPS page URL')
                 resp.raise_for_status()
@@ -215,13 +218,45 @@ async def part_from_url(request: Request, payload: dict):
                     chunks.append(chunk)
         html=b''.join(chunks).decode('utf-8','replace')
     except httpx.HTTPError as exc:
-        raise HTTPException(502,'Could not read public product page') from exc
+        # Shopify exposes a smaller public product JSON document on some stores.
+        # Only request the same DNS-validated host and fixed product slug.
+        if '/products/' not in parsed.path:
+            raise HTTPException(502,'Could not read public product page') from exc
+        slug=parsed.path.split('/products/',1)[-1].split('/',1)[0]
+        if not re.fullmatch(r'[a-zA-Z0-9_-]{1,160}',slug):
+            raise HTTPException(502,'Could not read public product page') from exc
+        fallback=urlunsplit(('https',parsed.netloc,'/products/'+slug+'.js','',''))
+        try:
+            async with httpx.AsyncClient(timeout=14,follow_redirects=False,trust_env=False) as client:
+                response=await client.get(fallback,headers={'User-Agent':'Mozilla/5.0','Accept':'application/json'})
+                response.raise_for_status()
+                if len(response.content)>750_000:raise ValueError('Oversized product JSON')
+                product=response.json()
+            if not isinstance(product,dict) or not product.get('title'):raise ValueError('Not a Shopify product')
+            from html import unescape
+            description=unescape(unescape(re.sub(r'<[^>]+>',' ',str(product.get('description') or product['title'])))).strip()
+            variants=product.get('variants') or []
+            first=variants[0] if variants and isinstance(variants[0],dict) else {}
+            pictures=product.get('images') or []
+            picture=pictures[0] if pictures else ''
+            if isinstance(picture,dict):picture=picture.get('src') or ''
+            if isinstance(picture,str) and picture.startswith('//'):picture='https:'+picture
+            return {'ok':True,'fields':{'part_number':str(first.get('sku') or '')[:160],
+                'manufacturer':str(product.get('vendor') or '')[:160],
+                'supplier':host.replace('www.',''),
+                'description':' '.join(description.split())[:1500],
+                'image_url':picture[:1500] if isinstance(picture,str) and picture.startswith('https://') else ''},
+                'source':'public Shopify product JSON; review before saving'}
+        except (httpx.HTTPError,ValueError,TypeError,KeyError,IndexError) as fallback_exc:
+            raise HTTPException(502,'Supplier site blocked public product reading; enter details manually or upload a photo') from fallback_exc
     from html import unescape
+    def clean_text(value):
+        return unescape(unescape(re.sub(r'<[^>]+>', ' ', str(value or '')))).replace('\xa0',' ').strip()
     def meta(prop):
         for tag in re.findall(r'<meta\b[^>]*>',html,re.I):
             if re.search(r'(?:property|name)=["\']'+re.escape(prop)+r'["\']',tag,re.I):
                 m=re.search(r'content=["\']([^"\']+)',tag,re.I)
-                if m:return unescape(m.group(1)).strip()
+                if m:return clean_text(m.group(1))
         return ''
     title=meta('og:title') or meta('twitter:title')
     if not title:
@@ -242,9 +277,9 @@ async def part_from_url(request: Request, payload: dict):
             if isinstance(obj.get('@graph'),list):stack.extend(obj['@graph'])
             if 'Product' not in str(obj.get('@type','')):continue
             brand=obj.get('brand') or ''
-            fields['manufacturer']=str(brand.get('name','') if isinstance(brand,dict) else brand)[:160]
+            fields['manufacturer']=clean_text(brand.get('name','') if isinstance(brand,dict) else (brand if isinstance(brand,str) else ''))[:160]
             fields['part_number']=str(obj.get('mpn') or obj.get('sku') or '')[:160]
-            fields['description']=str(obj.get('description') or obj.get('name') or description)[:1500]
+            fields['description']=clean_text(obj.get('description') or obj.get('name') or description)[:1500]
             photo=obj.get('image') or image
             if isinstance(photo,list):photo=next(iter(photo),'')
             if isinstance(photo,str) and photo.startswith('https://'):fields['image_url']=photo[:1500]
@@ -276,16 +311,31 @@ async def part_from_url(request: Request, payload: dict):
         # the product heading; prefer that over a generic catalog page title.
         if not fields['description'] or 'SECLOCK' in fields['description'].upper() or fields['description'].strip().lower()==product_code.lower():
             m=re.search(r'<h1[^>]*>\s*'+re.escape(product_code)+r'\s*</h1>\s*<[^>]+>(.*?)</',html,re.I|re.S)
-            if m:fields['description']=unescape(re.sub('<[^>]+>','',m.group(1))).strip()[:1500]
+            if m:fields['description']=clean_text(m.group(1))[:1500]
     # Prefer useful product text over a bare SKU, catalog title, or empty description.
     if not fields['description'] or fields['description'].strip().lower() in (fields['part_number'].lower(), 'seclock'):
         candidates=[]
         for pattern in (r'<h1\b[^>]*>(.*?)</h1>',r'<h2\b[^>]*>(.*?)</h2>',r'<div\b[^>]*class=[\"\'][^\"\']*(?:product-description|product__description)[^\"\']*[\"\'][^>]*>(.*?)</div>'):
             for match in re.finditer(pattern,html,re.I|re.S):
-                candidate=unescape(re.sub(r'<[^>]+>',' ',match.group(1)))
+                candidate=clean_text(match.group(1))
                 candidate=' '.join(candidate.split())
                 if len(candidate)>12 and candidate.lower()!=fields['part_number'].lower():candidates.append(candidate)
         if candidates:fields['description']=max(candidates,key=lambda x:len(x) if len(x)<350 else 0)[:1500]
+    if fields['manufacturer'].startswith(('[', '{')) or '@id' in fields['manufacturer'] or fields['manufacturer'].startswith('http'):
+        fields['manufacturer']=''
+    if not fields['manufacturer']:
+        for brand_pattern in (r'<meta[^>]*name=["\']brand["\'][^>]*content=["\']([^"\']+)',r'<meta[^>]*property=["\']product:brand["\'][^>]*content=["\']([^"\']+)'):
+            m=re.search(brand_pattern,html,re.I)
+            if m:fields['manufacturer']=clean_text(m.group(1))[:160];break
+    if host.lower().endswith('trudoor.com'):
+        fields['supplier']='Trudoor'
+        if not fields['part_number']:
+            slug=parsed.path.strip('/').split('/')[-1]
+            m=re.search(r'(TDE[-_ ]?2000R[-_ ]?L)',slug,re.I)
+            if m:fields['part_number']=m.group(1).replace('_','-').upper()
+    if host.lower().endswith('doorcontrolsusa.com'):
+        fields['supplier']='Door Controls USA'
+        if 'mc521' in parsed.path.lower() and not fields['part_number']:fields['part_number']='MC521-PRO'
     if not fields['description'] and title:fields['description']=title[:1500]
     return {'ok':True,'fields':fields,'source':'public product metadata; review before saving'}
 

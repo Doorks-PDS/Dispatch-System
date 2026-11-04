@@ -10,7 +10,7 @@ from pydantic import BaseModel
 
 router=APIRouter(prefix="/workspaces",tags=["workspaces"])
 _lock=RLock()
-KINDS={"doorks":("customers","vendors","work_orders","estimates_invoices","purchase_orders","customer_inquiries","vendor_assignments","expenses","receivables","inventory","employees","payroll"),"sdc":("customers","vendors","purchase_orders","estimates_invoices","orders","software_leads","products","expenses","receivables","inventory")}
+KINDS={"doorks":("customers","vendors","addresses","work_orders","estimates_invoices","purchase_orders","customer_inquiries","vendor_assignments","expenses","receivables","inventory","employees","payroll","stock_adjustments"),"sdc":("customers","vendors","addresses","purchase_orders","estimates_invoices","orders","software_leads","products","expenses","receivables","inventory")}
 class Record(BaseModel):
     data:dict
 
@@ -304,3 +304,29 @@ def delete(platform:str,kind:str,record_id:str,request:Request):
         if len(items)==len(remaining):raise HTTPException(404,"Record not found")
         save(path,remaining)
     return {"ok":True}
+
+@router.delete('/{platform}/{kind}/{record_id}/contact')
+def delete_contact_record(platform:str,kind:str,record_id:str,request:Request):
+    """Remove only one contact row, preserving company and linked business history."""
+    guard(request,platform,kind)
+    if kind not in ('customers','vendors'):
+        raise HTTPException(400,'Contact deletion is available for customer and supplier directories')
+    with _lock:
+        path=location(request,platform,kind)
+        items=load(path)
+        target=next((x for x in items if x.get('id')==record_id),None)
+        if not target:raise HTTPException(404,'Contact not found')
+        company=str(target.get('name') or '').strip().casefold()
+        if not any(x.get('id')!=record_id and str(x.get('name') or '').strip().casefold()==company for x in items):
+            raise HTTPException(409,'This is the last record for the company. Deactivate instead to preserve the company profile.')
+        person=str(target.get('contact') or '').strip().casefold()
+        email=str(target.get('email') or '').strip().casefold()
+        for other_kind in KINDS[platform]:
+            if other_kind==kind:continue
+            for linked in load(location(request,platform,other_kind)):
+                if person and str(linked.get('contact') or '').strip().casefold()==person and str(linked.get('customer') or linked.get('vendor') or linked.get('supplier') or '').strip().casefold()==company:
+                    raise HTTPException(409,'Contact is referenced by existing records. Deactivate instead.')
+                if email and str(linked.get('email') or linked.get('contact_email') or '').strip().casefold()==email:
+                    raise HTTPException(409,'Contact email is referenced by existing records. Deactivate instead.')
+        save(path,[x for x in items if x.get('id')!=record_id])
+    return {'ok':True}
