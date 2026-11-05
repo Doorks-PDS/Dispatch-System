@@ -515,38 +515,68 @@ def admin_vendor_upload(submission_id:str,request:Request):
         return FileResponse(path,media_type={'pdf':'application/pdf','png':'image/png','jpg':'image/jpeg','webp':'image/webp'}[ext],
             filename='vendor-upload-'+submission_id+'.'+ext,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
+class CustomerDocumentLink(BaseModel):
+    customer_id: str = Field(min_length=1, max_length=100)
+    document_id: str = Field(min_length=1, max_length=100)
+
+@router.get('/admin/document-links')
+def document_links(request: Request):
+    """Read-only link review; display-name matches are suggestions, never authorization."""
+    admin(request)
+    customers = workspace_items(request, 'customers')
+    documents = workspace_items(request, 'estimates_invoices')
+    return {'customers': [{'id': str(c.get('id') or ''), 'name': str(c.get('name') or c.get('company') or '')}
+                          for c in customers if c.get('id')],
+            'documents': [{'id': str(d.get('id') or ''), 'number': str(d.get('document_number') or ''),
+                           'type': str(d.get('document_type') or ''), 'customer': str(d.get('customer') or ''),
+                           'customer_id': str(d.get('customer_id') or ''), 'status': str(d.get('status') or '')}
+                          for d in documents if d.get('id') and d.get('document_type') in ('Estimate', 'Invoice')]}
+
+@router.post('/admin/document-links')
+def link_customer_document(payload: CustomerDocumentLink, request: Request):
+    """Explicit office-admin linking; never auto-match or silently reassign."""
+    admin(request)
+    if not any(str(c.get('id') or '') == payload.customer_id for c in workspace_items(request, 'customers')):
+        raise HTTPException(404, 'Customer not found')
+    path = Path(request.app.state.data_dir) / 'business_workspaces' / 'doorks' / 'estimates_invoices.json'
+    with _lock:
+        if not path.exists(): raise HTTPException(404, 'Documents not found')
+        raw = json.loads(path.read_text(encoding='utf-8'))
+        docs = raw if isinstance(raw, list) else raw.get('items') if isinstance(raw, dict) else None
+        if not isinstance(docs, list): raise HTTPException(500, 'Invalid document collection')
+        doc = next((d for d in docs if isinstance(d, dict) and str(d.get('id') or '') == payload.document_id), None)
+        if not doc or doc.get('document_type') not in ('Estimate', 'Invoice'):
+            raise HTTPException(404, 'Estimate or invoice not found')
+        existing = str(doc.get('customer_id') or '').strip()
+        if existing and existing != payload.customer_id:
+            raise HTTPException(409, 'Document is already linked to another customer; no reassignment performed')
+        if existing == payload.customer_id: return {'ok': True, 'already_linked': True}
+        doc['customer_id'] = payload.customer_id
+        tmp = path.with_name(path.name + '.portal-link-tmp')
+        try:
+            with tmp.open('w', encoding='utf-8') as f:
+                json.dump(raw, f, ensure_ascii=False, indent=2)
+                f.flush(); os.fsync(f.fileno())
+            os.replace(tmp, path)
+        finally:
+            tmp.unlink(missing_ok=True)
+    return {'ok': True, 'already_linked': False}
+
+@router.post('/my-submissions')
+def my_submissions(payload: SessionToken, request: Request):
+    """Invitation-scoped request history, never exposing other companies' messages."""
+    invite = access(request, payload.token)
+    with _lock:
+        obj = read(store(request))
+        rows = [x for x in obj['submissions'] if x.get('invite_id') == invite['id']]
+    return {'submissions': [{k: x.get(k) for k in ('id','subject','message','reference','status','created_at','kind')}
+                            for x in rows[-200:]]}
+
 @router.get('/access',response_class=HTMLResponse)
 def portal_page(response: HTMLResponse):
     response.headers['Cache-Control'] = 'no-store'
     response.headers['X-Frame-Options'] = 'DENY'
     response.headers['Referrer-Policy'] = 'no-referrer'
     response.headers['X-Content-Type-Options'] = 'nosniff'
-    return '''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="referrer" content="no-referrer"><title>Doorks Portal</title><style>body{font:16px system-ui;background:#f5f7fa;color:#17212f;margin:0;padding:30px}main{max-width:620px;margin:40px auto;background:white;padding:28px;border-radius:14px;box-shadow:0 4px 25px #0001}label{display:block;margin:15px 0 6px}input,textarea{box-sizing:border-box;width:100%;padding:12px;border:1px solid #bbc4ce;border-radius:7px;font:inherit}textarea{min-height:140px}button{padding:12px 20px;background:#183c62;color:white;border:0;border-radius:7px;margin-top:18px;cursor:pointer}#status{margin-top:18px;white-space:pre-wrap}</style></head><body><main><h1>Doorks Portal</h1><p id="identity">Checking access…</p><form id="form" hidden><label for="subject">Subject</label><input id="subject" maxlength="160" required><label for="reference">Reference / work order (optional)</label><input id="reference" maxlength="100"><label for="message">Details</label><textarea id="message" maxlength="2000" required></textarea><button type="submit">Submit for review</button></form><p id="status" role="status"></p><section id="docs" hidden><h2>My estimates & invoices</h2><p id="docHint"></p><div id="docList"></div></section></main><script>const token=location.hash.slice(1);history.replaceState(null,'',location.pathname);const identity=document.getElementById('identity'),form=document.getElementById('form'),status=document.getElementById('status');async function run(){try{if(!token)throw Error('Missing invitation token');const r=await fetch('/doorks-portals/session',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token}),cache:'no-store'});const d=await r.json();if(!r.ok)throw Error(d.detail||'Access denied');identity.textContent=(d.kind==='customer'?'Customer':'Vendor')+' portal — '+d.company+' ('+d.contact_name+')';form.hidden=false;if(d.kind==='customer'){
- const section=document.getElementById('docs'),list=document.getElementById('docList'),hint=document.getElementById('docHint');section.hidden=false;
- try{const rr=await fetch('/doorks-portals/customer/documents',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token}),cache:'no-store'});const data=await rr.json();if(!rr.ok)throw Error(data.detail||'Unable to load documents');
- hint.textContent=data.documents.length?'Only published documents linked to your customer account are shown.':'No published documents available. Ask the office to link your customer record if needed.';
- for(const doc of data.documents){const box=document.createElement('div');box.style.cssText='border:1px solid #d4dce5;border-radius:9px;padding:14px;margin:12px 0';
- const title=document.createElement('h3');title.textContent=doc.document_type+' '+doc.document_number;box.append(title);
- const detail=document.createElement('p');detail.textContent='Date: '+doc.date+' | Status: '+doc.status+' | Total: $'+Number(doc.amount).toFixed(2)+(doc.document_type==='Invoice'?' | Balance: $'+Number(doc.balance_due).toFixed(2):'');box.append(detail);
- if(doc.line_items&&doc.line_items.length){const ul=document.createElement('ul');for(const line of doc.line_items){const li=document.createElement('li');li.textContent=(line.description||line.item||'Item')+' × '+(line.quantity||1);ul.append(li)}box.append(ul)}
- if(doc.document_type==='Invoice'&&Number(doc.balance_due)>0){if(doc.checkout_url){const pay=document.createElement('a');pay.href=doc.checkout_url;pay.target='_blank';pay.rel='noopener noreferrer';pay.textContent='Pay securely with external provider';pay.style.cssText='display:inline-block;margin:8px 12px 8px 0';box.append(pay)}const ask=document.createElement('button');ask.type='button';ask.textContent='Ask about payment';ask.onclick=async()=>{const note=prompt('Question for the office (optional):') ;if(note===null)return;ask.disabled=true;try{const r=await fetch('/doorks-portals/customer/payment-question',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,document_id:doc.id,note,request_id:crypto.randomUUID()})});const d=await r.json();if(!r.ok)throw Error(d.detail||'Request failed');alert('Sent to office for review. No payment was recorded.')}catch(e){alert(e.message)}finally{ask.disabled=false}};box.append(ask)}
- if(doc.document_type==='Estimate'&&['sent','quote sent','pending approval'].includes(doc.status.toLowerCase())){const note=document.createElement('input');note.placeholder='Optional note';note.maxLength=1000;box.append(note);for(const decision of ['approve','decline','question']){const b=document.createElement('button');b.type='button';b.textContent=decision==='approve'?'Request Approval':decision==='decline'?'Decline':'Ask a Question';b.style.marginRight='8px';b.onclick=async()=>{b.disabled=true;try{const res=await fetch('/doorks-portals/customer/document-response',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,document_id:doc.id,decision,note:note.value})});const out=await res.json();if(!res.ok)throw Error(out.detail||'Request failed');b.parentElement.querySelector('p').textContent='Response received for office review. No document status changed automatically.';}catch(e){alert(e.message)}finally{b.disabled=false}};box.append(b)}}list.append(box)}
- }catch(err){hint.textContent=err.message}
- }else if(d.kind==='vendor'){
- const section=document.createElement('section');const heading=document.createElement('h2');heading.textContent='My assignments & purchase orders';section.append(heading);form.before(section);
- try{const rr=await fetch('/doorks-portals/vendor/records',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token}),cache:'no-store'});const data=await rr.json();if(!rr.ok)throw Error(data.detail||'Unable to load vendor records');
- if(!data.linked){const p=document.createElement('p');p.textContent='This invitation is not linked to a saved vendor record. Contact the office.';section.append(p)}
- for(const [type,records] of [['assignment',data.assignments],['purchase_order',data.purchase_orders]]){
- const h=document.createElement('h3');h.textContent=type==='assignment'?'Assignments':'Purchase orders';section.append(h);
- if(!records.length){const p=document.createElement('p');p.textContent='No available records.';section.append(p)}
- for(const record of records){const box=document.createElement('div');box.style.cssText='border:1px solid #d4dce5;border-radius:9px;padding:14px;margin:12px 0';
- const title=document.createElement('strong');title.textContent=(record.po_number||record.work_order_number||'Record')+' — '+record.status;box.append(title);
- const detail=document.createElement('p');detail.textContent=type==='assignment'?[record.scope,record.scheduled_date,record.scheduled_time,record.address].filter(Boolean).join(' | '):[record.description,record.quantity?'Qty: '+record.quantity:'',record.received_quantity?'Received: '+record.received_quantity:''].filter(Boolean).join(' | ');box.append(detail);
- const sel=document.createElement('select');for(const value of (type==='assignment'?['accepted','declined','in_progress','completed','delayed','question']:['shipped','received','delayed','question'])){const o=document.createElement('option');o.value=value;o.textContent=value.replaceAll('_',' ');sel.append(o)}box.append(sel);
- const note=document.createElement('textarea');note.placeholder='Optional update details';note.maxLength=2000;note.style.minHeight='70px';box.append(note);
- const send=document.createElement('button');send.type='button';send.textContent='Submit update for office review';send.onclick=async()=>{send.disabled=true;try{const id=crypto.randomUUID();const res=await fetch('/doorks-portals/vendor/update',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,record_type:type,record_id:record.id,update_status:sel.value,note:note.value,request_id:id})});const out=await res.json();if(!res.ok)throw Error(out.detail||'Update failed');alert('Update submitted for office review.');note.value=''}catch(e){alert(e.message)}finally{send.disabled=false}};box.append(send);
- const upload=document.createElement('input');upload.type='file';upload.accept='.pdf,.png,.jpg,.jpeg,.webp';upload.style.marginTop='12px';box.append(upload);
- const up=document.createElement('button');up.type='button';up.textContent='Upload supporting document';up.onclick=async()=>{if(!upload.files.length){alert('Choose a file first');return}up.disabled=true;try{const fd=new FormData();fd.append('token',token);fd.append('record_type',type);fd.append('record_id',record.id);fd.append('note',note.value);fd.append('file',upload.files[0]);const res=await fetch('/doorks-portals/vendor/upload',{method:'POST',body:fd});const out=await res.json();if(!res.ok)throw Error(out.detail||'Upload failed');alert('Document submitted for office review.');upload.value=''}catch(e){alert(e.message)}finally{up.disabled=false}};box.append(up);section.append(box)}
- }
- }catch(err){const p=document.createElement('p');p.textContent=err.message;section.append(p)}
- }form.onsubmit=async e=>{e.preventDefault();status.textContent='Submitting…';try{const res=await fetch('/doorks-portals/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,subject:document.getElementById('subject').value,reference:document.getElementById('reference').value,message:document.getElementById('message').value})});const out=await res.json();if(!res.ok)throw Error(out.detail||'Submission failed');status.textContent='Received for office review. Reference: '+out.submission_id;form.reset()}catch(err){status.textContent=err.message}}}catch(e){identity.textContent=e.message}}run();</script></body></html>'''
+    template = Path(__file__).resolve().parents[2] / 'static' / 'doorks_portal.html'
+    return template.read_text(encoding='utf-8')
