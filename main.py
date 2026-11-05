@@ -253,6 +253,8 @@ from app.routers.doorks_operations import router as doorks_operations_router
 app.include_router(doorks_operations_router)
 from app.routers.doorks_portals import router as doorks_portals_router
 app.include_router(doorks_portals_router)
+from app.routers.doorks_assistant import router as doorks_assistant_router
+app.include_router(doorks_assistant_router)
 from app.routers.doorks_packages import router as doorks_packages_router
 app.include_router(doorks_packages_router)
 from app.routers.ai_data_import import router as ai_data_import_router

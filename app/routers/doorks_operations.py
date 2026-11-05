@@ -391,3 +391,79 @@ def financial_register(request: Request):
                 linked_supplier_balance=round(sum(max(0,float(b['balance'])) for b in bills if b['origin']=='linked_workflow'),2),
                 manual_supplier_bill_total=round(sum(float(b.get('amount') or 0) for b in bills if b['origin']=='manual_ledger'),2),
                 note='Linked and manual bills shown separately. No automatic merging or double-counting across sources.')
+
+
+# Rev65: audit-friendly source-data exports; these are NOT tax returns or payroll filings.
+import csv, io
+from fastapi.responses import StreamingResponse
+
+def _csv_response(rows,headers,filename):
+    out=io.StringIO();writer=csv.DictWriter(out,fieldnames=headers,extrasaction='ignore');writer.writeheader()
+    for row in rows: writer.writerow({k:row.get(k,'') for k in headers})
+    return StreamingResponse(iter([out.getvalue()]),media_type='text/csv',headers={
+        'Content-Disposition':'attachment; filename="'+filename+'"',
+        'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+@router.get('/payroll/export')
+def export_payroll(start:str,end:str,request:Request):
+    report=pay_period(start,end,request)
+    if any(not e['ready_for_export'] for e in report['employees']):
+        raise HTTPException(409,'Approve all timecards and resolve PTO discrepancies before payroll export')
+    headers=['employee_id','employee','hourly_rate','regular_hours','overtime_hours','pto_hours','holiday_hours',
+             'timecards','pending_approval','estimated_gross','ready_for_export']
+    return _csv_response(report['employees'],headers,'doorks-payroll-'+start+'-'+end+'.csv')
+
+@router.get('/timecards/export')
+def export_timecards(start:str,end:str,request:Request):
+    pay_period(start,end,request) # date validation and permission check
+    headers=['id','employee_id','employee','work_date','time_in','time_out','lunch_minutes','regular_hours',
+             'overtime_hours','pto_hours','holiday_hours','supervisor_approved','notes']
+    return _csv_response([r for r in cards(request) if start<=str(r.get('work_date',''))<=end],headers,
+                         'doorks-timecards-'+start+'-'+end+'.csv')
+
+@router.get('/payroll/diagnostics')
+def payroll_diagnostics(start:str,end:str,request:Request):
+    report=pay_period(start,end,request)
+    rows=[r for r in cards(request) if start<=str(r.get('work_date',''))<=end]
+    employees=report['employees']
+    return {'period':{'start':start,'end':end},'employee_count':len(employees),
+            'timecard_count':len(rows),'pending_approval':sum(e['pending_approval'] for e in employees),
+            'regular_hours':round(sum(e['regular_hours'] for e in employees),2),
+            'overtime_hours':round(sum(e['overtime_hours'] for e in employees),2),
+            'pto_hours':round(sum(e['pto_hours'] for e in employees),2),
+            'holiday_hours':round(sum(e['holiday_hours'] for e in employees),2),
+            'estimated_gross':report['estimated_gross_total'],
+            'export_ready':all(e['ready_for_export'] for e in employees) and bool(employees),
+            'note':report['note']+' CSV exports are not W-2, 941, or other tax filings.'}
+
+@router.get('/payroll/annual-export')
+def annual_payroll_export(year:int,request:Request):
+    guard(request)
+    if year<2020 or year>2100:raise HTTPException(400,'Invalid tax year')
+    first,last=f'{year}-01-01',f'{year}-12-31'
+    employees={str(e.get('id')):e for e in staff(request)}
+    totals=defaultdict(lambda:dict(regular_hours=Decimal(0),overtime_hours=Decimal(0),
+        pto_hours=Decimal(0),holiday_hours=Decimal(0),timecards=0,unapproved=0))
+    for card in cards(request):
+        if not first<=str(card.get('work_date',''))<=last:continue
+        employee_id=str(card.get('employee_id') or '')
+        group=totals[employee_id]
+        for key in ('regular_hours','overtime_hours','pto_hours','holiday_hours'):
+            group[key]+=Decimal(str(card.get(key) or 0))
+        group['timecards']+=1
+        if card.get('supervisor_approved')!='Yes':group['unapproved']+=1
+    rows=[]
+    for eid,t in totals.items():
+        emp=employees.get(eid,{})
+        rate=money(emp.get('hourly_rate',0))
+        gross=(t['regular_hours']+t['pto_hours']+t['holiday_hours'])*rate+t['overtime_hours']*rate*Decimal('1.5')
+        rows.append({'tax_year':year,'employee_id':eid,'employee':emp.get('name',''),
+            'regular_hours':float(t['regular_hours']),'overtime_hours':float(t['overtime_hours']),
+            'pto_hours':float(t['pto_hours']),'holiday_hours':float(t['holiday_hours']),
+            'timecards':t['timecards'],'unapproved':t['unapproved'],
+            'estimated_gross':float(gross.quantize(Decimal('0.01'))),
+            'report_type':'ESTIMATED SOURCE HOURS - NOT A TAX RETURN',
+            'limitations':'Current hourly rate used; historical rates, withholding, deductions and taxes not verified'})
+    headers=['tax_year','employee_id','employee','regular_hours','overtime_hours','pto_hours','holiday_hours',
+             'timecards','unapproved','estimated_gross','report_type','limitations']
+    return _csv_response(rows,headers,f'doorks-annual-earnings-source-{year}.csv')

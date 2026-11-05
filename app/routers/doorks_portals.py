@@ -26,6 +26,9 @@ def read(p):
         raise HTTPException(500, 'Portal storage invalid')
     obj.setdefault('payment_links', [])
     obj.setdefault('notifications', [])
+    obj.setdefault('accounts', [])
+    obj.setdefault('checkout_sessions', [])
+    obj.setdefault('stripe_events', [])
     return obj
 
 def write(p, obj):
@@ -770,3 +773,304 @@ def public_service_download(submission_id:str,upload_id:str,request:Request):
     target=store(request).parent/'portal_private_uploads'/(attachment['id']+attachment['extension'])
     if not target.is_file(): raise HTTPException(404, 'Attachment unavailable')
     return FileResponse(target,filename=attachment['filename'],headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+
+# Rev 65: customer identity is bound to a verified Doorks customer record ID.
+# Public registration never grants invoice access until an office admin approves it.
+from fastapi.responses import RedirectResponse
+import base64
+from urllib.parse import urlencode
+from urllib.request import Request as UrlRequest, urlopen
+from urllib.error import HTTPError
+
+class PortalRegistration(BaseModel):
+    email: str=Field(min_length=5,max_length=250)
+    contact_name: str=Field(min_length=2,max_length=120)
+    company: str=Field(min_length=1,max_length=160)
+    password: str=Field(min_length=12,max_length=128)
+
+class PortalLogin(BaseModel):
+    email: str
+    password: str
+
+class PortalApproval(BaseModel):
+    customer_id: str=Field(min_length=1,max_length=100)
+
+def _password_hash(password, salt=None):
+    salt=salt or secrets.token_hex(16)
+    derived=hashlib.pbkdf2_hmac('sha256',password.encode(),bytes.fromhex(salt),310000)
+    return salt+'$'+derived.hex()
+
+def _password_valid(password, stored):
+    try:
+        salt,expected=stored.split('$',1)
+        return hmac.compare_digest(_password_hash(password,salt),stored)
+    except (ValueError,TypeError): return False
+
+def _portal_origin(request):
+    origin=request.headers.get('origin')
+    if origin and origin.rstrip('/')!=str(request.base_url).rstrip('/'):
+        raise HTTPException(403,'Invalid request origin')
+
+def _portal_user(request):
+    aid=str(request.session.get('doorks_portal_account') or '')
+    if not aid: raise HTTPException(401,'Customer login required')
+    with _lock:
+        obj=read(store(request))
+        account=next((x for x in obj['accounts'] if x['id']==aid and x.get('status')=='active'),None)
+    if not account: raise HTTPException(401,'Customer account inactive')
+    cid=str(account.get('customer_id') or '')
+    if not cid or not any(str(c.get('id'))==cid for c in workspace_items(request,'customers')):
+        raise HTTPException(403,'Customer record not available')
+    return account
+
+@router.post('/accounts/register')
+def portal_register(payload:PortalRegistration,request:Request):
+    _portal_origin(request)
+    email=payload.email.strip().lower()
+    if '@' not in email or len(email.split('@')[-1])<3: raise HTTPException(422,'Valid email required')
+    with _lock:
+        p=store(request);obj=read(p)
+        if any(a['email']==email for a in obj['accounts']): raise HTTPException(409,'Account already registered; contact the office')
+        account={'id':uuid.uuid4().hex,'email':email,'contact_name':payload.contact_name.strip(),
+                 'company':payload.company.strip(),'password_hash':_password_hash(payload.password),
+                 'customer_id':'','status':'pending','created_at':iso(now())}
+        obj['accounts'].append(account)
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'account_registration','created_at':iso(now()),
+                                     'delivery':'office_only','message':'Customer account awaiting verification: '+email})
+        write(p,obj)
+    return {'ok':True,'message':'Registration received. Office verification is required before login.'}
+
+@router.get('/admin/accounts')
+def list_portal_accounts(request:Request):
+    admin(request)
+    with _lock: obj=read(store(request))
+    return {'accounts':[{k:v for k,v in a.items() if k!='password_hash'} for a in obj['accounts']]}
+
+@router.post('/admin/accounts/{account_id}/approve')
+def approve_portal_account(account_id:str,payload:PortalApproval,request:Request):
+    admin(request)
+    verify_invitation_link(request,'customer',payload.customer_id)
+    with _lock:
+        p=store(request);obj=read(p)
+        a=next((x for x in obj['accounts'] if x['id']==account_id),None)
+        if not a: raise HTTPException(404,'Account not found')
+        if a['status']!='pending': raise HTTPException(409,'Account already processed')
+        a['customer_id']=payload.customer_id;a['status']='active';a['verified_at']=iso(now())
+        write(p,obj)
+    return {'ok':True,'message':'Customer account approved. Notify customer through your verified contact channel.'}
+
+@router.post('/accounts/login')
+def portal_login(payload:PortalLogin,request:Request):
+    _portal_origin(request)
+    with _lock:
+        obj=read(store(request))
+        a=next((x for x in obj['accounts'] if x['email']==payload.email.strip().lower()),None)
+    # Avoid leaking whether an email exists; constant-work check for nonexistent accounts.
+    if not a:
+        _password_valid(payload.password,_password_hash('dummy-password-for-timing'))
+        raise HTTPException(401,'Invalid credentials or account awaiting approval')
+    if not _password_valid(payload.password,a.get('password_hash','')) or a['status']!='active':
+        raise HTTPException(401,'Invalid credentials or account awaiting approval')
+    request.session['doorks_portal_account']=a['id']
+    return {'ok':True,'name':a['contact_name']}
+
+@router.post('/accounts/logout')
+def portal_logout(request:Request):
+    _portal_origin(request)
+    request.session.pop('doorks_portal_account',None)
+    return {'ok':True}
+
+@router.get('/accounts/me')
+def portal_me(request:Request):
+    a=_portal_user(request)
+    return {'name':a['contact_name'],'email':a['email'],'company':a['company']}
+
+@router.get('/accounts/documents')
+def portal_account_documents(request:Request):
+    a=_portal_user(request)
+    return {'documents':customer_documents(request,{'kind':'customer','record_id':a['customer_id']})}
+
+@router.get('/accounts/payments')
+def portal_account_payments(request:Request):
+    a=_portal_user(request)
+    with _lock: obj=read(store(request))
+    return {'payments':[{'invoice_id':x['invoice_id'],'amount':round(x['amount_cents']/100,2),
+            'status':x['status'],'paid_at':x.get('paid_at','')} for x in obj['checkout_sessions']
+            if x['customer_id']==a['customer_id'] and x['status']=='paid']}
+
+@router.get('/accounts/work-orders')
+def portal_account_work_orders(request:Request):
+    a=_portal_user(request)
+    allowed=('id','job_number','work_order_number','status','customer','address','service_type','scheduled_date','scheduled_time','description')
+    return {'work_orders':[{k:r.get(k) for k in allowed} for r in workspace_items(request,'work_orders')
+            if str(r.get('customer_id') or '')==a['customer_id'] and not r.get('deactivated_at')][:500]}
+
+# Stripe Checkout uses the server-side invoice amount. Never accept an amount or
+# customer ID from the browser. Checkout session IDs are stored for reconciliation.
+class CheckoutRequest(BaseModel):
+    document_id: str=Field(min_length=1,max_length=100)
+
+def _stripe_api(endpoint,fields):
+    key=os.environ.get('STRIPE_SECRET_KEY','')
+    if not key.startswith('sk_test_') and not key.startswith('sk_live_'):
+        raise HTTPException(503,'Stripe is not configured')
+    req=UrlRequest('https://api.stripe.com/v1/'+endpoint,
+        data=urlencode(fields).encode(),headers={'Authorization':'Bearer '+key,
+        'Content-Type':'application/x-www-form-urlencoded'},method='POST')
+    try:
+        with urlopen(req,timeout=15) as response: return json.loads(response.read())
+    except HTTPError as exc:
+        raise HTTPException(502,'Stripe Checkout request failed') from exc
+    except Exception as exc:
+        raise HTTPException(502,'Stripe Checkout unavailable') from exc
+
+@router.post('/accounts/checkout')
+def portal_checkout(payload:CheckoutRequest,request:Request):
+    _portal_origin(request)
+    a=_portal_user(request)
+    doc=invoice_record(request,payload.document_id)
+    if str(doc.get('customer_id'))!=a['customer_id']: raise HTTPException(404,'Invoice not found')
+    if str(doc.get('status','')).lower() in ('draft','voided','cancelled'):
+        raise HTTPException(409,'Invoice is not payable')
+    amount=round((float(doc.get('amount') or 0)-float(doc.get('paid') or 0))*100)
+    if amount<50 or amount>99999999: raise HTTPException(409,'Invoice has no payable balance or exceeds limit')
+    base=str(request.base_url).rstrip('/')
+    session=_stripe_api('checkout/sessions',{
+        'mode':'payment','success_url':base+'/doorks-portals/home?payment=return',
+        'cancel_url':base+'/doorks-portals/home?payment=cancel',
+        'line_items[0][price_data][currency]':'usd',
+        'line_items[0][price_data][unit_amount]':str(amount),
+        'line_items[0][price_data][product_data][name]':'Invoice '+str(doc.get('document_number') or doc['id'])[:80],
+        'line_items[0][quantity]':'1',
+        'client_reference_id':doc['id'],
+        'metadata[doorks_invoice_id]':doc['id'],
+        'metadata[doorks_customer_id]':a['customer_id'],
+        'customer_email':a['email'],
+    })
+    if not str(session.get('id','')).startswith('cs_') or not str(session.get('url','')).startswith('https://checkout.stripe.com/'):
+        raise HTTPException(502,'Stripe did not return a valid Checkout session')
+    with _lock:
+        p=store(request);obj=read(p)
+        obj['checkout_sessions'].append({'id':session['id'],'invoice_id':doc['id'],'customer_id':a['customer_id'],
+            'amount_cents':amount,'status':'created','created_at':iso(now())})
+        write(p,obj)
+    return {'url':session['url']}
+
+@router.post('/stripe/webhook')
+async def stripe_webhook(request:Request):
+    secret=os.environ.get('STRIPE_WEBHOOK_SECRET','')
+    if not secret.startswith('whsec_'): raise HTTPException(503,'Stripe webhook not configured')
+    raw=await request.body()
+    if len(raw)>1024*1024: raise HTTPException(413,'Event too large')
+    header=request.headers.get('stripe-signature','')
+    parts=dict(x.split('=',1) for x in header.split(',') if '=' in x)
+    try: timestamp=int(parts.get('t','0'))
+    except ValueError: raise HTTPException(400,'Invalid signature timestamp')
+    if abs(now().timestamp()-timestamp)>300: raise HTTPException(400,'Expired signature')
+    expected=hmac.new(secret.encode(),str(timestamp).encode()+b'.'+raw,hashlib.sha256).hexdigest()
+    signatures=[x[3:] for x in header.split(',') if x.startswith('v1=')]
+    if not any(hmac.compare_digest(expected,sig) for sig in signatures): raise HTTPException(400,'Invalid Stripe signature')
+    event=json.loads(raw)
+    eid=str(event.get('id') or '')
+    if not eid.startswith('evt_'): raise HTTPException(400,'Invalid event')
+    typ=event.get('type')
+    objdata=event.get('data',{}).get('object',{})
+    with _lock:
+        p=store(request);obj=read(p)
+        if eid in obj['stripe_events']: return {'received':True,'duplicate':True}
+        # Never credit an invoice until Stripe reports a paid session.
+        if typ in ('checkout.session.completed','checkout.session.async_payment_succeeded'):
+            sid=str(objdata.get('id') or '')
+            entry=next((x for x in obj['checkout_sessions'] if x['id']==sid),None)
+            if entry and objdata.get('payment_status')=='paid' and entry['status']!='paid':
+                if str(objdata.get('currency','')).lower()!='usd' or int(objdata.get('amount_total') or 0)!=entry['amount_cents']:
+                    raise HTTPException(409,'Checkout amount mismatch')
+                path=p.parent/'estimates_invoices.json'
+                original=json.loads(path.read_text())
+                rows=original if isinstance(original,list) else original.get('items',[])
+                invoice=next((x for x in rows if str(x.get('id'))==entry['invoice_id'] and
+                    str(x.get('customer_id'))==entry['customer_id'] and x.get('document_type')=='Invoice'),None)
+                if not invoice: raise HTTPException(409,'Linked invoice missing')
+                applied=invoice.setdefault('stripe_checkout_session_ids',[])
+                if sid not in applied:
+                    old_paid=round(float(invoice.get('paid') or 0)*100)
+                    total=round(float(invoice.get('amount') or 0)*100)
+                    if old_paid+entry['amount_cents']>total: raise HTTPException(409,'Invoice balance changed; manual reconciliation required')
+                    invoice['paid']=round((old_paid+entry['amount_cents'])/100,2)
+                    applied.append(sid)
+                entry['status']='paid';entry['paid_at']=iso(now());entry['payment_intent']=objdata.get('payment_intent')
+                # Persist invoice before acknowledging the webhook. Repeated delivery
+                # uses the session status to avoid crediting it twice.
+                write(path,original)
+        elif typ=='checkout.session.async_payment_failed':
+            entry=next((x for x in obj['checkout_sessions'] if x['id']==objdata.get('id')),None)
+            if entry and entry['status']!='paid':entry['status']='failed'
+        elif typ=='charge.refunded':
+            # Refunds require review; never silently adjust books without a
+            # verified charge-to-invoice reconciliation.
+            obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'stripe_refund_review',
+                'created_at':iso(now()),'delivery':'office_only','message':'Stripe refund requires accounting reconciliation: '+str(objdata.get('id',''))})
+        obj['stripe_events'].append(eid)
+        write(p,obj)
+    return {'received':True}
+
+@router.get('/home',response_class=HTMLResponse)
+def public_home(request:Request):
+    return (Path(__file__).resolve().parents[2]/'static'/'doorks_home.html').read_text(encoding='utf-8')
+
+
+class VendorInquiryLink(BaseModel):
+    submission_id: str=Field(min_length=1,max_length=100)
+    work_order_id: str=Field(min_length=1,max_length=100)
+    vendor_id: str=Field(min_length=1,max_length=100)
+
+@router.post('/admin/inquiry-vendor-link')
+def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
+    admin(request)
+    jobs=workspace_items(request,'work_orders')
+    job=next((j for j in jobs if str(j.get('id'))==payload.work_order_id),None)
+    if not job: raise HTTPException(404,'Work order not found')
+    vendor=next((v for v in workspace_items(request,'vendors') if str(v.get('id'))==payload.vendor_id),None)
+    if not vendor or vendor_is_suspended(request,payload.vendor_id):raise HTTPException(404,'Active vendor not found')
+    with _lock:
+        p=store(request);obj=read(p)
+        sub=next((x for x in obj['submissions'] if x['id']==payload.submission_id),None)
+        if not sub or sub.get('kind') not in ('customer','public_service_request'):
+            raise HTTPException(404,'Customer inquiry not found')
+        if sub.get('record_id') and str(job.get('customer_id') or '')!=str(sub['record_id']):
+            raise HTTPException(409,'Inquiry customer does not match work order customer')
+        # Create a DRAFT assignment in the actual Doorks workspace collection.
+        # The vendor portal excludes Draft until an office user reviews/activates it.
+        from app.routers import workspaces as ws
+        assignment_path=ws.location(request,'doorks','vendor_assignments')
+        with ws._lock:
+            assignments=ws.load(assignment_path)
+            assignment=next((a for a in assignments if a.get('source_submission_id')==sub['id']),None)
+            if assignment and (str(assignment.get('work_order_id'))!=payload.work_order_id or str(assignment.get('vendor_id'))!=payload.vendor_id):
+                raise HTTPException(409,'Inquiry already linked to another assignment')
+            if not assignment:
+                assignment={'id':uuid.uuid4().hex,'source_submission_id':sub['id'],
+                    'work_order_id':payload.work_order_id,'work_order_number':str(job.get('job_number') or job.get('work_order_number') or ''),
+                    'vendor_id':payload.vendor_id,'vendor':str(vendor.get('name') or ''),
+                    'customer':str(job.get('customer') or ''),'customer_id':str(job.get('customer_id') or ''),
+                    'address':str(job.get('address') or ''),'scheduled_date':str(job.get('scheduled_date') or ''),
+                    'scheduled_time':str(job.get('scheduled_time') or ''),'scope':str(job.get('description') or '')[:2000],
+                    'status':'Draft','created_at':iso(now())}
+                assignments.append(assignment)
+                ws.save(assignment_path,assignments)
+        sub['work_order_id']=payload.work_order_id
+        sub['vendor_id']=payload.vendor_id
+        sub['vendor_assignment_id']=assignment['id']
+        sub['linked_at']=iso(now())
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'vendor_assignment_link',
+            'delivery':'office_only','created_at':iso(now()),
+            'message':'Inquiry linked to work order and vendor; create/approve assignment before sharing'})
+        write(p,obj)
+    return {'ok':True,'work_order_id':payload.work_order_id,'vendor_id':payload.vendor_id,
+            'message':'Draft vendor assignment created and linked to inquiry and work order. Approve its status in Vendor Assignments to make it visible to the vendor.'}
+
+
+@router.get('/',include_in_schema=False)
+def portal_marketing_redirect():
+    return RedirectResponse('/doorks-portals/home',status_code=302)
