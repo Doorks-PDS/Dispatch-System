@@ -524,3 +524,168 @@ def record_verified_wage(employee_id:str, payload:VerifiedWage, request:Request)
         emp['wage_history']=sorted(history,key=lambda x:x['effective_date'])
         ws.save(ws.location(request,'doorks','employees'),employees)
     return {'ok':True,'effective_date':payload.effective_date,'hourly_rate':float(rate)}
+
+
+# Revision 69: append-only, effective-dated PTO transactions and manual-payment allocation.
+# Historical approvals and posted payment allocations are never silently recalculated.
+class PTOEntry(BaseModel):
+    employee_id: str
+    effective_date: str
+    entry_type: str  # opening, accrual_rate, adjustment
+    hours: float
+    note: str = ''
+
+class PaymentAllocation(BaseModel):
+    payment_id: str
+    receivable_id: str
+
+
+def _pto_path(request):
+    return ws.location(request, 'doorks', 'pto_ledger')
+
+
+def _pto_entries(request):
+    return ws.load(_pto_path(request))
+
+
+def _pto_decimal(value):
+    try:
+        result=Decimal(str(value))
+        if not result.is_finite() or abs(result)>Decimal('100000'):
+            raise ValueError()
+        return result.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP)
+    except (ValueError,InvalidOperation,TypeError):
+        raise HTTPException(400,'Invalid PTO hours')
+
+
+def _pto_snapshot(entries, employee_id, through):
+    relevant=sorted((x for x in entries if x.get('employee_id')==employee_id and x.get('effective_date','')<=through),key=lambda x:(x['effective_date'],x.get('created_at','')))
+    balance=Decimal('0');rate=Decimal('0');last=None
+    for row in relevant:
+        kind=row['entry_type'];h=_pto_decimal(row['hours'])
+        if kind=='opening': balance+=h
+        elif kind=='adjustment': balance+=h
+        elif kind=='accrual_rate': rate=h
+        elif kind=='accrual': balance+=h
+        elif kind=='usage': balance-=h
+        last=row['effective_date']
+    return {'employee_id':employee_id,'through':through,'balance_hours':float(balance),'accrual_hours_per_period':float(rate),'last_event_date':last}
+
+@router.get('/pto-ledger')
+def pto_ledger(request:Request, employee_id:str='', through:str=''):
+    guard(request)
+    end=through or date.today().isoformat()
+    try:date.fromisoformat(end)
+    except ValueError:raise HTTPException(400,'Invalid as-of date')
+    employees=staff(request)
+    entries=_pto_entries(request)
+    if employee_id and not any(e.get('id')==employee_id for e in employees):raise HTTPException(404,'Employee not found')
+    selected=[e for e in employees if not employee_id or e.get('id')==employee_id]
+    return {'entries':[x for x in entries if not employee_id or x.get('employee_id')==employee_id], 'balances':[_pto_snapshot(entries,e.get('id'),end) for e in selected], 'note':'Accrual entries are explicitly posted for each pay period; changing an accrual rate does not rewrite prior entries.'}
+
+@router.post('/pto-ledger')
+def add_pto_entry(data:PTOEntry,request:Request):
+    guard(request)
+    if getattr(request.state,'auth_role',None)!='office_admin':raise HTTPException(403,'Office Admin required')
+    if data.entry_type not in ('opening','accrual_rate','adjustment'):raise HTTPException(400,'Invalid PTO entry type')
+    try:date.fromisoformat(data.effective_date)
+    except ValueError:raise HTTPException(400,'Invalid effective date')
+    h=_pto_decimal(data.hours)
+    if data.entry_type=='accrual_rate' and h<0:raise HTTPException(400,'Accrual rate must be nonnegative')
+    if not any(e.get('id')==data.employee_id for e in staff(request)):raise HTTPException(404,'Employee not found')
+    import uuid
+    with _lock:
+        entries=_pto_entries(request)
+        if data.entry_type=='opening' and any(e.get('employee_id')==data.employee_id and e.get('entry_type')=='opening' for e in entries):
+            raise HTTPException(409,'Opening balance already exists; use an adjustment')
+        entry={'id':uuid.uuid4().hex,'employee_id':data.employee_id,'effective_date':data.effective_date,'entry_type':data.entry_type,'hours':float(h),'note':data.note[:1000], 'created_at':datetime.now(timezone.utc).isoformat(),'created_by':str(request.state.auth_user.get('id',''))}
+        entries.append(entry);ws.save(_pto_path(request),entries)
+        return {'item':entry,'balance':_pto_snapshot(entries,data.employee_id,date.today().isoformat())}
+
+class PTOAccrual(BaseModel):
+    employee_id:str
+    period_start:str
+    period_end:str
+
+@router.post('/pto-ledger/post-accrual')
+def post_pto_accrual(data:PTOAccrual,request:Request):
+    guard(request)
+    if getattr(request.state,'auth_role',None)!='office_admin':raise HTTPException(403,'Office Admin required')
+    try:first=date.fromisoformat(data.period_start);last=date.fromisoformat(data.period_end)
+    except ValueError:raise HTTPException(400,'Invalid period dates')
+    if first>last or (last-first).days>45:raise HTTPException(400,'Invalid pay period')
+    if not any(e.get('id')==data.employee_id for e in staff(request)):raise HTTPException(404,'Employee not found')
+    with _lock:
+        entries=_pto_entries(request)
+        if any(e.get('entry_type')=='accrual' and e.get('employee_id')==data.employee_id and e.get('period_start')==data.period_start and e.get('period_end')==data.period_end for e in entries):raise HTTPException(409,'Accrual already posted for this period')
+        rate=_pto_decimal(_pto_snapshot(entries,data.employee_id,data.period_end)['accrual_hours_per_period'])
+        import uuid
+        item={'id':uuid.uuid4().hex,'employee_id':data.employee_id,'effective_date':data.period_end,'entry_type':'accrual','hours':float(rate),'period_start':data.period_start,'period_end':data.period_end,'created_at':datetime.now(timezone.utc).isoformat(),'created_by':str(request.state.auth_user.get('id',''))}
+        entries.append(item);ws.save(_pto_path(request),entries)
+        return {'item':item,'balance':_pto_snapshot(entries,data.employee_id,data.period_end)}
+
+@router.get('/payment-reconciliation')
+def payment_reconciliation(request:Request):
+    guard(request)
+    from app.routers import accounting_ledger as al
+    from app.routers import doorks_accounting as accounting
+    payments=[p for p in al.load(al.path(request,'doorks','payments')) if p.get('direction')=='received']
+    receivables=accounting.read(accounting.base(request)/'receivables.json')
+    allocations=ws.load(ws.location(request,'doorks','payment_allocations'))
+    return {'payments':[dict(p,allocated=any(a.get('payment_id')==p.get('id') for a in allocations)) for p in payments], 'receivables':receivables,'allocations':allocations}
+
+@router.post('/payment-reconciliation/allocate')
+def allocate_payment(data:PaymentAllocation,request:Request):
+    guard(request)
+    from app.routers import accounting_ledger as al
+    from app.routers import doorks_accounting as accounting
+    from app.routers import doorks_workflow as workflow
+    with _lock:
+        payments=al.load(al.path(request,'doorks','payments'))
+        payment=next((p for p in payments if p.get('id')==data.payment_id and p.get('direction')=='received'),None)
+        if payment is None:raise HTTPException(404,'Received payment not found')
+        allocation_path=ws.location(request,'doorks','payment_allocations')
+        allocations=ws.load(allocation_path)
+        if any(a.get('payment_id')==data.payment_id for a in allocations):raise HTTPException(409,'Payment already allocated; duplicate prevented')
+        receivable_path=accounting.base(request)/'receivables.json'
+        rows=accounting.read(receivable_path)
+        invoice=next((r for r in rows if r.get('id')==data.receivable_id),None)
+        if invoice is None:raise HTTPException(404,'Invoice receivable not found')
+        amount=money(payment.get('amount'))
+        remaining=money(invoice.get('amount'))-money(invoice.get('paid'))
+        if amount<=0 or amount>remaining:raise HTTPException(409,'Payment exceeds invoice outstanding balance')
+        ref=str(payment.get('reference_id','')).strip().casefold()
+        invoice_ref=str(invoice.get('invoice_number','')).strip().casefold()
+        if ref and invoice_ref and ref!=invoice_ref:
+            raise HTTPException(409,'Payment reference does not match invoice number; correct the reference before allocation')
+        import uuid
+        allocation={'id':uuid.uuid4().hex,'payment_id':data.payment_id,'receivable_id':data.receivable_id,'invoice_number':invoice.get('invoice_number',''),'amount':float(amount),'allocated_at':datetime.now(timezone.utc).isoformat(),'allocated_by':str(request.state.auth_user.get('id',''))}
+        # Persist allocation marker first to prevent replay after a retry; recovery must review
+        # incomplete allocations rather than automatically duplicating a financial posting.
+        allocation['status']='pending_post'
+        allocations.append(allocation);ws.save(allocation_path,allocations)
+        try:
+            invoice['paid']=float((money(invoice.get('paid'))+amount).quantize(Decimal('.01')))
+            invoice['status']='Paid' if money(invoice['paid'])>=money(invoice['amount']) else 'Partially Paid'
+            invoice['updated_at']=datetime.now(timezone.utc).isoformat()
+            accounting.write(receivable_path,rows)
+        except Exception:
+            raise HTTPException(500,'Allocation pending review; do not retry until reconciled')
+        allocation['status']='posted';ws.save(allocation_path,allocations)
+        return {'item':allocation,'receivable':invoice}
+
+@router.get('/relationship-hubs')
+def relationship_hubs(request:Request):
+    guard(request)
+    customers=ws.load(ws.location(request,'doorks','customers'))
+    vendors=ws.load(ws.location(request,'doorks','vendors'))
+    jobs=ws.load(ws.location(request,'doorks','work_orders'))
+    docs=ws.load(ws.location(request,'doorks','estimates_invoices'))
+    assignments=ws.load(ws.location(request,'doorks','vendor_assignments'))
+    def match(row, entity):
+        names=[str(entity.get(k,'')).strip().casefold() for k in ('name','customer','company','vendor','supplier')]
+        names=[n for n in names if n]
+        return any(str(row.get(k,'')).strip().casefold() in names for k in ('customer','customer_name','company','vendor','supplier') if row.get(k))
+    def hub(items, vendor=False):
+        return [dict(record=x,work_orders=[j for j in jobs if match(j,x)],documents=[d for d in docs if match(d,x)],assignments=[a for a in assignments if match(a,x)] if vendor else []) for x in items]
+    return {'customers':hub(customers),'vendors':hub(vendors,True),'note':'Relationships match exact company names; review records with aliases or renamed companies.'}

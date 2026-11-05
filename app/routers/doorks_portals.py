@@ -917,6 +917,35 @@ def list_portal_accounts(request:Request):
     with _lock: obj=read(store(request))
     return {'accounts':[{k:v for k,v in a.items() if k!='password_hash'} for a in obj['accounts']]}
 
+class PortalAccountEdit(BaseModel):
+    contact_name: str=Field(min_length=1,max_length=150)
+    company: str=Field(min_length=1,max_length=180)
+
+@router.patch('/admin/accounts/{account_id}')
+def edit_portal_account(account_id:str,payload:PortalAccountEdit,request:Request):
+    admin(request)
+    with _lock:
+        path=store(request);obj=read(path)
+        account=next((a for a in obj['accounts'] if a['id']==account_id),None)
+        if not account: raise HTTPException(404,'Account not found')
+        account['contact_name']=payload.contact_name.strip()
+        account['company']=payload.company.strip()
+        account['updated_at']=iso(now())
+        write(path,obj)
+    return {'ok':True}
+
+@router.delete('/admin/accounts/{account_id}')
+def deactivate_portal_account(account_id:str,request:Request):
+    admin(request)
+    with _lock:
+        path=store(request);obj=read(path)
+        account=next((a for a in obj['accounts'] if a['id']==account_id),None)
+        if not account: raise HTTPException(404,'Account not found')
+        account['status']='deactivated'
+        account['deactivated_at']=iso(now())
+        write(path,obj)
+    return {'ok':True,'message':'Portal access deactivated; history preserved'}
+
 @router.post('/admin/accounts/{account_id}/approve')
 def approve_portal_account(account_id:str,payload:PortalApproval,request:Request):
     admin(request)
