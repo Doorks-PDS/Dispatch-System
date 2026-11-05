@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Literal
 from threading import RLock
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix='/doorks-portals', tags=['doorks-portals'])
@@ -675,3 +675,98 @@ def download_vendor_profile_file(vendor_id:str,file_id:str,request:Request):
     path=store(request).parent/'portal_private_uploads'/(record['id']+'.'+record['extension'])
     if not path.is_file():raise HTTPException(404,'File missing')
     return FileResponse(path,filename=record['filename'],headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+
+# Rev 63: Public, unauthenticated lead intake. Leads are review-only, never auto-dispatched.
+class PublicServiceRequest(BaseModel):
+    company: str = Field(default='', max_length=160)
+    contact_name: str = Field(min_length=2, max_length=120)
+    contact_email: str = Field(min_length=5, max_length=250)
+    contact_phone: str = Field(min_length=7, max_length=50)
+    address: str = Field(default='', max_length=300)
+    service_type: str = Field(default='', max_length=100)
+    urgency: str = Field(default='Normal', max_length=40)
+    preferred_date: str = Field(default='', max_length=40)
+    preferred_time: str = Field(default='', max_length=80)
+    nte: str = Field(default='', max_length=40)
+    description: str = Field(min_length=5, max_length=5000)
+    website: str = Field(default='', max_length=300)  # honeypot
+
+_public_hits = {}
+
+@router.get('/request-service', response_class=HTMLResponse)
+def public_service_page():
+    return HTMLResponse((Path(__file__).resolve().parents[2] / 'static' / 'doorks_request_service.html').read_text(encoding='utf-8'), headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+
+@router.post('/public/service-request')
+def public_service_request(payload: PublicServiceRequest, request: Request):
+    if payload.website.strip():
+        return {'received':True}
+    if '@' not in payload.contact_email or '.' not in payload.contact_email.split('@')[-1]:
+        raise HTTPException(422, 'Valid email required')
+    if not payload.description.strip():
+        raise HTTPException(422, 'Describe the requested service')
+    # Bounded in-process rate limit. For multi-instance production, add shared Redis/WAF throttling.
+    ip = request.client.host if request.client else 'unknown'
+    slot = int(now().timestamp() // 3600)
+    with _lock:
+        for k in list(_public_hits):
+            if k[1] < slot - 1: _public_hits.pop(k, None)
+        key = (ip, slot)
+        if _public_hits.get(key, 0) >= 8:
+            raise HTTPException(429, 'Too many requests. Please try again later.')
+        _public_hits[key] = _public_hits.get(key, 0) + 1
+        path = store(request)
+        data = read(path)
+        entry = {'id':str(uuid.uuid4()), 'kind':'public_service_request', 'status':'pending_review',
+                 'company':payload.company.strip() or payload.contact_name.strip(),
+                 'contact_name':payload.contact_name.strip(), 'contact_email':payload.contact_email.strip(),
+                 'contact_phone':payload.contact_phone.strip(), 'address':payload.address.strip(),
+                 'service_type':payload.service_type.strip(), 'urgency':payload.urgency.strip(),
+                 'preferred_date':payload.preferred_date.strip(), 'preferred_time':payload.preferred_time.strip(),
+                 'nte':payload.nte.strip(), 'subject':payload.service_type.strip() or 'New service inquiry',
+                 'message':payload.description.strip(), 'reference':'', 'created_at':iso(now()),
+                 'source':'public_marketing_form', 'upload_ids':[]}
+        data['submissions'].append(entry)
+        write(path, data)
+    return {'received':True,'reference':entry['id'][:8].upper(),'id':entry['id']}
+
+@router.post('/public/service-request/{submission_id}/attachment')
+async def public_service_attachment(submission_id: str, request: Request, file: UploadFile = File(...), reference: str = Form(...)):
+    # A short-lived upload reference is intentionally required; uploads must be linked to a fresh public lead.
+    if submission_id[:8].upper() != reference.strip().upper():
+        raise HTTPException(403, 'Invalid upload reference')
+    extension = Path(file.filename or '').suffix.lower()
+    if extension not in ('.png','.jpg','.jpeg','.webp','.pdf'):
+        raise HTTPException(400, 'Supported files: JPG, PNG, WEBP, PDF')
+    contents = await file.read(5*1024*1024+1)
+    if len(contents)>5*1024*1024 or not contents:
+        raise HTTPException(413, 'File must be 1 byte to 5 MB')
+    signatures = {'.pdf':contents.startswith(b'%PDF-'),'.png':contents.startswith(b'\x89PNG\r\n\x1a\n'),
+                  '.jpg':contents.startswith(b'\xff\xd8\xff'),'.jpeg':contents.startswith(b'\xff\xd8\xff'),
+                  '.webp':contents.startswith(b'RIFF') and contents[8:12]==b'WEBP'}
+    if not signatures[extension]: raise HTTPException(400, 'File content does not match extension')
+    with _lock:
+        path=store(request);data=read(path)
+        item=next((x for x in data['submissions'] if x.get('id')==submission_id and x.get('source')=='public_marketing_form'),None)
+        if not item or (now()-datetime.fromisoformat(item['created_at'])).total_seconds()>1800:
+            raise HTTPException(404, 'Upload window expired')
+        if len(item.get('upload_ids',[]))>=5: raise HTTPException(400, 'Maximum five attachments')
+        uid=uuid.uuid4().hex
+        folder=path.parent/'portal_private_uploads';folder.mkdir(parents=True,exist_ok=True)
+        dest=folder/(uid+extension)
+        with dest.open('xb') as handle: handle.write(contents)
+        item.setdefault('upload_ids',[]).append({'id':uid,'extension':extension,'filename':Path(file.filename or 'attachment').name[:160]})
+        write(path,data)
+    return {'uploaded':True}
+
+@router.get('/admin/public-attachment/{submission_id}/{upload_id}')
+def public_service_download(submission_id:str,upload_id:str,request:Request):
+    admin(request)
+    data=read(store(request))
+    item=next((x for x in data['submissions'] if x.get('id')==submission_id and x.get('source')=='public_marketing_form'),None)
+    attachment=next((a for a in item.get('upload_ids',[]) if a.get('id')==upload_id),None) if item else None
+    if not attachment: raise HTTPException(404, 'Attachment not found')
+    target=store(request).parent/'portal_private_uploads'/(attachment['id']+attachment['extension'])
+    if not target.is_file(): raise HTTPException(404, 'Attachment unavailable')
+    return FileResponse(target,filename=attachment['filename'],headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
