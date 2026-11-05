@@ -363,19 +363,21 @@ def customer_document_response(payload:DocumentResponse,request:Request):
 
 class Submission(BaseModel):
     token: str
-    subject: str=Field(min_length=1,max_length=160)
-    message: str=Field(min_length=1,max_length=2000)
+    subject: str=Field(default='',max_length=160)
+    message: str=Field(default='',max_length=2000)
     reference: str=Field(default='',max_length=100)
 
 @router.post('/submit')
 def submit(payload:Submission,request:Request):
+    if not (payload.subject.strip() or payload.message.strip() or payload.reference.strip()):
+        raise HTTPException(400,'Enter a subject, details or reference before submitting')
     with _lock:
         p=store(request);obj=read(p)
         i=access(request,payload.token)
         # Never trust user-supplied company or entity IDs; derive identity from the invitation.
         item={'id':str(uuid.uuid4()),'invite_id':i['id'],'kind':i['kind'],'company':i['company'],
               'record_id':i['record_id'],'contact_name':i['contact_name'],'contact_email':i['contact_email'],
-              'subject':payload.subject.strip(),'message':payload.message.strip(),
+              'subject':payload.subject.strip() or 'Customer inquiry / update','message':payload.message.strip(),
               'reference':payload.reference.strip(),'status':'pending_review','created_at':iso(now())}
         obj['submissions'].append(item);write(p,obj)
     return {'ok':True,'submission_id':item['id'],'status':'pending_review'}
@@ -500,6 +502,42 @@ async def vendor_upload(request:Request,token:str=Form(...),record_type:str=Form
             raise
     return {'ok':True,'submission_id':item['id'],'status':'pending_review'}
 
+@router.post('/customer/upload')
+async def customer_upload(request:Request,token:str=Form(...),subject:str=Form(''),
+                          reference:str=Form(''),note:str=Form(''),file:UploadFile=File(...)):
+    invite=access(request,token)
+    if invite['kind']!='customer': raise HTTPException(403,'Customer invitation required')
+    if len(subject)>160 or len(reference)>100 or len(note)>2000:
+        raise HTTPException(400,'Field too long')
+    content=await file.read(5*1024*1024+1)
+    if not content or len(content)>5*1024*1024: raise HTTPException(413,'File must be 1 byte to 5 MB')
+    if content.startswith(b'%PDF-'): ext='pdf'
+    elif content.startswith(b'\x89PNG\r\n\x1a\n'): ext='png'
+    elif content.startswith(b'\xff\xd8\xff'): ext='jpg'
+    elif content.startswith(b'RIFF') and content[8:12]==b'WEBP': ext='webp'
+    else: raise HTTPException(415,'Only PDF, JPG, PNG or WEBP supported')
+    with _lock:
+        invite=access(request,token)
+        if invite['kind']!='customer': raise HTTPException(403,'Customer invitation required')
+        p=store(request);obj=read(p);file_id=uuid.uuid4().hex
+        folder=p.parent/'portal_private_uploads';folder.mkdir(parents=True,exist_ok=True)
+        dest=folder/(file_id+'.'+ext)
+        with dest.open('xb') as f:
+            f.write(content);f.flush();os.fsync(f.fileno())
+        item={'id':str(uuid.uuid4()),'invite_id':invite['id'],'kind':'customer',
+              'company':invite['company'],'record_id':invite['record_id'],
+              'contact_name':invite['contact_name'],'contact_email':invite['contact_email'],
+              'subject':subject.strip() or 'Customer attachment',
+              'message':note.strip() or 'Supporting document uploaded',
+              'reference':reference.strip(),'upload_id':file_id,'upload_extension':ext,
+              'original_filename':Path(file.filename or 'upload').name[:160],
+              'file_size':len(content),'status':'pending_review','created_at':iso(now())}
+        try:
+            obj['submissions'].append(item);write(p,obj)
+        except Exception:
+            dest.unlink(missing_ok=True);raise
+    return {'ok':True,'submission_id':item['id'],'status':'pending_review'}
+
 @router.get('/admin/uploads/{submission_id}')
 def admin_vendor_upload(submission_id:str,request:Request):
     from fastapi.responses import FileResponse
@@ -513,7 +551,7 @@ def admin_vendor_upload(submission_id:str,request:Request):
         path=store(request).parent/'portal_private_uploads'/(item['upload_id']+'.'+ext)
         if not path.is_file(): raise HTTPException(404,'Upload unavailable')
         return FileResponse(path,media_type={'pdf':'application/pdf','png':'image/png','jpg':'image/jpeg','webp':'image/webp'}[ext],
-            filename='vendor-upload-'+submission_id+'.'+ext,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
+            filename='portal-upload-'+submission_id+'.'+ext,headers={'Cache-Control':'no-store','X-Content-Type-Options':'nosniff'})
 
 class CustomerDocumentLink(BaseModel):
     customer_id: str = Field(min_length=1, max_length=100)
@@ -580,3 +618,60 @@ def portal_page(response: HTMLResponse):
     response.headers['X-Content-Type-Options'] = 'nosniff'
     template = Path(__file__).resolve().parents[2] / 'static' / 'doorks_portal.html'
     return template.read_text(encoding='utf-8')
+
+
+@router.post('/customer/work-orders')
+def customer_work_orders(payload: SessionToken, request: Request):
+    invite=access(request,payload.token)
+    if invite['kind']!='customer': raise HTTPException(403,'Customer portal required')
+    customer_id=str(invite.get('record_id') or '').strip()
+    if not customer_id: return {'work_orders': []}
+    allowed=('id','job_number','work_order_number','status','customer','address','service_type','scheduled_date','scheduled_time','description')
+    rows=[{k:r.get(k) for k in allowed} for r in workspace_items(request,'work_orders')
+          if str(r.get('customer_id') or '').strip()==customer_id and not r.get('deactivated_at')]
+    return {'work_orders': rows[:500]}
+
+
+def _vendor_file_record(request, vendor_id):
+    if not any(str(v.get('id'))==vendor_id for v in workspace_items(request,'vendors')):
+        raise HTTPException(404,'Vendor not found')
+
+@router.get('/admin/vendor-files/{vendor_id}')
+def list_vendor_profile_files(vendor_id:str,request:Request):
+    admin(request);_vendor_file_record(request,vendor_id)
+    with _lock:
+        obj=read(store(request))
+        return {'files':[{'id':f['id'],'filename':f['filename'],'size':f['size'],'created_at':f['created_at']}
+                         for f in obj.get('vendor_profile_files',[]) if f.get('vendor_id')==vendor_id]}
+
+@router.post('/admin/vendor-files/{vendor_id}')
+async def upload_vendor_profile_file(vendor_id:str,request:Request,file:UploadFile=File(...)):
+    admin(request);_vendor_file_record(request,vendor_id)
+    content=await file.read(5*1024*1024+1)
+    if not content or len(content)>5*1024*1024: raise HTTPException(413,'File must be 1 byte to 5 MB')
+    if content.startswith(b'%PDF-'): ext='pdf'
+    elif content.startswith(b'\x89PNG\r\n\x1a\n'): ext='png'
+    elif content.startswith(b'\xff\xd8\xff'): ext='jpg'
+    elif content.startswith(b'RIFF') and content[8:12]==b'WEBP': ext='webp'
+    else: raise HTTPException(415,'Only PDF, JPG, PNG and WEBP supported')
+    with _lock:
+        _vendor_file_record(request,vendor_id)
+        path=store(request);obj=read(path)
+        uid=uuid.uuid4().hex;folder=path.parent/'portal_private_uploads';folder.mkdir(parents=True,exist_ok=True)
+        dest=folder/(uid+'.'+ext)
+        with dest.open('xb') as out:out.write(content);out.flush();os.fsync(out.fileno())
+        obj.setdefault('vendor_profile_files',[]).append({'id':uid,'vendor_id':vendor_id,'filename':Path(file.filename or 'upload').name[:160],'size':len(content),'extension':ext,'created_at':iso(now())})
+        try:write(path,obj)
+        except Exception:dest.unlink(missing_ok=True);raise
+    return {'ok':True,'id':uid}
+
+@router.get('/admin/vendor-files/{vendor_id}/{file_id}')
+def download_vendor_profile_file(vendor_id:str,file_id:str,request:Request):
+    from fastapi.responses import FileResponse
+    admin(request);_vendor_file_record(request,vendor_id)
+    with _lock:
+        obj=read(store(request));record=next((f for f in obj.get('vendor_profile_files',[]) if f.get('vendor_id')==vendor_id and f.get('id')==file_id),None)
+    if not record:raise HTTPException(404,'File not found')
+    path=store(request).parent/'portal_private_uploads'/(record['id']+'.'+record['extension'])
+    if not path.is_file():raise HTTPException(404,'File missing')
+    return FileResponse(path,filename=record['filename'],headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
