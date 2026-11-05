@@ -74,7 +74,7 @@ def access(request, token):
     with _lock:
         obj=read(store(request))
         invite=next((i for i in obj['invites'] if hmac.compare_digest(i['token_hash'],digest(token))),None)
-        if not invite or invite['revoked'] or datetime.fromisoformat(invite['expires_at'])<=now():
+        if not invite or invite['revoked'] or (invite.get('expires_at') and datetime.fromisoformat(invite['expires_at'])<=now()):
             raise HTTPException(401,'Portal link expired or revoked')
         # Rev 48: fail closed when a linked vendor is suspended or a linked
         # customer/vendor has been removed. Unlinked links remain message-only.
@@ -94,7 +94,7 @@ class Invite(BaseModel):
     contact_email: str=Field(min_length=3,max_length=250)
     company: str=Field(min_length=1,max_length=160)
     record_id: str=Field(default='',max_length=100)
-    days: int=Field(default=14,ge=1,le=30)
+    days: int=Field(default=14,ge=0,le=365)
 
 @router.post('/admin/invitations')
 def create_invite(payload:Invite, request:Request):
@@ -108,7 +108,7 @@ def create_invite(payload:Invite, request:Request):
         entry={'id':str(uuid.uuid4()),'kind':payload.kind,'contact_name':payload.contact_name.strip(),
                'contact_email':payload.contact_email.strip(),'company':payload.company.strip(),
                'record_id':payload.record_id.strip(),'token_hash':digest(token),
-               'created_at':iso(now()),'expires_at':iso(now()+timedelta(days=payload.days)),
+               'created_at':iso(now()),'expires_at':iso(now()+timedelta(days=payload.days)) if payload.days else None,
                'revoked':False}
         obj['invites'].append(entry);write(p,obj)
     # Fragment prevents the bearer token being sent to the server in HTTP GET or referrer.
@@ -325,7 +325,7 @@ def portal_security_check(request: Request):
         obj = read(store(request))
     issues = []
     for invite in obj['invites']:
-        if invite.get('revoked') or datetime.fromisoformat(invite['expires_at']) <= now():
+        if invite.get('revoked') or (invite.get('expires_at') and datetime.fromisoformat(invite['expires_at']) <= now()):
             continue
         rid = str(invite.get('record_id') or '').strip()
         if not rid:
@@ -336,7 +336,7 @@ def portal_security_check(request: Request):
             except HTTPException as exc:
                 issue = 'Suspended vendor with active invitation' if exc.status_code == 409 else 'Linked customer/vendor record no longer exists'
                 issues.append({'invitation_id': invite['id'], 'issue': issue})
-    return {'active_invitations': sum(not x.get('revoked') and datetime.fromisoformat(x['expires_at']) > now() for x in obj['invites']),
+    return {'active_invitations': sum(not x.get('revoked') and (not x.get('expires_at') or datetime.fromisoformat(x['expires_at']) > now()) for x in obj['invites']),
             'pending_submissions': sum(x.get('status') == 'pending_review' for x in obj['submissions']),
             'issues': issues, 'ok': not issues}
 
@@ -369,6 +369,7 @@ class Submission(BaseModel):
     subject: str=Field(default='',max_length=160)
     message: str=Field(default='',max_length=2000)
     reference: str=Field(default='',max_length=100)
+    request_id: str=Field(default='',max_length=100)
 
 @router.post('/submit')
 def submit(payload:Submission,request:Request):
@@ -377,11 +378,14 @@ def submit(payload:Submission,request:Request):
     with _lock:
         p=store(request);obj=read(p)
         i=access(request,payload.token)
+        if payload.request_id:
+            previous=next((x for x in obj['submissions'] if x.get('invite_id')==i['id'] and x.get('request_id')==payload.request_id),None)
+            if previous:return {'ok':True,'submission_id':previous['id'],'status':previous['status'],'duplicate':True}
         # Never trust user-supplied company or entity IDs; derive identity from the invitation.
         item={'id':str(uuid.uuid4()),'invite_id':i['id'],'kind':i['kind'],'company':i['company'],
               'record_id':i['record_id'],'contact_name':i['contact_name'],'contact_email':i['contact_email'],
               'subject':payload.subject.strip() or 'Customer inquiry / update','message':payload.message.strip(),
-              'reference':payload.reference.strip(),'status':'pending_review','created_at':iso(now())}
+              'reference':payload.reference.strip(),'request_id':payload.request_id,'status':'pending_review','created_at':iso(now())}
         obj['submissions'].append(item);write(p,obj)
     return {'ok':True,'submission_id':item['id'],'status':'pending_review'}
 
@@ -788,13 +792,15 @@ class PortalRegistration(BaseModel):
     contact_name: str=Field(min_length=2,max_length=120)
     company: str=Field(min_length=1,max_length=160)
     password: str=Field(min_length=12,max_length=128)
+    role: Literal['customer','vendor']='customer'
 
 class PortalLogin(BaseModel):
     email: str
     password: str
 
 class PortalApproval(BaseModel):
-    customer_id: str=Field(min_length=1,max_length=100)
+    customer_id: str=Field(default='',max_length=100)
+    vendor_id: str=Field(default='',max_length=100)
 
 def _password_hash(password, salt=None):
     salt=salt or secrets.token_hex(16)
@@ -819,10 +825,74 @@ def _portal_user(request):
         obj=read(store(request))
         account=next((x for x in obj['accounts'] if x['id']==aid and x.get('status')=='active'),None)
     if not account: raise HTTPException(401,'Customer account inactive')
+    if account.get('role','customer')!='customer': raise HTTPException(403,'Customer portal only')
     cid=str(account.get('customer_id') or '')
     if not cid or not any(str(c.get('id'))==cid for c in workspace_items(request,'customers')):
         raise HTTPException(403,'Customer record not available')
     return account
+
+def _vendor_user(request):
+    aid=str(request.session.get('doorks_portal_account') or '')
+    with _lock:
+        account=next((x for x in read(store(request))['accounts'] if x.get('id')==aid and x.get('status')=='active' and x.get('role')=='vendor'),None)
+    if not account: raise HTTPException(401,'Vendor login required')
+    vid=str(account.get('vendor_id') or '')
+    if not vid or not any(str(v.get('id'))==vid for v in workspace_items(request,'vendors')) or vendor_is_suspended(request,vid):
+        raise HTTPException(403,'Vendor account unavailable')
+    return account
+
+@router.get('/vendor-account/me')
+def vendor_account_me(request:Request):
+    a=_vendor_user(request)
+    return {'name':a['contact_name'],'company':a['company'],'role':'vendor'}
+
+@router.get('/vendor-account/records')
+def vendor_account_records(request:Request):
+    a=_vendor_user(request)
+    # Reuse the same vendor-scoped, allowlisted projection as invitation access.
+    return vendor_records(request,{'kind':'vendor','record_id':a['vendor_id']})
+
+@router.post('/vendor-account/upload')
+async def vendor_account_upload(request:Request,record_type:str=Form(...),record_id:str=Form(...),
+                                note:str=Form(''),file:UploadFile=File(...)):
+    _portal_origin(request)
+    account=_vendor_user(request)
+    if record_type not in ('assignment','purchase_order'):raise HTTPException(400,'Invalid record type')
+    if len(note)>1000:raise HTTPException(400,'Note too long')
+    scope={'kind':'vendor','record_id':account['vendor_id']}
+    collection=vendor_records(request,scope)['assignments' if record_type=='assignment' else 'purchase_orders']
+    record=next((x for x in collection if str(x['id'])==record_id),None)
+    if not record:raise HTTPException(404,'Record not available')
+    content=await file.read(5*1024*1024+1)
+    if not content or len(content)>5*1024*1024:raise HTTPException(413,'File must be 1 byte to 5 MB')
+    if content.startswith(b'%PDF-'):ext='pdf'
+    elif content.startswith(b'\x89PNG\r\n\x1a\n'):ext='png'
+    elif content.startswith(b'\xff\xd8\xff'):ext='jpg'
+    elif content.startswith(b'RIFF') and content[8:12]==b'WEBP':ext='webp'
+    else:raise HTTPException(415,'Only PDF, JPG, PNG or WEBP supported')
+    with _lock:
+        account=_vendor_user(request)
+        scope={'kind':'vendor','record_id':account['vendor_id']}
+        collection=vendor_records(request,scope)['assignments' if record_type=='assignment' else 'purchase_orders']
+        if not any(str(x['id'])==record_id for x in collection):raise HTTPException(404,'Record not available')
+        p=store(request);obj=read(p);file_id=uuid.uuid4().hex
+        folder=p.parent/'portal_private_uploads';folder.mkdir(parents=True,exist_ok=True)
+        dest=folder/(file_id+'.'+ext)
+        with dest.open('xb') as output:
+            output.write(content);output.flush();os.fsync(output.fileno())
+        entry={'id':uuid.uuid4().hex,'kind':'vendor','company':account['company'],
+               'record_id':account['vendor_id'],'contact_name':account['contact_name'],
+               'contact_email':account['email'],'source_record_id':record_id,
+               'source_record_type':record_type,'subject':'Vendor document — '+record_type,
+               'message':note.strip() or 'Supporting document uploaded',
+               'reference':record.get('po_number') or record.get('work_order_number') or '',
+               'upload_id':file_id,'upload_extension':ext,
+               'original_filename':Path(file.filename or 'upload').name[:160],
+               'file_size':len(content),'status':'pending_review','created_at':iso(now())}
+        try:obj['submissions'].append(entry);write(p,obj)
+        except Exception:
+            dest.unlink(missing_ok=True);raise
+    return {'ok':True,'submission_id':entry['id'],'status':'pending_review'}
 
 @router.post('/accounts/register')
 def portal_register(payload:PortalRegistration,request:Request):
@@ -834,10 +904,10 @@ def portal_register(payload:PortalRegistration,request:Request):
         if any(a['email']==email for a in obj['accounts']): raise HTTPException(409,'Account already registered; contact the office')
         account={'id':uuid.uuid4().hex,'email':email,'contact_name':payload.contact_name.strip(),
                  'company':payload.company.strip(),'password_hash':_password_hash(payload.password),
-                 'customer_id':'','status':'pending','created_at':iso(now())}
+                 'customer_id':'','vendor_id':'','role':payload.role,'status':'pending','created_at':iso(now())}
         obj['accounts'].append(account)
         obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'account_registration','created_at':iso(now()),
-                                     'delivery':'office_only','message':'Customer account awaiting verification: '+email})
+                                     'delivery':'office_only','message':payload.role.title()+' account awaiting verification: '+email})
         write(p,obj)
     return {'ok':True,'message':'Registration received. Office verification is required before login.'}
 
@@ -850,13 +920,16 @@ def list_portal_accounts(request:Request):
 @router.post('/admin/accounts/{account_id}/approve')
 def approve_portal_account(account_id:str,payload:PortalApproval,request:Request):
     admin(request)
-    verify_invitation_link(request,'customer',payload.customer_id)
     with _lock:
         p=store(request);obj=read(p)
         a=next((x for x in obj['accounts'] if x['id']==account_id),None)
         if not a: raise HTTPException(404,'Account not found')
         if a['status']!='pending': raise HTTPException(409,'Account already processed')
-        a['customer_id']=payload.customer_id;a['status']='active';a['verified_at']=iso(now())
+        role=a.get('role','customer')
+        rid=payload.vendor_id if role=='vendor' else payload.customer_id
+        if not rid: raise HTTPException(422,'Select a verified '+role+' record')
+        verify_invitation_link(request,role,rid)
+        a[role+'_id']=rid;a['status']='active';a['verified_at']=iso(now())
         write(p,obj)
     return {'ok':True,'message':'Customer account approved. Notify customer through your verified contact channel.'}
 
@@ -873,7 +946,7 @@ def portal_login(payload:PortalLogin,request:Request):
     if not _password_valid(payload.password,a.get('password_hash','')) or a['status']!='active':
         raise HTTPException(401,'Invalid credentials or account awaiting approval')
     request.session['doorks_portal_account']=a['id']
-    return {'ok':True,'name':a['contact_name']}
+    return {'ok':True,'name':a['contact_name'],'role':a.get('role','customer')}
 
 @router.post('/accounts/logout')
 def portal_logout(request:Request):
@@ -1060,7 +1133,9 @@ def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
                 'description':str(sub.get('message') or sub.get('description') or sub.get('subject') or '')[:3000],
                 'service_type':str(sub.get('service_type') or '')[:100],
                 'priority':str(sub.get('urgency') or 'Normal')[:40],
-                'scheduled_date':str(sub.get('preferred_date') or '')[:40],
+                'scheduled_date':str(sub.get('preferred_date') or '')[:10],
+                'date':str(sub.get('preferred_date') or now().date().isoformat())[:10],
+                'schedule_confirmation':'Requested — office confirmation pending',
                 'scheduled_time':str(sub.get('preferred_time') or '')[:80],
                 'status':'Dispatch', 'source_submission_id':sub['id'],
             }

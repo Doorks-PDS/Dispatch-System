@@ -1,7 +1,7 @@
 """Isolated Doorks/SDC workspace records. PDS stores are never read or written."""
 from __future__ import annotations
 import json, os, uuid, re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from zoneinfo import ZoneInfo
 from pathlib import Path
 from threading import RLock
@@ -63,6 +63,19 @@ def create(platform:str,kind:str,payload:Record,request:Request):
         path=location(request,platform,kind);items=load(path)
         data=clean(payload.data)
         for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
+        if platform=='doorks' and kind=='employees':
+            from decimal import Decimal,InvalidOperation
+            history=data.pop('wage_history',None)
+            if history is not None: raise HTTPException(400,'Wage history cannot be supplied directly')
+            if data.get('hourly_rate') not in (None,''):
+                try:
+                    rate=Decimal(str(data['hourly_rate']))
+                    if not rate.is_finite() or rate<0 or rate>100000: raise ValueError()
+                except (InvalidOperation,ValueError):raise HTTPException(400,'Invalid wage rate')
+                effective=str(data.pop('wage_effective_date','') or datetime.now(timezone.utc).date().isoformat())
+                try:date.fromisoformat(effective)
+                except ValueError:raise HTTPException(400,'Invalid wage effective date')
+                data['wage_history']=[{'effective_date':effective,'hourly_rate':str(rate),'recorded_at':datetime.now(timezone.utc).isoformat()}]
         if kind=="purchase_orders":
             # PO numbers are assigned server-side and are never reused after deletion.
             counter_path=path.parent/"purchase_order_sequence.json"
@@ -218,6 +231,26 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
                 data=clean(payload.data)
                 for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
                 if platform=='doorks' and kind=='employees':
+                    if 'hourly_rate' in data and str(data['hourly_rate']) != str(item.get('hourly_rate','')):
+                        from decimal import Decimal, InvalidOperation
+                        try:
+                            new_rate=Decimal(str(data['hourly_rate']))
+                            if not new_rate.is_finite() or new_rate<0 or new_rate>100000: raise ValueError()
+                        except (InvalidOperation,ValueError):
+                            raise HTTPException(400,'Invalid wage rate')
+                        effective=str(data.pop('wage_effective_date', '') or datetime.now(timezone.utc).date().isoformat())
+                        try: datetime.fromisoformat(effective)
+                        except ValueError: raise HTTPException(400,'Wage effective date must be YYYY-MM-DD')
+                        history=list(item.get('wage_history') or [])
+                        if any(h.get('effective_date')==effective for h in history):
+                            raise HTTPException(409,'A wage rate already exists on that effective date; review wage history')
+                        history.append({'effective_date':effective,'hourly_rate':str(new_rate),'recorded_at':datetime.now(timezone.utc).isoformat()})
+                        data['wage_history']=history
+                    else:
+                        data.pop('wage_effective_date',None)
+                    # Wage history is system-maintained; never accept arbitrary replacement from the client.
+                    if 'wage_history' in data and 'hourly_rate' not in data:
+                        data.pop('wage_history',None)
                     # Employment records stay on disk. Disabling a linked employee
                     # immediately revokes login access at the authentication store.
                     data.pop('auth_user_id',None)

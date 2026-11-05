@@ -19,7 +19,7 @@ function schedulePage(v){
  }
 function showCustomerJob(j){drawer(j.job_number||j.work_order_number||'Work Order',(body,close)=>{for(const [key,label] of [['status','Status'],['customer','Customer'],['address','Service address'],['service_type','Service type'],['scheduled_date','Scheduled date'],['scheduled_time','Scheduled time'],['description','Description']])if(j[key])line(body,label,j[key]);body.append(E('h3','Request a change'));const kind=E('select');for(const opt of ['Schedule change','Cancellation request','Deactivate request','Service question'])kind.append(E('option',opt));body.append(kind);const note=field(body,'Reason / preferred date','textarea');body.append(action('Send request to office',async()=>{if(!confirm('Send this request to the office? No work order changes automatically.'))return;try{await api('submit',{token,subject:kind.value,message:note.value||kind.value,reference:j.job_number||j.work_order_number||''});notice('Request sent for review.');close();await loadRequests()}catch(e){alert(e.message)}}))})}
 
-function newRequest(){drawer(account.kind==='customer'?'New Customer Inquiry':'New Vendor Message',(body,close)=>{
+function newRequest(){const requestId=crypto.randomUUID();drawer(account.kind==='customer'?'New Customer Inquiry':'New Vendor Message',(body,close)=>{
  body.append(E('p','Share a service request, question, or update. The office reviews submissions before changing any work order.','muted'));
  const subject=field(body,'Subject (optional)');const reference=field(body,'Work order / PO reference (optional)');const message=field(body,'Details (optional)','textarea');
  const uploadLabel=E('h3','Supporting photos & documents');body.append(uploadLabel);
@@ -32,7 +32,7 @@ function newRequest(){drawer(account.kind==='customer'?'New Customer Inquiry':'N
   save.disabled=true;
   try{
    const files=Array.from(file.files);if(files.some(f=>f.size>5*1024*1024))throw Error('Each file must be 5 MB or smaller');
-   await api('submit',{token,subject:subject.value,message:message.value,reference:reference.value});
+   await api('submit',{token,subject:subject.value,message:message.value,reference:reference.value,request_id:requestId});
    for(const f of files){const fd=new FormData();fd.append('token',token);fd.append('subject',subject.value);fd.append('reference',reference.value);fd.append('note',message.value);fd.append('file',f);
     const r=await fetch('/doorks-portals/'+(account.kind==='customer'?'customer/upload':'vendor/upload'),{method:'POST',body:fd});
     const d=await r.json();if(!r.ok)throw Error(d.detail||'Attachment upload failed');

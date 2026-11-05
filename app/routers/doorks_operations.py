@@ -98,6 +98,24 @@ def staff(request):
 def cards(request):
     return ws.load(ws.location(request,'doorks','payroll'))
 
+
+def effective_rate(employee, work_date):
+    """Only documented effective-dated wages may be used for historical payroll."""
+    history=employee.get('wage_history') or []
+    valid=[h for h in history if isinstance(h,dict) and str(h.get('effective_date',''))<=str(work_date) and h.get('hourly_rate') not in (None,'')]
+    if valid:
+        return money(max(valid,key=lambda h:h['effective_date'])['hourly_rate'])
+    return None
+
+def card_rate(card, employee):
+    # Approval freezes the rate even if the employee is later edited.
+    if card.get('hourly_rate_snapshot') not in (None,''):
+        return money(card['hourly_rate_snapshot'])
+    return effective_rate(employee,str(card.get('work_date',''))) if employee else None
+
+def card_gross(card, rate):
+    return ((Decimal(str(card.get('regular_hours') or 0)) + Decimal(str(card.get('pto_hours') or 0)) + Decimal(str(card.get('holiday_hours') or 0)))*rate + Decimal(str(card.get('overtime_hours') or 0))*rate*Decimal('1.5')).quantize(Decimal('0.01'),rounding=ROUND_HALF_UP)
+
 @router.post('/timecards')
 def create_timecard(data: Timecard, request: Request):
     guard(request)
@@ -116,7 +134,7 @@ def create_timecard(data: Timecard, request: Request):
                       work_date=data.work_date, time_in=data.time_in, time_out=data.time_out,
                       lunch_minutes=data.lunch_minutes, notes=data.notes[:4000], **result,
                       supervisor_approved='No', created_at=datetime.now(timezone.utc).isoformat(),
-                      calculation_version=1)
+                      calculation_version=1, hourly_rate_snapshot=float(effective_rate(employee,data.work_date)) if effective_rate(employee,data.work_date) is not None else None)
         rows.append(record)
         ws.save(ws.location(request,'doorks','payroll'),rows)
         return {'item':record}
@@ -136,7 +154,7 @@ def update_timecard(item_id: str, data: Timecard, request: Request):
             raise HTTPException(409, 'Timecard already exists for this employee and date')
         result = calculate(data)
         now = datetime.now(timezone.utc).isoformat()
-        row.update(employee_id=data.employee_id, employee=employee.get('name', ''), work_date=data.work_date,
+        row.update(hourly_rate_snapshot=float(effective_rate(employee,data.work_date)) if effective_rate(employee,data.work_date) is not None else None, employee_id=data.employee_id, employee=employee.get('name', ''), work_date=data.work_date,
                    time_in=data.time_in, time_out=data.time_out, lunch_minutes=data.lunch_minutes,
                    notes=data.notes[:4000], **result, supervisor_approved='No', approved_by='',
                    approved_at='', updated_at=now, calculation_version=1)
@@ -154,6 +172,10 @@ def approve_timecard(item_id: str, data: Approval, request: Request):
         if row is None: raise HTTPException(404,'Timecard not found')
         if not row.get('calculation_version'):
             raise HTTPException(409,'Legacy timecard must be recalculated before approval')
+        if data.approved and card_rate(row,next((e for e in staff(request) if e.get('id')==row.get('employee_id')),{})) is None:
+            raise HTTPException(409,'Wage rate history missing for this work date; record and verify an effective-dated wage before approval')
+        if data.approved and row.get('hourly_rate_snapshot') is None:
+            row['hourly_rate_snapshot']=float(card_rate(row,next((e for e in staff(request) if e.get('id')==row.get('employee_id')),{})))
         row['supervisor_approved']='Yes' if data.approved else 'No'
         row['approved_by']=request.state.auth_user.get('id') if data.approved else ''
         row['approved_at']=datetime.now(timezone.utc).isoformat() if data.approved else ''
@@ -177,19 +199,20 @@ def pay_period(start: str, end: str, request: Request):
     output=[]
     for employee_id,records in groups.items():
         emp=employees.get(employee_id,{})
-        rate=money(emp.get('hourly_rate',0))
+        rates=[card_rate(r,emp) for r in records]
+        rate=rates[-1] if rates and all(v is not None for v in rates) and len(set(rates))==1 else None
         totals={k:sum(Decimal(str(r.get(k,0) or 0)) for r in records) for k in ('regular_hours','overtime_hours','pto_hours','holiday_hours')}
         pending=sum(r.get('supervisor_approved')!='Yes' or not r.get('calculation_version') for r in records)
-        # Advisory only: PTO bank is not debited automatically. Do not silently modify employee records.
+        missing_rates=sum(v is None for v in rates)
         pto_bank = hours(emp.get('pto_bank', 0)) if emp else Decimal(0)
         pto_exceeds_bank = totals['pto_hours'] > pto_bank
-        gross=(totals['regular_hours']+totals['pto_hours']+totals['holiday_hours'])*rate+totals['overtime_hours']*rate*Decimal('1.5')
+        gross=sum((card_gross(r,v) for r,v in zip(records,rates) if v is not None),Decimal(0))
         output.append(dict(employee_id=employee_id,employee=emp.get('name') or records[0].get('employee',''),
-                           hourly_rate=float(rate), **{k:float(v) for k,v in totals.items()},
+                           hourly_rate=float(rate) if rate is not None else None, missing_wage_rates=missing_rates, **{k:float(v) for k,v in totals.items()},
                            pending_approval=pending, timecards=len(records),
                            estimated_gross=float(gross.quantize(Decimal('0.01'),rounding=ROUND_HALF_UP)),
                            pto_bank_hours=float(pto_bank), pto_exceeds_bank=pto_exceeds_bank,
-                           ready_for_export=pending==0 and bool(emp) and not pto_exceeds_bank))
+                           ready_for_export=pending==0 and missing_rates==0 and bool(emp) and not pto_exceeds_bank))
     return {'start':start,'end':end,'employees':output,
             'estimated_gross_total':round(sum(e['estimated_gross'] for e in output),2),
             'note':'Gross wages estimate only. PTO balances are advisory and not automatically debited. Taxes, deductions, jurisdiction-specific wage rules and payroll transmission are not included.'}
@@ -430,6 +453,7 @@ def payroll_diagnostics(start:str,end:str,request:Request):
             'timecard_count':len(rows),'pending_approval':sum(e['pending_approval'] for e in employees),
             'regular_hours':round(sum(e['regular_hours'] for e in employees),2),
             'overtime_hours':round(sum(e['overtime_hours'] for e in employees),2),
+            'double_time_hours':0.0, 'missing_wage_rates':sum(e['missing_wage_rates'] for e in employees),
             'pto_hours':round(sum(e['pto_hours'] for e in employees),2),
             'holiday_hours':round(sum(e['holiday_hours'] for e in employees),2),
             'estimated_gross':report['estimated_gross_total'],
@@ -455,15 +479,48 @@ def annual_payroll_export(year:int,request:Request):
     rows=[]
     for eid,t in totals.items():
         emp=employees.get(eid,{})
-        rate=money(emp.get('hourly_rate',0))
-        gross=(t['regular_hours']+t['pto_hours']+t['holiday_hours'])*rate+t['overtime_hours']*rate*Decimal('1.5')
+        historical=[c for c in cards(request) if str(c.get('employee_id') or '')==eid and first<=str(c.get('work_date',''))<=last]
+        rates=[card_rate(c,emp) for c in historical]
+        missing=sum(r is None for r in rates)
+        gross=sum((card_gross(c,r) for c,r in zip(historical,rates) if r is not None),Decimal(0))
         rows.append({'tax_year':year,'employee_id':eid,'employee':emp.get('name',''),
             'regular_hours':float(t['regular_hours']),'overtime_hours':float(t['overtime_hours']),
             'pto_hours':float(t['pto_hours']),'holiday_hours':float(t['holiday_hours']),
             'timecards':t['timecards'],'unapproved':t['unapproved'],
-            'estimated_gross':float(gross.quantize(Decimal('0.01'))),
+            'estimated_gross':float(gross.quantize(Decimal('0.01'))) if not missing else '', 'missing_wage_rates':missing,
             'report_type':'ESTIMATED SOURCE HOURS - NOT A TAX RETURN',
-            'limitations':'Current hourly rate used; historical rates, withholding, deductions and taxes not verified'})
+            'limitations':'Missing historical wage rates must be reconciled; withholding, deductions and taxes not verified'})
     headers=['tax_year','employee_id','employee','regular_hours','overtime_hours','pto_hours','holiday_hours',
-             'timecards','unapproved','estimated_gross','report_type','limitations']
+             'timecards','unapproved','estimated_gross','missing_wage_rates','report_type','limitations']
     return _csv_response(rows,headers,f'doorks-annual-earnings-source-{year}.csv')
+
+class VerifiedWage(BaseModel):
+    effective_date: str
+    hourly_rate: float
+    evidence_note: str
+
+@router.post('/employees/{employee_id}/verified-wage')
+def record_verified_wage(employee_id:str, payload:VerifiedWage, request:Request):
+    """Office-only wage history entry; no retrospective payroll recalculation or silent backfill."""
+    guard(request)
+    if getattr(request.state,'auth_role',None)!='office_admin':
+        raise HTTPException(403,'Office Admin required')
+    try: date.fromisoformat(payload.effective_date)
+    except ValueError: raise HTTPException(422,'Effective date must be YYYY-MM-DD')
+    rate=money(payload.hourly_rate)
+    if len(payload.evidence_note.strip())<8:
+        raise HTTPException(422,'Record payroll evidence or approval reference')
+    with _lock:
+        employees=staff(request)
+        emp=next((e for e in employees if str(e.get('id'))==employee_id),None)
+        if not emp:raise HTTPException(404,'Employee not found')
+        history=list(emp.get('wage_history') or [])
+        if any(x.get('effective_date')==payload.effective_date for x in history):
+            raise HTTPException(409,'Existing rate on this date; investigate instead of overwriting')
+        history.append({'effective_date':payload.effective_date,'hourly_rate':str(rate),
+                        'evidence_note':payload.evidence_note.strip()[:500],
+                        'recorded_at':datetime.now(timezone.utc).isoformat(),
+                        'recorded_by':request.state.auth_user.get('id')})
+        emp['wage_history']=sorted(history,key=lambda x:x['effective_date'])
+        ws.save(ws.location(request,'doorks','employees'),employees)
+    return {'ok':True,'effective_date':payload.effective_date,'hourly_rate':float(rate)}
