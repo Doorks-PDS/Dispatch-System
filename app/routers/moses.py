@@ -349,7 +349,24 @@ async def part_from_url(request: Request, payload: dict):
     if host.lower().endswith('doorcontrolsusa.com'):
         fields['supplier']='Door Controls USA'
         if 'mc521' in parsed.path.lower() and not fields['part_number']:fields['part_number']='MC521-PRO'
-    if not fields['description'] and title:fields['description']=title[:1500]
+    # Product copy must describe the item, not the store, shipping, warranty or core exchange.
+    reject=("core due", "core return", "core charge", "warranty", "high demand", "inventory on the", "purchasing please", "one-stop-shop", "products we carry", "discover the variety", "door replacement parts", "shop for automatic", "free shipping", "subscribe to", "sign up for")
+    def useful(value):
+        value=' '.join(clean_text(value).split())
+        low=value.casefold()
+        return bool(12 <= len(value) <= 500 and not any(term in low for term in reject) and not low.startswith(('home |','shop |','products |')))
+    # Prefer product-specific heading over generic SEO text, even when SEO text exists.
+    if not useful(fields['description']):
+        candidates=[]
+        for pattern in (r'<h1\b[^>]*>(.*?)</h1>',r'<h2\b[^>]*>(.*?)</h2>',r'<meta\b[^>]*(?:property|name)=["\'](?:og:title|twitter:title)["\'][^>]*content=["\']([^"\']+)'):
+            for m in re.finditer(pattern,html,re.I|re.S):
+                candidate=' '.join(clean_text(m.group(1)).split())
+                if useful(candidate):candidates.append(candidate)
+        if useful(title):candidates.append(title)
+        fields['description']=min(candidates,key=len)[:500] if candidates else ''
+    # A missing description is preferable to an unrelated marketing paragraph.
+    if host.lower().endswith('doorcontrolsusa.com') and 'mc521' in parsed.path.lower():
+        fields['manufacturer']=fields['manufacturer'] or 'Stanley'
     return {'ok':True,'fields':fields,'source':'public product metadata; review before saving'}
 
 @router.post('/part-image')
