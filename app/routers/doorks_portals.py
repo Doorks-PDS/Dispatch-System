@@ -1022,24 +1022,52 @@ def public_home(request:Request):
 
 class VendorInquiryLink(BaseModel):
     submission_id: str=Field(min_length=1,max_length=100)
-    work_order_id: str=Field(min_length=1,max_length=100)
+    work_order_id: str=Field(default="",max_length=100)
     vendor_id: str=Field(min_length=1,max_length=100)
 
 @router.post('/admin/inquiry-vendor-link')
 def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
     admin(request)
-    jobs=workspace_items(request,'work_orders')
-    job=next((j for j in jobs if str(j.get('id'))==payload.work_order_id),None)
-    if not job: raise HTTPException(404,'Work order not found')
     vendor=next((v for v in workspace_items(request,'vendors') if str(v.get('id'))==payload.vendor_id),None)
     if not vendor or vendor_is_suspended(request,payload.vendor_id):raise HTTPException(404,'Active vendor not found')
+    from app.routers import workspaces as ws
     with _lock:
         p=store(request);obj=read(p)
         sub=next((x for x in obj['submissions'] if x['id']==payload.submission_id),None)
         if not sub or sub.get('kind') not in ('customer','public_service_request'):
             raise HTTPException(404,'Customer inquiry not found')
-        if sub.get('record_id') and str(job.get('customer_id') or '')!=str(sub['record_id']):
-            raise HTTPException(409,'Inquiry customer does not match work order customer')
+        # The submission's original customer record ID is authoritative.
+        # Never associate financial records based only on a company name.
+        jobs=workspace_items(request,'work_orders')
+        job=next((j for j in jobs if str(j.get('id'))==str(sub.get('work_order_id') or '')),None)
+        if payload.work_order_id:
+            requested=next((j for j in jobs if str(j.get('id'))==payload.work_order_id),None)
+            if not requested:raise HTTPException(404,'Work order not found')
+            if sub.get('record_id') and str(requested.get('customer_id') or '')!=str(sub['record_id']):
+                raise HTTPException(409,'Inquiry customer does not match work order customer')
+            if job and job['id']!=requested['id']:raise HTTPException(409,'Inquiry already linked to another work order')
+            job=requested
+        if not job:
+            if sub.get('record_id') and not any(str(c.get('id'))==str(sub['record_id']) for c in workspace_items(request,'customers')):
+                raise HTTPException(409,'Linked customer record no longer exists')
+            fields={
+                'customer':str(sub.get('company') or sub.get('contact_name') or 'New inquiry')[:160],
+                'customer_id':str(sub.get('record_id') or ''),
+                'contact':str(sub.get('contact_name') or '')[:120],
+                'email':str(sub.get('contact_email') or '')[:250],
+                'phone':str(sub.get('contact_phone') or '')[:50],
+                'address':str(sub.get('address') or '')[:300],
+                'description':str(sub.get('message') or sub.get('description') or sub.get('subject') or '')[:3000],
+                'service_type':str(sub.get('service_type') or '')[:100],
+                'priority':str(sub.get('urgency') or 'Normal')[:40],
+                'scheduled_date':str(sub.get('preferred_date') or '')[:40],
+                'scheduled_time':str(sub.get('preferred_time') or '')[:80],
+                'status':'Dispatch', 'source_submission_id':sub['id'],
+            }
+            # Use the existing workspace creation function to reserve the
+            # monthly work-order number under its own sequence lock.
+            created=ws.create('doorks','work_orders',ws.Record(data=fields),request)
+            job=created['item']
         # Create a DRAFT assignment in the actual Doorks workspace collection.
         # The vendor portal excludes Draft until an office user reviews/activates it.
         from app.routers import workspaces as ws
@@ -1047,11 +1075,11 @@ def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
         with ws._lock:
             assignments=ws.load(assignment_path)
             assignment=next((a for a in assignments if a.get('source_submission_id')==sub['id']),None)
-            if assignment and (str(assignment.get('work_order_id'))!=payload.work_order_id or str(assignment.get('vendor_id'))!=payload.vendor_id):
+            if assignment and (str(assignment.get('work_order_id'))!=str(job['id']) or str(assignment.get('vendor_id'))!=payload.vendor_id):
                 raise HTTPException(409,'Inquiry already linked to another assignment')
             if not assignment:
                 assignment={'id':uuid.uuid4().hex,'source_submission_id':sub['id'],
-                    'work_order_id':payload.work_order_id,'work_order_number':str(job.get('job_number') or job.get('work_order_number') or ''),
+                    'work_order_id':job['id'],'work_order_number':str(job.get('job_number') or job.get('work_order_number') or ''),
                     'vendor_id':payload.vendor_id,'vendor':str(vendor.get('name') or ''),
                     'customer':str(job.get('customer') or ''),'customer_id':str(job.get('customer_id') or ''),
                     'address':str(job.get('address') or ''),'scheduled_date':str(job.get('scheduled_date') or ''),
@@ -1059,7 +1087,7 @@ def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
                     'status':'Draft','created_at':iso(now())}
                 assignments.append(assignment)
                 ws.save(assignment_path,assignments)
-        sub['work_order_id']=payload.work_order_id
+        sub['work_order_id']=job['id']
         sub['vendor_id']=payload.vendor_id
         sub['vendor_assignment_id']=assignment['id']
         sub['linked_at']=iso(now())
@@ -1067,7 +1095,7 @@ def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
             'delivery':'office_only','created_at':iso(now()),
             'message':'Inquiry linked to work order and vendor; create/approve assignment before sharing'})
         write(p,obj)
-    return {'ok':True,'work_order_id':payload.work_order_id,'vendor_id':payload.vendor_id,
+    return {'ok':True,'work_order_id':job['id'],'work_order_number':job.get('job_number',''),'vendor_id':payload.vendor_id,
             'message':'Draft vendor assignment created and linked to inquiry and work order. Approve its status in Vendor Assignments to make it visible to the vendor.'}
 
 
