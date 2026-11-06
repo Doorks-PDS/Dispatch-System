@@ -1322,3 +1322,150 @@ def vendor_assignment_decision(payload:VendorAssignmentDecision,request:Request)
         row['vendor_responded_at']=iso(now());row['vendor_responded_by']=account['id']
         ws.save(path,rows)
         return {'item':{k:row.get(k) for k in ('id','status','work_order_number','scheduled_date')},'ok':True}
+
+
+@router.post('/vendor-account/assignments/progress')
+def vendor_assignment_progress(payload:dict, request:Request):
+    """Vendor-owned assignment progress; office retains control of dispatch and payment."""
+    _portal_origin(request)
+    account=_vendor_user(request)
+    assignment_id=str(payload.get('assignment_id') or '')
+    desired=str(payload.get('status') or '').strip().lower().replace(' ','_')
+    note=str(payload.get('note') or '').strip()
+    if len(note)>2000: raise HTTPException(400,'Note too long')
+    transitions={
+      'accepted':{'en_route','additional_work_required','estimate_required','parts_required'},
+      'en_route':{'arrived','additional_work_required'},
+      'arrived':{'in_progress','additional_work_required','estimate_required','parts_required'},
+      'in_progress':{'finished','additional_work_required','estimate_required','parts_required'},
+      'additional_work_required':{'in_progress','estimate_required','parts_required'},
+      'estimate_required':{'in_progress','parts_required'},
+      'parts_required':{'in_progress'},
+    }
+    from app.routers import workspaces as ws
+    with _lock:
+      path=ws.location(request,'doorks','vendor_assignments');rows=ws.load(path)
+      row=next((x for x in rows if str(x.get('id'))==assignment_id and str(x.get('vendor_id'))==str(account['vendor_id'])),None)
+      if not row: raise HTTPException(404,'Assignment not found for this vendor')
+      current=str(row.get('status') or '').strip().lower().replace(' ','_')
+      if desired not in transitions.get(current,set()): raise HTTPException(409,'Status transition not allowed')
+      label={'en_route':'En Route','arrived':'Arrived','in_progress':'In Progress','finished':'Finished','additional_work_required':'Additional Work Required','estimate_required':'Estimate Required','parts_required':'Parts Required'}[desired]
+      history=row.get('vendor_progress_history')
+      if not isinstance(history,list): history=[]
+      history.append({'from':row.get('status'),'to':label,'note':note,'at':iso(now()),'vendor_account_id':account['id']})
+      row['vendor_progress_history']=history;row['status']=label
+      ws.save(path,rows)
+      return {'ok':True,'item':{'id':row['id'],'status':label},'message':'Progress saved; office can review the assignment'}
+
+
+# Rev 73: vendor-authored commercial documents and assignment conversation.
+# These are vendor proposals, NOT posted customer invoices or supplier bills.
+class VendorCommercialDocument(BaseModel):
+    assignment_id: str = Field(min_length=1, max_length=100)
+    document_type: Literal['estimate','invoice']
+    description: str = Field(min_length=1, max_length=3000)
+    amount: float = Field(ge=0, le=100000000)
+    reference: str = Field(default='', max_length=100)
+    note: str = Field(default='', max_length=2000)
+
+class VendorThreadMessage(BaseModel):
+    assignment_id: str = Field(min_length=1, max_length=100)
+    message: str = Field(min_length=1, max_length=3000)
+
+def _vendor_assignment_owned(request, account, assignment_id):
+    from app.routers import workspaces as ws
+    rows=ws.load(ws.location(request,'doorks','vendor_assignments'))
+    row=next((r for r in rows if str(r.get('id'))==assignment_id and str(r.get('vendor_id'))==str(account['vendor_id']) and str(r.get('status','')).lower() not in ('draft','cancelled')),None)
+    if not row: raise HTTPException(404,'Assignment not available for this vendor')
+    return row
+
+@router.get('/vendor-account/commercial-documents')
+def vendor_commercial_documents(request:Request):
+    account=_vendor_user(request)
+    with _lock:
+        obj=read(store(request))
+        docs=[d.copy() for d in obj.get('vendor_commercial_documents',[]) if d.get('vendor_id')==account['vendor_id']]
+    return {'documents':docs}
+
+@router.post('/vendor-account/commercial-documents')
+def create_vendor_commercial_document(payload:VendorCommercialDocument,request:Request):
+    _portal_origin(request)
+    account=_vendor_user(request)
+    with _lock:
+        assignment=_vendor_assignment_owned(request,account,payload.assignment_id)
+        p=store(request);obj=read(p)
+        docs=obj.setdefault('vendor_commercial_documents',[])
+        entry={'id':uuid.uuid4().hex,'vendor_id':account['vendor_id'],'vendor_account_id':account['id'],
+               'assignment_id':payload.assignment_id,'work_order_number':assignment.get('work_order_number',''),
+               'document_type':payload.document_type,'description':payload.description.strip(),
+               'amount':round(payload.amount,2),'reference':payload.reference.strip(),
+               'note':payload.note.strip(),'status':'submitted_for_review','created_at':iso(now())}
+        docs.append(entry)
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'vendor_document_review',
+            'created_at':entry['created_at'],'delivery':'office_only',
+            'message':'Vendor '+payload.document_type+' submitted for work order '+str(entry['work_order_number'])})
+        write(p,obj)
+    return {'ok':True,'document':entry}
+
+class VendorDocumentReview(BaseModel):
+    decision: Literal['approved','rejected']
+    note: str = Field(default='',max_length=2000)
+
+@router.get('/admin/vendor-commercial-documents')
+def office_vendor_commercial_documents(request:Request):
+    admin(request)
+    with _lock: return {'documents':read(store(request)).get('vendor_commercial_documents',[])}
+
+@router.post('/admin/vendor-commercial-documents/{document_id}/review')
+def office_review_vendor_document(document_id:str,payload:VendorDocumentReview,request:Request):
+    admin(request)
+    with _lock:
+        p=store(request);obj=read(p)
+        entry=next((d for d in obj.get('vendor_commercial_documents',[]) if d.get('id')==document_id),None)
+        if not entry: raise HTTPException(404,'Document not found')
+        if entry['status']!='submitted_for_review':raise HTTPException(409,'Document already reviewed')
+        entry.update(status=payload.decision,review_note=payload.note.strip(),reviewed_at=iso(now()))
+        write(p,obj)
+        return {'ok':True,'document':entry,'message':'Review recorded; no accounting entry or payment was posted'}
+
+@router.get('/vendor-account/assignments/{assignment_id}/messages')
+def vendor_assignment_messages(assignment_id:str,request:Request):
+    account=_vendor_user(request)
+    with _lock:
+        _vendor_assignment_owned(request,account,assignment_id)
+        return {'messages':[m for m in read(store(request)).get('vendor_assignment_messages',[]) if m.get('assignment_id')==assignment_id and m.get('vendor_id')==account['vendor_id']]}
+
+@router.post('/vendor-account/assignments/messages')
+def vendor_send_message(payload:VendorThreadMessage,request:Request):
+    _portal_origin(request)
+    account=_vendor_user(request)
+    with _lock:
+        _vendor_assignment_owned(request,account,payload.assignment_id)
+        p=store(request);obj=read(p)
+        entry={'id':uuid.uuid4().hex,'assignment_id':payload.assignment_id,'vendor_id':account['vendor_id'],
+               'sender':'vendor','message':payload.message.strip(),'created_at':iso(now())}
+        obj.setdefault('vendor_assignment_messages',[]).append(entry)
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'vendor_message','created_at':entry['created_at'],
+                                    'delivery':'office_only','message':'Vendor message on assignment '+payload.assignment_id})
+        write(p,obj)
+        return {'ok':True,'message':entry}
+
+@router.get('/admin/vendor-assignments/{assignment_id}/messages')
+def office_vendor_messages(assignment_id:str,request:Request):
+    admin(request)
+    with _lock:
+        return {'messages':[m for m in read(store(request)).get('vendor_assignment_messages',[]) if m.get('assignment_id')==assignment_id]}
+
+@router.post('/admin/vendor-assignments/{assignment_id}/messages')
+def office_reply_vendor(assignment_id:str,payload:VendorThreadMessage,request:Request):
+    admin(request)
+    if payload.assignment_id!=assignment_id:raise HTTPException(400,'Assignment ID mismatch')
+    from app.routers import workspaces as ws
+    with _lock:
+        row=next((r for r in ws.load(ws.location(request,'doorks','vendor_assignments')) if str(r.get('id'))==assignment_id),None)
+        if not row or not row.get('vendor_id'):raise HTTPException(404,'Assignment not found')
+        p=store(request);obj=read(p)
+        entry={'id':uuid.uuid4().hex,'assignment_id':assignment_id,'vendor_id':str(row['vendor_id']),
+               'sender':'office','message':payload.message.strip(),'created_at':iso(now())}
+        obj.setdefault('vendor_assignment_messages',[]).append(entry);write(p,obj)
+        return {'ok':True,'message':entry}
