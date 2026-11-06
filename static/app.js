@@ -11321,7 +11321,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     if(platform==='doorks'){const editor=container.querySelector('#upoEditor');editor.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(740px,100vw);max-width:100vw;overflow-y:auto;z-index:10002;box-shadow:-15px 0 55px #0004;background:white;border-radius:16px 0 0 16px;padding:24px';editor.setAttribute('role','dialog');editor.setAttribute('aria-label','Purchase order editor');}
     const q=id=>container.querySelector('#'+id),money=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
     const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const fields=[['vendor','Supplier / Vendor'],['vendor_address','Vendor Address'],['ship_to','Ship To Address'],['customer','Customer / Project'],['work_order_number','Job Number'],['sro_number','SRO #'],['salesperson','Salesperson'],['date','PO Date'],['expected_date','Needed By'],['status','Status'],['payment_status','Payment Status'],['notes','Notes']];
+    const fields=[['vendor','Supplier'],['vendor_address','Supplier Address'],['ship_to','Ship To Address'],['customer','Customer / Project'],['work_order_number','Job Number'],['sro_number','SRO #'],['salesperson','Salesperson'],['date','PO Date'],['expected_date','Needed By'],['status','Status'],['payment_status','Payment Status'],['notes','Notes']];
     const mainKeys=new Set(['vendor','vendor_address','ship_to','customer','work_order_number','date','expected_date']);
     const advanced=document.createElement('details');advanced.style.cssText='margin-top:14px;border:1px solid #d9dee7;border-radius:12px;padding:12px';
     advanced.innerHTML='<summary style="cursor:pointer;font-weight:700">Additional Details — SRO, salesperson, status, payment & notes</summary>';
@@ -11337,18 +11337,44 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       if(['vendor_address','ship_to','notes'].includes(key))label.style.gridColumn='1 / -1';
       label.append(input);(mainKeys.has(key)?grid:advancedGrid).append(label);
     }
-    const selectLabel=document.createElement('label');selectLabel.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';selectLabel.textContent='Saved Supplier / Vendor Profile';
+    const selectLabel=document.createElement('label');selectLabel.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';selectLabel.textContent=platform==='doorks'?'Saved Supplier Profile':'Saved Supplier / Vendor Profile';
     const supplierSelect=document.createElement('select');supplierSelect.className='input';supplierSelect.innerHTML='<option value="">Manual entry / no profile</option>';selectLabel.append(supplierSelect);grid.insertBefore(selectLabel,grid.firstChild);
-    supplierSelect.onchange=()=>{const supplier=suppliers.find(x=>x.id===supplierSelect.value);if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||'';}};
+    supplierSelect.onchange=()=>{const supplier=suppliers.find(x=>x.id===supplierSelect.value);if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||supplier.street_address||[supplier.address_line1,supplier.address_line2,[supplier.city,supplier.state,supplier.zip||supplier.postal_code].filter(Boolean).join(', ')].filter(Boolean).join('\n')||'';}};
     if(platform==='doorks'){form.elements.ship_to.placeholder='Defaults to business address; select a customer to use their delivery address';}
     const supplierSearch=document.createElement('input');supplierSearch.type='search';supplierSearch.className='input';supplierSearch.placeholder='Type supplier name…';supplierSearch.setAttribute('list','upoSupplierOptions');
     const supplierOptions=document.createElement('datalist');supplierOptions.id='upoSupplierOptions';
     selectLabel.insertBefore(supplierSearch,supplierSelect);selectLabel.append(supplierOptions);supplierSelect.style.display='none';
-    supplierSearch.oninput=()=>{const name=supplierSearch.value.trim().toLowerCase();const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===name);supplierSelect.value=supplier?.id||'';if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||'';}};
-    form.elements.vendor.addEventListener('input',()=>{supplierSelect.value='';const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===form.elements.vendor.value.trim().toLowerCase());if(supplier)form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||'';});
+    supplierSearch.oninput=()=>{const name=supplierSearch.value.trim().toLowerCase();const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===name);supplierSelect.value=supplier?.id||'';if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||supplier.street_address||[supplier.address_line1,supplier.address_line2,[supplier.city,supplier.state,supplier.zip||supplier.postal_code].filter(Boolean).join(', ')].filter(Boolean).join('\n')||'';}};
+    form.elements.vendor.addEventListener('input',()=>{supplierSelect.value='';const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===form.elements.vendor.value.trim().toLowerCase());if(supplier)form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||supplier.street_address||[supplier.address_line1,supplier.address_line2,[supplier.city,supplier.state,supplier.zip||supplier.postal_code].filter(Boolean).join(', ')].filter(Boolean).join('\n')||'';});
     const customerSearch=document.createElement('input');customerSearch.type='search';customerSearch.className='input';customerSearch.placeholder='Type to find a saved customer…';customerSearch.setAttribute('list','upoCustomerOptions');
     const customerOptions=document.createElement('datalist');customerOptions.id='upoCustomerOptions';
     const customerField=form.elements.customer;customerField.parentElement.insertBefore(customerSearch,customerField);customerField.style.display='none';customerField.parentElement.append(customerOptions);
+    // Rev 77: link a PO to an existing work order without breaking the ticket-to-PO draft.
+    let linkedJobs=[];
+    if(platform==='doorks'){
+      const jobInput=form.elements.work_order_number;
+      jobInput.setAttribute('list','upoExistingJobs');
+      jobInput.placeholder='Search an existing job number…';
+      const jobOptions=document.createElement('datalist');jobOptions.id='upoExistingJobs';jobInput.parentElement.append(jobOptions);
+      try{
+        const response=await fetchJSON('/workspaces/doorks/work_orders');
+        linkedJobs=response.items||[];
+        for(const job of linkedJobs){
+          const number=String(job.job_number||job.work_order_number||'').trim();
+          if(!number)continue;
+          const opt=document.createElement('option');opt.value=number;
+          opt.label=[job.customer,job.address].filter(Boolean).join(' · ');
+          jobOptions.append(opt);
+        }
+      }catch(e){console.warn('PO job lookup unavailable',e);}
+      jobInput.addEventListener('change',()=>{
+        const job=linkedJobs.find(j=>String(j.job_number||j.work_order_number||'').trim().toLowerCase()===jobInput.value.trim().toLowerCase());
+        if(!job)return;
+        form.elements.customer.value=job.customer||form.elements.customer.value;
+        customerSearch.value=job.customer||customerSearch.value;
+        form.elements.notes.value=form.elements.notes.value||('Linked to work order '+jobInput.value);
+      });
+    }
     let customers=[];
     customerSearch.oninput=()=>{const name=customerSearch.value.trim().toLowerCase();const customer=customers.find(x=>String(x.name||x.customer||'').toLowerCase()===name);customerField.value=customer?.name||customer?.customer||customerSearch.value;if(customer)form.elements.ship_to.value=customer.ship_to||customer.shipping_address||customer.service_address||customer.address||form.elements.ship_to.value;};
 
@@ -11467,7 +11493,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const result=await fetchJSON(endpoint+(editing?'/'+encodeURIComponent(editing.id):''),{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
       const saved=result.item||result;msg.textContent='Purchase order saved.';await reload();const found=orders.find(x=>x.id===saved.id)||saved;show(found);
     }catch(e){msg.textContent='Could not save PO: '+(e.message||e);}finally{button.disabled=false;}};
-    try{const result=await fetchJSON(supplierEndpoint);suppliers=result.items||[];for(const supplier of suppliers){const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name||'Unnamed';supplierSelect.append(option);const suggestion=document.createElement('option');suggestion.value=supplier.name||'';supplierOptions.append(suggestion);}}catch(e){console.warn('Supplier lookup unavailable',e);}
+    try{const result=await fetchJSON(supplierEndpoint);suppliers=(result.items||[]).filter(x=>platform!=='doorks'||!String(x.vendor_type||x.type||x.category||'').trim()||/supplier|distributor|material|manufacturer/i.test(String(x.vendor_type||x.type||x.category||'')));for(const supplier of suppliers){const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name||'Unnamed';supplierSelect.append(option);const suggestion=document.createElement('option');suggestion.value=supplier.name||'';supplierOptions.append(suggestion);}}catch(e){console.warn('Supplier lookup unavailable',e);}
     try{const result=await fetchJSON(isPds?'/crm/customers':'/workspaces/'+platform+'/customers');customers=Array.isArray(result)?result:(result.items||result.customers||[]);for(const customer of customers){const option=document.createElement('option');option.value=customer.name||customer.customer||'';customerOptions.append(option);}}catch(e){console.warn('Customer lookup unavailable',e);}
     await reload();if(openNew)edit(null);
   }

@@ -298,7 +298,7 @@ async def part_from_url(request: Request, payload: dict):
             fields['manufacturer']=unescape(re.sub(r'<[^>]+>','',brand_match.group(1))).strip()[:160]
         # The public page commonly contains "Brand | Product Code" in the title.
         if not fields['manufacturer'] and title:
-            m=re.search(r'(?:Adams Rite|Von Duprin|LCN|Dorma|Norton|Sargent|Hager)',title,re.I)
+            m=re.search(r'(?:Rixson|Adams Rite|Von Duprin|LCN|Dorma|Norton|Sargent|Hager)',title,re.I)
             if m:fields['manufacturer']=m.group(0)
         if not fields['manufacturer'] and 'Adams Rite' in html and product_code=='8611-36':
             fields['manufacturer']='Adams Rite'

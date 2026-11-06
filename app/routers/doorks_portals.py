@@ -1095,6 +1095,40 @@ def portal_account_work_orders(request:Request):
         orders.append(entry)
     return {'work_orders':orders[:500]}
 
+class CustomerNewWorkOrderRequest(BaseModel):
+    address: str = Field(min_length=5, max_length=250)
+    description: str = Field(min_length=3, max_length=3000)
+    access_instructions: str = Field(default='', max_length=3000)
+    preferred_date: str = Field(default='', max_length=30)
+
+@router.post('/accounts/work-orders/new-request')
+def customer_new_work_order_request(payload:CustomerNewWorkOrderRequest, request:Request):
+    """Intake only: office approves before a dispatch or vendor assignment exists."""
+    _portal_origin(request)
+    account=_portal_user(request)
+    customer_id=str(account['customer_id'])
+    customer=next((x for x in workspace_items(request,'customers') if str(x.get('id'))==customer_id),{})
+    preferred_vendor_id=str(customer.get('preferred_vendor_id') or '')[:100]
+    # Never trust a vendor id supplied by the customer browser.
+    with _lock:
+        path=store(request);obj=read(path)
+        entry={'id':uuid.uuid4().hex,'kind':'customer_new_work_order','status':'pending_review',
+               'created_at':iso(now()),'record_id':customer_id,
+               'company':str(account.get('company') or customer.get('name') or ''),
+               'contact_name':str(account.get('contact_name') or ''),
+               'contact_email':str(account.get('email') or ''),
+               'address':payload.address.strip(),'subject':'New service work order',
+               'message':payload.description.strip(),
+               'access_instructions':payload.access_instructions.strip(),
+               'preferred_date':payload.preferred_date,
+               'preferred_vendor_id':preferred_vendor_id}
+        obj['submissions'].append(entry)
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'customer_new_work_order',
+              'created_at':entry['created_at'],'delivery':'office_only',
+              'message':'New customer work order request: '+entry['company']})
+        write(path,obj)
+    return {'ok':True,'status':'pending_review','request_id':entry['id']}
+
 class CustomerWorkOrderChange(BaseModel):
     work_order_id:str=Field(min_length=1,max_length=100)
     requested_date:str=Field(default='',max_length=30)
