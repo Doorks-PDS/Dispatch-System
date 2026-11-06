@@ -4,6 +4,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from app.services import login_guard
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -86,11 +87,14 @@ def auth_me(request: Request):
 @router.post("/login")
 def auth_login(payload: LoginRequest, request: Request):
     store = _store(request)
+    login_guard.check(request,payload.username)
     raw_user = store.verify_password_only(payload.username, payload.password)
     if not raw_user:
+        login_guard.failure(request,payload.username)
         request.session.clear()
         raise HTTPException(status_code=401, detail="Invalid username or password")
 
+    login_guard.success(request,payload.username)
     request.session.clear()
     user_id = str(raw_user.get("id", ""))
     request.session["pending_user_id"] = user_id
@@ -112,9 +116,12 @@ def auth_login_pin(payload: PinRequest, request: Request):
     pending_user_id = str(request.session.get("pending_user_id") or "").strip()
     if not pending_user_id:
         raise HTTPException(status_code=401, detail="Username/password step expired. Please start over.")
+    login_guard.check(request,pending_user_id,"pin")
     user = store.verify_pin(pending_user_id, payload.pin)
     if not user:
+        login_guard.failure(request,pending_user_id,"pin")
         raise HTTPException(status_code=401, detail="Invalid PIN")
+    login_guard.success(request,pending_user_id,"pin")
     request.session.pop("pending_user_id", None)
     request.session["user_id"] = user.get("id", "")
     return {"ok": True, "user": user}
@@ -140,6 +147,7 @@ def create_user(payload: UserCreateRequest, request: Request):
     pin = "".join(ch for ch in str(payload.pin or "") if ch.isdigit())[-4:]
     if len(pin) != 4:
         raise HTTPException(status_code=400, detail="PIN must be 4 digits")
+    login_guard.password_policy(payload.password)
     try:
         item = _store(request).create_user(
             username=payload.username,
@@ -177,6 +185,7 @@ def update_user(user_id: str, payload: UserUpdateRequest, request: Request):
 @router.put("/users/{user_id}/password")
 def update_password(user_id: str, payload: PasswordUpdateRequest, request: Request):
     _require_admin(request)
+    login_guard.password_policy(payload.password)
     try:
         item = _store(request).set_password(user_id, payload.password)
     except ValueError as e:
@@ -227,3 +236,13 @@ def delete_user(user_id: str, request: Request):
     if not ok:
         raise HTTPException(status_code=404, detail="User not found")
     return {"ok": True}
+
+
+@router.post("/users/{user_id}/unlock")
+def unlock_user(user_id: str, request: Request):
+    _require_admin(request)
+    user=_store(request).get_by_id(user_id)
+    if not user: raise HTTPException(status_code=404,detail="User not found")
+    login_guard.unlock(request,user.get("username",""))
+    login_guard.unlock(request,user_id)
+    return {"ok":True,"message":"Account restriction cleared; IP-based protections remain active."}

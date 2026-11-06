@@ -1,5 +1,6 @@
 """Doorks-only limited external portal, invitation-based, no access to internal workspace APIs."""
 from __future__ import annotations
+from app.services import login_guard
 import hashlib, hmac, json, os, secrets, uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -412,7 +413,7 @@ def vendor_records(request, invite):
         if not isinstance(a,dict) or str(a.get('vendor_id') or '') != vendor_id: continue
         if str(a.get('status') or '').lower() in ('draft','cancelled'): continue
         assignments.append({k:str(a.get(k) or '')[:1000] for k in
-            ('id','work_order_number','scheduled_date','scheduled_time','status','scope','address','notes')})
+            ('id','work_order_id','work_order_number','scheduled_date','scheduled_time','status','scope','address','notes','customer','priority','urgency','service_type','contact','contact_phone','contact_email','job_location','access_instructions')})
     orders=[]
     for po in items('purchase_orders'):
         if not isinstance(po,dict) or str(po.get('vendor_id') or '') != vendor_id: continue
@@ -1033,15 +1034,19 @@ def portal_reset_password(payload:PortalPasswordReset,request:Request):
 @router.post('/accounts/login')
 def portal_login(payload:PortalLogin,request:Request):
     _portal_origin(request)
+    login_guard.check(request,payload.email)
     with _lock:
         obj=read(store(request))
         a=next((x for x in obj['accounts'] if x['email']==payload.email.strip().lower()),None)
     # Avoid leaking whether an email exists; constant-work check for nonexistent accounts.
     if not a:
         _password_valid(payload.password,_password_hash('dummy-password-for-timing'))
+        login_guard.failure(request,payload.email)
         raise HTTPException(401,'Invalid credentials or account awaiting approval')
     if not _password_valid(payload.password,a.get('password_hash','')) or a['status']!='active':
+        login_guard.failure(request,payload.email)
         raise HTTPException(401,'Invalid credentials or account awaiting approval')
+    login_guard.success(request,payload.email)
     request.session['doorks_portal_account']=a['id']
     return {'ok':True,'name':a['contact_name'],'role':a.get('role','customer')}
 
@@ -1072,9 +1077,55 @@ def portal_account_payments(request:Request):
 @router.get('/accounts/work-orders')
 def portal_account_work_orders(request:Request):
     a=_portal_user(request)
-    allowed=('id','job_number','work_order_number','status','customer','address','service_type','scheduled_date','scheduled_time','description')
-    return {'work_orders':[{k:r.get(k) for k in allowed} for r in workspace_items(request,'work_orders')
-            if str(r.get('customer_id') or '')==a['customer_id'] and not r.get('deactivated_at')][:500]}
+    customer_id=str(a['customer_id'])
+    allowed=('id','job_number','work_order_number','status','customer','address','service_type',
+             'scheduled_date','scheduled_time','description','priority','urgency','schedule_confirmation',
+             'customer_visible_notes','customer_notes','customer_visible_tech_notes')
+    orders=[]
+    assignments=workspace_items(request,'vendor_assignments')
+    for r in workspace_items(request,'work_orders'):
+        if str(r.get('customer_id') or '')!=customer_id or r.get('deactivated_at'):continue
+        entry={k:r.get(k) for k in allowed}
+        visible=[x for x in assignments if str(x.get('work_order_id') or '')==str(r.get('id'))
+                 and str(x.get('customer_id') or '')==customer_id
+                 and str(x.get('status') or '').lower() not in ('draft','cancelled','declined')]
+        # A customer may see the assigned company and progress, not vendor-only office notes.
+        entry['assigned_vendor']=str(visible[-1].get('vendor') or '')[:160] if visible else ''
+        entry['vendor_status']=str(visible[-1].get('status') or '')[:80] if visible else ''
+        orders.append(entry)
+    return {'work_orders':orders[:500]}
+
+class CustomerWorkOrderChange(BaseModel):
+    work_order_id:str=Field(min_length=1,max_length=100)
+    requested_date:str=Field(default='',max_length=30)
+    requested_time:str=Field(default='',max_length=80)
+    note:str=Field(min_length=3,max_length=3000)
+    request_type:Literal['schedule_change','details_update','cancel_request','question']='details_update'
+
+@router.post('/accounts/work-orders/change-request')
+def customer_work_order_change(payload:CustomerWorkOrderChange,request:Request):
+    _portal_origin(request)
+    a=_portal_user(request)
+    job=next((r for r in workspace_items(request,'work_orders')
+        if str(r.get('id') or '')==payload.work_order_id
+        and str(r.get('customer_id') or '')==str(a['customer_id']) and not r.get('deactivated_at')),None)
+    if not job:raise HTTPException(404,'Work order not found')
+    with _lock:
+        p=store(request);obj=read(p)
+        entry={'id':uuid.uuid4().hex,'kind':'customer_work_order_change','status':'pending_review',
+            'created_at':iso(now()),'record_id':str(a['customer_id']),
+            'work_order_id':str(job['id']),'work_order_number':str(job.get('job_number') or job.get('work_order_number') or ''),
+            'company':str(a.get('company') or job.get('customer') or ''),
+            'contact_name':str(a.get('contact_name') or a.get('name') or ''),
+            'contact_email':str(a.get('email') or ''),
+            'address':str(job.get('address') or ''), 'subject':'Work order change: '+payload.request_type.replace('_',' '),
+            'message':payload.note,'request_type':payload.request_type,
+            'preferred_date':payload.requested_date,'preferred_time':payload.requested_time}
+        obj['submissions'].append(entry)
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'customer_work_order_change',
+            'created_at':iso(now()),'delivery':'office_only','message':'Customer requested a work order update: '+entry['work_order_number']})
+        write(p,obj)
+    return {'ok':True,'status':'pending_review','request_id':entry['id']}
 
 # Stripe Checkout uses the server-side invoice amount. Never accept an amount or
 # customer ID from the browser. Checkout session IDs are stored for reconciliation.
