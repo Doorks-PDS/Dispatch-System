@@ -792,7 +792,9 @@ class PortalRegistration(BaseModel):
     contact_name: str=Field(min_length=2,max_length=120)
     company: str=Field(min_length=1,max_length=160)
     password: str=Field(min_length=12,max_length=128)
-    role: Literal['customer','vendor']='customer'
+    role: Literal['customer','vendor']
+    password_confirm: str=Field(min_length=12,max_length=128)
+    role_confirm: Literal['customer','vendor']
 
 class PortalLogin(BaseModel):
     email: str
@@ -897,6 +899,8 @@ async def vendor_account_upload(request:Request,record_type:str=Form(...),record
 @router.post('/accounts/register')
 def portal_register(payload:PortalRegistration,request:Request):
     _portal_origin(request)
+    if payload.password != payload.password_confirm: raise HTTPException(422,'Passwords do not match')
+    if payload.role != payload.role_confirm: raise HTTPException(422,'Account type confirmation does not match')
     email=payload.email.strip().lower()
     if '@' not in email or len(email.split('@')[-1])<3: raise HTTPException(422,'Valid email required')
     with _lock:
@@ -915,7 +919,7 @@ def portal_register(payload:PortalRegistration,request:Request):
 def list_portal_accounts(request:Request):
     admin(request)
     with _lock: obj=read(store(request))
-    return {'accounts':[{k:v for k,v in a.items() if k!='password_hash'} for a in obj['accounts']]}
+    return {'accounts':[{k:v for k,v in a.items() if k not in ('password_hash','password_reset_hash','password_reset_expires')} for a in obj['accounts']]}
 
 class PortalAccountEdit(BaseModel):
     contact_name: str=Field(min_length=1,max_length=150)
@@ -960,7 +964,71 @@ def approve_portal_account(account_id:str,payload:PortalApproval,request:Request
         verify_invitation_link(request,role,rid)
         a[role+'_id']=rid;a['status']='active';a['verified_at']=iso(now())
         write(p,obj)
-    return {'ok':True,'message':'Customer account approved. Notify customer through your verified contact channel.'}
+    return {'ok':True,'message':role.title()+' account approved. Notify the contact through a verified channel.'}
+
+class PortalPasswordRequest(BaseModel):
+    email: str=Field(min_length=3,max_length=250)
+
+class PortalPasswordReset(BaseModel):
+    token: str=Field(min_length=32,max_length=200)
+    password: str=Field(min_length=12,max_length=128)
+    password_confirm: str=Field(min_length=12,max_length=128)
+
+@router.post('/accounts/forgot-password')
+def portal_forgot_password(payload:PortalPasswordRequest,request:Request):
+    """Privacy-safe request; office must verify identity before issuing a link."""
+    _portal_origin(request)
+    email=payload.email.strip().lower()
+    with _lock:
+        path=store(request); obj=read(path)
+        account=next((a for a in obj['accounts'] if a.get('email')==email and a.get('status')=='active'),None)
+        if account:
+            # Avoid unbounded duplicate office notifications from repeat requests.
+            recent=any(n.get('kind')=='password_reset_requested' and n.get('account_id')==account['id']
+                       and (now()-datetime.fromisoformat(n['created_at'])).total_seconds()<3600
+                       for n in obj['notifications'] if n.get('created_at'))
+            if not recent:
+                obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'password_reset_requested',
+                    'account_id':account['id'],'created_at':iso(now()),'delivery':'office_only',
+                    'message':'Password reset requested for portal account '+email})
+                write(path,obj)
+    return {'ok':True,'message':'If an active account exists, the office will review the password reset request.'}
+
+@router.post('/admin/accounts/{account_id}/password-reset-link')
+def portal_admin_password_reset_link(account_id:str,request:Request):
+    """Issue a one-time, 30-minute reset URL for delivery through a VERIFIED channel."""
+    admin(request)
+    with _lock:
+        path=store(request);obj=read(path)
+        account=next((a for a in obj['accounts'] if a['id']==account_id),None)
+        if not account or account.get('status')!='active': raise HTTPException(404,'Active account not found')
+        token=secrets.token_urlsafe(40)
+        account['password_reset_hash']=hashlib.sha256(token.encode()).hexdigest()
+        account['password_reset_expires']=iso(now()+timedelta(minutes=30))
+        write(path,obj)
+    return {'ok':True,'reset_url':str(request.base_url).rstrip('/')+'/doorks-portals/home#reset='+token,
+            'expires_in_minutes':30,'delivery':'manual_verified_channel',
+            'message':'Copy and deliver only after independently verifying the account holder.'}
+
+@router.post('/accounts/reset-password')
+def portal_reset_password(payload:PortalPasswordReset,request:Request):
+    _portal_origin(request)
+    if payload.password!=payload.password_confirm: raise HTTPException(422,'Passwords do not match')
+    digest=hashlib.sha256(payload.token.encode()).hexdigest()
+    with _lock:
+        path=store(request);obj=read(path)
+        account=next((a for a in obj['accounts'] if a.get('password_reset_hash') and
+                      hmac.compare_digest(a['password_reset_hash'],digest)),None)
+        if not account or account.get('status')!='active': raise HTTPException(400,'Invalid or expired reset link')
+        try: expires=datetime.fromisoformat(account.get('password_reset_expires',''))
+        except ValueError: raise HTTPException(400,'Invalid or expired reset link')
+        if expires<=now(): raise HTTPException(400,'Invalid or expired reset link')
+        account['password_hash']=_password_hash(payload.password)
+        account.pop('password_reset_hash',None);account.pop('password_reset_expires',None)
+        account['password_changed_at']=iso(now())
+        write(path,obj)
+    request.session.pop('doorks_portal_account',None)
+    return {'ok':True,'message':'Password updated. Sign in with your new password.'}
 
 @router.post('/accounts/login')
 def portal_login(payload:PortalLogin,request:Request):
@@ -1206,3 +1274,51 @@ def link_inquiry_vendor(payload:VendorInquiryLink,request:Request):
 @router.get('/',include_in_schema=False)
 def portal_marketing_redirect():
     return RedirectResponse('/doorks-portals/home',status_code=302)
+
+# Rev 70: explicit office release and vendor response. Drafts remain private.
+class VendorAssignmentRelease(BaseModel):
+    assignment_id: str
+
+class VendorAssignmentDecision(BaseModel):
+    assignment_id: str
+    decision: Literal['accepted','declined']
+
+@router.get('/admin/vendor-onboarding')
+def vendor_onboarding_queue(request:Request):
+    admin(request)
+    with _lock:
+        obj=read(store(request))
+        accounts=[{k:v for k,v in a.items() if k not in ('password_hash','password_reset_hash','password_reset_expires')} for a in obj['accounts'] if a.get('role')=='vendor']
+    return {'accounts':accounts,'vendors':[{'id':v.get('id'),'name':v.get('name'),'onboarding_status':v.get('onboarding_status','')} for v in workspace_items(request,'vendors')],
+            'instructions':'Approve a pending vendor account against a verified vendor record using POST /admin/accounts/{id}/approve with vendor_id. Draft assignments require separate office release.'}
+
+@router.post('/admin/vendor-assignments/release')
+def release_vendor_assignment(payload:VendorAssignmentRelease,request:Request):
+    admin(request)
+    from app.routers import workspaces as ws
+    with _lock:
+        path=ws.location(request,'doorks','vendor_assignments');rows=ws.load(path)
+        row=next((r for r in rows if str(r.get('id'))==payload.assignment_id),None)
+        if not row:raise HTTPException(404,'Vendor assignment not found')
+        if str(row.get('status','')).lower()!='draft':raise HTTPException(409,'Only draft assignments may be released')
+        vid=str(row.get('vendor_id') or '')
+        verify_invitation_link(request,'vendor',vid)
+        if not vid:raise HTTPException(409,'Assignment must have a verified vendor ID')
+        row['status']='Offered';row['released_at']=iso(now());row['released_by']=str(request.state.auth_user.get('id',''))
+        ws.save(path,rows)
+        return {'item':row,'message':'Assignment is now visible to the linked vendor account'}
+
+@router.post('/vendor-account/assignments/decision')
+def vendor_assignment_decision(payload:VendorAssignmentDecision,request:Request):
+    _portal_origin(request)
+    account=_vendor_user(request)
+    from app.routers import workspaces as ws
+    with _lock:
+        path=ws.location(request,'doorks','vendor_assignments');rows=ws.load(path)
+        row=next((r for r in rows if str(r.get('id'))==payload.assignment_id and str(r.get('vendor_id'))==str(account['vendor_id'])),None)
+        if not row:raise HTTPException(404,'Assignment not found for this vendor')
+        if str(row.get('status','')).lower()!='offered':raise HTTPException(409,'Only offered assignments can be accepted or declined')
+        row['status']='Accepted' if payload.decision=='accepted' else 'Declined'
+        row['vendor_responded_at']=iso(now());row['vendor_responded_by']=account['id']
+        ws.save(path,rows)
+        return {'item':{k:row.get(k) for k in ('id','status','work_order_number','scheduled_date')},'ok':True}
