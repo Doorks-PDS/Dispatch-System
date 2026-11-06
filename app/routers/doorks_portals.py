@@ -1,13 +1,13 @@
 """Doorks-only limited external portal, invitation-based, no access to internal workspace APIs."""
 from __future__ import annotations
 from app.services import login_guard
-import hashlib, hmac, json, os, secrets, uuid
+import hashlib, hmac, json, os, secrets, uuid, io
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 from threading import RLock
 from fastapi import APIRouter, HTTPException, Request, UploadFile, File, Form
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(prefix='/doorks-portals', tags=['doorks-portals'])
@@ -198,7 +198,8 @@ def customer_documents(request, invite):
             'amount':total,'paid':paid,'balance_due':round(max(0,total-paid),2),
             'terms':str(d.get('terms') or ''),
             'line_items':d.get('line_items') if isinstance(d.get('line_items'),list) else [],
-            'notes':str(d.get('notes') or '')[:2000]})
+            'notes':str(d.get('notes') or '')[:2000],
+            'has_original':any(x.get('document_id')==str(d.get('id') or '') and x.get('customer_id')==customer_id for x in read(store(request)).get('published_originals',[]))})
     return output
 
 # Rev 43: Admin-configured external checkout links; Doorks never collects card data.
@@ -464,7 +465,8 @@ def vendor_update(payload:VendorUpdate,request:Request):
 
 @router.post('/vendor/upload')
 async def vendor_upload(request:Request,token:str=Form(...),record_type:str=Form(...),
-                        record_id:str=Form(...),note:str=Form(''),file:UploadFile=File(...)):
+                        record_id:str=Form(...),note:str=Form(''),file:UploadFile=File(...),
+                                compliance_type:str=Form(''),expires_on:str=Form('')):
     # Reject arbitrary record IDs before reading or storing the upload.
     invite=access(request,token)
     if record_type not in ('assignment','purchase_order'): raise HTTPException(400,'Invalid record type')
@@ -496,13 +498,14 @@ async def vendor_upload(request:Request,token:str=Form(...),record_type:str=Form
         item={'id':str(uuid.uuid4()),'invite_id':invite['id'],'kind':'vendor',
               'company':invite['company'],'record_id':invite['record_id'],
               'contact_name':invite['contact_name'],'contact_email':invite['contact_email'],
-              'subject':'Vendor document — '+record_type,
+              'subject':('Vendor compliance document — ' if record_type=='vendor_profile' else 'Vendor document — ')+record_type,
               'message':note.strip() or 'Supporting document uploaded',
               'reference':record.get('po_number') or record.get('work_order_number') or '',
               'source_record_id':record_id,'source_record_type':record_type,
               'upload_id':file_id,'upload_extension':ext,
               'original_filename':Path(file.filename or 'upload').name[:160],
-              'file_size':len(content),'status':'pending_review','created_at':iso(now())}
+              'file_size':len(content),'compliance_type':compliance_type.strip(),
+               'expires_on':expires_on,'status':'pending_review','created_at':iso(now())}
         try:
             obj['submissions'].append(item);write(p,obj)
         except Exception:
@@ -512,7 +515,8 @@ async def vendor_upload(request:Request,token:str=Form(...),record_type:str=Form
 
 @router.post('/customer/upload')
 async def customer_upload(request:Request,token:str=Form(...),subject:str=Form(''),
-                          reference:str=Form(''),note:str=Form(''),file:UploadFile=File(...)):
+                          reference:str=Form(''),note:str=Form(''),file:UploadFile=File(...),
+                                compliance_type:str=Form(''),expires_on:str=Form('')):
     invite=access(request,token)
     if invite['kind']!='customer': raise HTTPException(403,'Customer invitation required')
     if len(subject)>160 or len(reference)>100 or len(note)>2000:
@@ -539,7 +543,8 @@ async def customer_upload(request:Request,token:str=Form(...),subject:str=Form('
               'message':note.strip() or 'Supporting document uploaded',
               'reference':reference.strip(),'upload_id':file_id,'upload_extension':ext,
               'original_filename':Path(file.filename or 'upload').name[:160],
-              'file_size':len(content),'status':'pending_review','created_at':iso(now())}
+              'file_size':len(content),'compliance_type':compliance_type.strip(),
+               'expires_on':expires_on,'status':'pending_review','created_at':iso(now())}
         try:
             obj['submissions'].append(item);write(p,obj)
         except Exception:
@@ -847,7 +852,7 @@ def _vendor_user(request):
 @router.get('/vendor-account/me')
 def vendor_account_me(request:Request):
     a=_vendor_user(request)
-    return {'name':a['contact_name'],'company':a['company'],'role':'vendor'}
+    return {'name':a['contact_name'],'company':a['company'],'vendor_id':a['vendor_id'],'role':'vendor'}
 
 @router.get('/vendor-account/records')
 def vendor_account_records(request:Request):
@@ -857,14 +862,21 @@ def vendor_account_records(request:Request):
 
 @router.post('/vendor-account/upload')
 async def vendor_account_upload(request:Request,record_type:str=Form(...),record_id:str=Form(...),
-                                note:str=Form(''),file:UploadFile=File(...)):
+                                note:str=Form(''),file:UploadFile=File(...),
+                                compliance_type:str=Form(''),expires_on:str=Form('')):
     _portal_origin(request)
     account=_vendor_user(request)
-    if record_type not in ('assignment','purchase_order'):raise HTTPException(400,'Invalid record type')
+    if record_type not in ('assignment','purchase_order','vendor_profile'):raise HTTPException(400,'Invalid record type')
     if len(note)>1000:raise HTTPException(400,'Note too long')
+    if len(compliance_type)>100 or len(expires_on)>10:raise HTTPException(400,'Invalid compliance metadata')
+    if expires_on:
+        try: datetime.strptime(expires_on, '%Y-%m-%d')
+        except ValueError: raise HTTPException(422,'Expiration must be YYYY-MM-DD')
+    if record_type!='vendor_profile' and (compliance_type or expires_on):
+        raise HTTPException(400,'Compliance metadata is only valid for vendor profiles')
     scope={'kind':'vendor','record_id':account['vendor_id']}
-    collection=vendor_records(request,scope)['assignments' if record_type=='assignment' else 'purchase_orders']
-    record=next((x for x in collection if str(x['id'])==record_id),None)
+    collection=vendor_records(request,scope)['assignments' if record_type=='assignment' else 'purchase_orders'] if record_type!='vendor_profile' else []
+    record=({'id':account['vendor_id'],'vendor':account['company']} if record_type=='vendor_profile' and str(record_id)==str(account['vendor_id']) else next((x for x in collection if str(x['id'])==record_id),None))
     if not record:raise HTTPException(404,'Record not available')
     content=await file.read(5*1024*1024+1)
     if not content or len(content)>5*1024*1024:raise HTTPException(413,'File must be 1 byte to 5 MB')
@@ -876,8 +888,8 @@ async def vendor_account_upload(request:Request,record_type:str=Form(...),record
     with _lock:
         account=_vendor_user(request)
         scope={'kind':'vendor','record_id':account['vendor_id']}
-        collection=vendor_records(request,scope)['assignments' if record_type=='assignment' else 'purchase_orders']
-        if not any(str(x['id'])==record_id for x in collection):raise HTTPException(404,'Record not available')
+        collection=vendor_records(request,scope)['assignments' if record_type=='assignment' else 'purchase_orders'] if record_type!='vendor_profile' else []
+        if not (record_type=='vendor_profile' and str(record_id)==str(account['vendor_id'])) and not any(str(x['id'])==record_id for x in collection):raise HTTPException(404,'Record not available')
         p=store(request);obj=read(p);file_id=uuid.uuid4().hex
         folder=p.parent/'portal_private_uploads';folder.mkdir(parents=True,exist_ok=True)
         dest=folder/(file_id+'.'+ext)
@@ -886,12 +898,13 @@ async def vendor_account_upload(request:Request,record_type:str=Form(...),record
         entry={'id':uuid.uuid4().hex,'kind':'vendor','company':account['company'],
                'record_id':account['vendor_id'],'contact_name':account['contact_name'],
                'contact_email':account['email'],'source_record_id':record_id,
-               'source_record_type':record_type,'subject':'Vendor document — '+record_type,
+               'source_record_type':record_type,'subject':('Vendor compliance document — ' if record_type=='vendor_profile' else 'Vendor document — ')+record_type,
                'message':note.strip() or 'Supporting document uploaded',
                'reference':record.get('po_number') or record.get('work_order_number') or '',
                'upload_id':file_id,'upload_extension':ext,
                'original_filename':Path(file.filename or 'upload').name[:160],
-               'file_size':len(content),'status':'pending_review','created_at':iso(now())}
+               'file_size':len(content),'compliance_type':compliance_type.strip(),
+               'expires_on':expires_on,'status':'pending_review','created_at':iso(now())}
         try:obj['submissions'].append(entry);write(p,obj)
         except Exception:
             dest.unlink(missing_ok=True);raise
@@ -1515,6 +1528,35 @@ def vendor_assignment_progress(payload:dict, request:Request):
       return {'ok':True,'item':{'id':row['id'],'status':label},'message':'Progress saved; office can review the assignment'}
 
 
+@router.post('/vendor-account/assignments/field-update')
+def vendor_assignment_field_update(payload:dict,request:Request):
+    """Vendor-owned field notes and ETA only; never overwrite office-controlled scope, schedule or pricing."""
+    _portal_origin(request)
+    account=_vendor_user(request)
+    assignment_id=str(payload.get('assignment_id') or '')
+    note=str(payload.get('field_notes') or '').strip()
+    parts=str(payload.get('parts_needed') or '').strip()
+    eta=str(payload.get('estimated_arrival') or '').strip()
+    if not note and not parts and not eta:raise HTTPException(400,'Enter at least one field update')
+    if len(note)>3000 or len(parts)>1500 or len(eta)>100:raise HTTPException(400,'Field update too long')
+    from app.routers import workspaces as ws
+    with _lock:
+        path=ws.location(request,'doorks','vendor_assignments');rows=ws.load(path)
+        row=next((x for x in rows if str(x.get('id'))==assignment_id and str(x.get('vendor_id'))==str(account['vendor_id'])),None)
+        if not row:raise HTTPException(404,'Assignment not found for this vendor')
+        if str(row.get('status','')).lower() in ('draft','declined','cancelled','completed','finished'):
+            raise HTTPException(409,'This assignment is not editable')
+        event={'at':iso(now()),'vendor_account_id':account['id'],'field_notes':note,'parts_needed':parts,'estimated_arrival':eta}
+        history=row.get('vendor_field_history')
+        if not isinstance(history,list):history=[]
+        history.append(event)
+        row['vendor_field_history']=history
+        if note:row['vendor_field_notes']=note
+        if parts:row['vendor_parts_needed']=parts
+        if eta:row['vendor_estimated_arrival']=eta
+        ws.save(path,rows)
+    return {'ok':True,'message':'Field update saved for office review'}
+
 # Rev 73: vendor-authored commercial documents and assignment conversation.
 # These are vendor proposals, NOT posted customer invoices or supplier bills.
 class VendorLineItem(BaseModel):
@@ -1637,3 +1679,247 @@ def office_reply_vendor(assignment_id:str,payload:VendorThreadMessage,request:Re
                'sender':'office','message':payload.message.strip(),'created_at':iso(now())}
         obj.setdefault('vendor_assignment_messages',[]).append(entry);write(p,obj)
         return {'ok':True,'message':entry}
+
+
+# Rev 81: permission-scoped vendor change requests. Office owns authoritative dispatch fields.
+class VendorAssignmentChangeRequest(BaseModel):
+    assignment_id: str = Field(min_length=1, max_length=100)
+    change_type: Literal['schedule', 'scope', 'access', 'contact', 'other']
+    proposed_date: str = Field(default='', max_length=10)
+    proposed_time: str = Field(default='', max_length=5)
+    explanation: str = Field(min_length=5, max_length=3000)
+
+@router.post('/vendor-account/assignments/change-request')
+def vendor_assignment_change_request(payload: VendorAssignmentChangeRequest, request: Request):
+    _portal_origin(request)
+    account = _vendor_user(request)
+    if payload.proposed_date:
+        try: datetime.strptime(payload.proposed_date, '%Y-%m-%d')
+        except ValueError: raise HTTPException(422, 'Use YYYY-MM-DD for requested date')
+    if payload.proposed_time:
+        try: datetime.strptime(payload.proposed_time, '%H:%M')
+        except ValueError: raise HTTPException(422, 'Use HH:MM for requested time')
+    with _lock:
+        assignment = _vendor_assignment_owned(request, account, payload.assignment_id)
+        if str(assignment.get('status','')).lower() in ('declined','finished','completed'):
+            raise HTTPException(409, 'This assignment is closed for changes')
+        p = store(request); obj = read(p)
+        entry = {'id': uuid.uuid4().hex, 'kind':'vendor_assignment_change_request',
+                 'vendor_id':account['vendor_id'], 'vendor_account_id':account['id'],
+                 'assignment_id':payload.assignment_id,
+                 'reference':str(assignment.get('work_order_number') or ''),
+                 'company':account['company'], 'contact_name':account['contact_name'],
+                 'subject':'Vendor '+payload.change_type+' change request',
+                 'change_type':payload.change_type, 'proposed_date':payload.proposed_date,
+                 'proposed_time':payload.proposed_time, 'message':payload.explanation.strip(),
+                 'status':'pending_review','created_at':iso(now())}
+        obj['submissions'].append(entry)
+        obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'vendor_assignment_change_request',
+                                    'created_at':entry['created_at'],'delivery':'office_only',
+                                    'message':entry['subject']+' · '+entry['reference']})
+        write(p,obj)
+    return {'ok':True,'submission_id':entry['id'],'status':'pending_review'}
+
+@router.get('/vendor-account/compliance')
+def vendor_compliance_records(request: Request):
+    account = _vendor_user(request)
+    with _lock:
+        rows = read(store(request)).get('submissions',[])
+        return {'documents':[{'id':x['id'],'type':x.get('compliance_type') or x.get('message'),
+            'filename':x.get('original_filename'), 'expires_on':x.get('expires_on'),
+            'status':x.get('status'),'review_note':x.get('review_note'),
+            'created_at':x.get('created_at')}
+            for x in rows if x.get('source_record_type')=='vendor_profile' and
+            str(x.get('record_id'))==str(account['vendor_id'])]}
+
+class VendorComplianceReview(BaseModel):
+    decision: Literal['approved','rejected']
+    note: str = Field(default='',max_length=1000)
+
+@router.post('/admin/vendor-compliance/{submission_id}/review')
+def review_vendor_compliance(submission_id:str,payload:VendorComplianceReview,request:Request):
+    admin(request)
+    with _lock:
+        p=store(request);obj=read(p)
+        entry=next((x for x in obj['submissions'] if x.get('id')==submission_id and
+                    x.get('source_record_type')=='vendor_profile'),None)
+        if not entry:raise HTTPException(404,'Compliance document not found')
+        if entry.get('status')!='pending_review':raise HTTPException(409,'Document already reviewed')
+        entry.update(status=payload.decision,review_note=payload.note.strip(),reviewed_at=iso(now()),
+                     reviewed_by=str(request.state.auth_user.get('id','')))
+        write(p,obj)
+    return {'ok':True,'status':payload.decision}
+
+
+@router.get('/admin/vendor-compliance/expiring')
+def vendor_compliance_expiring(request: Request, days: int = 30):
+    """Read-only compliance expiration report; never changes approval state."""
+    admin(request)
+    if not 0 <= days <= 365:
+        raise HTTPException(422, 'Days must be between 0 and 365')
+    today = now().date()
+    with _lock:
+        rows = list(read(store(request)).get('submissions', []))
+    result = []
+    for entry in rows:
+        if entry.get('source_record_type') != 'vendor_profile' or entry.get('status') != 'approved':
+            continue
+        expiry = str(entry.get('expires_on') or '').strip()
+        if not expiry:
+            continue
+        try:
+            expiration = datetime.strptime(expiry, '%Y-%m-%d').date()
+        except ValueError:
+            continue
+        remaining = (expiration - today).days
+        if remaining <= days:
+            result.append({'submission_id':entry.get('id'), 'vendor_id':entry.get('record_id'),
+                'type':entry.get('compliance_type'), 'expires_on':expiry,
+                'days_remaining':remaining, 'status':'expired' if remaining < 0 else 'expiring'})
+    result.sort(key=lambda row:row['days_remaining'])
+    return {'documents':result, 'window_days':days, 'as_of':today.isoformat()}
+
+
+# Rev 83: originals are explicitly published by an office admin against a
+# customer-ID-linked, released estimate/invoice. They are not guessed by name.
+@router.post('/admin/document-originals/{document_id}')
+async def publish_document_original(document_id: str, request: Request, file: UploadFile = File(...)):
+    admin(request)
+    docs = workspace_items(request, 'estimates_invoices')
+    doc = next((d for d in docs if str(d.get('id') or '') == document_id and
+                d.get('document_type') in ('Estimate', 'Invoice') and
+                str(d.get('status') or '').lower() not in ('draft', 'voided') and
+                str(d.get('customer_id') or '').strip()), None)
+    if not doc:
+        raise HTTPException(404, 'Released, customer-linked document not found')
+    data = await file.read(10*1024*1024+1)
+    if not data or len(data)>10*1024*1024:
+        raise HTTPException(413, 'Document must be 1 byte to 10 MB')
+    if data.startswith(b'%PDF-'): ext='pdf'; mime='application/pdf'
+    elif data.startswith(b'\x89PNG\r\n\x1a\n'): ext='png'; mime='image/png'
+    elif data.startswith(b'\xff\xd8\xff'): ext='jpg'; mime='image/jpeg'
+    elif data.startswith(b'RIFF') and data[8:12]==b'WEBP': ext='webp'; mime='image/webp'
+    else: raise HTTPException(415,'Only PDF, PNG, JPG or WEBP documents supported')
+    with _lock:
+        p=store(request);obj=read(p)
+        directory=p.parent/'portal_private_uploads';directory.mkdir(parents=True,exist_ok=True)
+        fid=uuid.uuid4().hex;target=directory/(fid+'.'+ext)
+        with target.open('xb') as f:
+            f.write(data);f.flush();os.fsync(f.fileno())
+        old=[x for x in obj.get('published_originals',[]) if x.get('document_id')==document_id]
+        obj['published_originals']=[x for x in obj.get('published_originals',[]) if x.get('document_id')!=document_id]
+        obj['published_originals'].append({'document_id':document_id,'customer_id':str(doc['customer_id']),
+             'file_id':fid,'extension':ext,'mime':mime,'published_at':iso(now()),
+             'filename':Path(file.filename or 'document').name[:150]})
+        try:write(p,obj)
+        except Exception:target.unlink(missing_ok=True);raise
+        # Old files are left on disk for manual recovery/audit; no destructive replacement.
+    return {'ok':True,'document_id':document_id,'replaced':bool(old)}
+
+@router.get('/accounts/document-originals/{document_id}')
+def customer_document_original(document_id: str, request: Request):
+    account=_portal_user(request)
+    visible=customer_documents(request,{'kind':'customer','record_id':account['customer_id']})
+    if not any(d['id']==document_id for d in visible):
+        raise HTTPException(404,'Document not available')
+    with _lock:
+        record=next((x for x in read(store(request)).get('published_originals',[])
+                     if x.get('document_id')==document_id and
+                     x.get('customer_id')==account['customer_id']),None)
+    if not record:raise HTTPException(404,'Original not published')
+    target=store(request).parent/'portal_private_uploads'/(record['file_id']+'.'+record['extension'])
+    if not target.is_file():raise HTTPException(404,'Original file missing')
+    return FileResponse(target,media_type=record['mime'],content_disposition_type='inline',
+                        headers={'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff',
+                                 'Content-Security-Policy':"default-src 'none'; sandbox"})
+
+# Server-created PDF for a saved vendor proposal. Only its author/vendor or
+# Doorks office admin may view it; it never posts to accounting.
+def _vendor_pdf_bytes(doc, vendor_name):
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet
+        from xml.sax.saxutils import escape
+    except ImportError:
+        raise HTTPException(503,'PDF rendering dependency unavailable (reportlab)')
+    buffer=io.BytesIO(); pdf=SimpleDocTemplate(buffer,pagesize=letter,leftMargin=44,rightMargin=44,topMargin=48,bottomMargin=45)
+    styles=getSampleStyleSheet(); safe=lambda v:escape(str(v or ''))
+    elements=[Paragraph('DOORKS  |  VENDOR '+safe(doc.get('document_type','')).upper(),styles['Title']),
+              Paragraph('Draft for office review — not a posted invoice or approved estimate',styles['Italic']),Spacer(1,18)]
+    for k,v in [('Vendor',vendor_name),('Work order',doc.get('work_order_number')),
+                ('Vendor reference',doc.get('reference')),('Submitted',doc.get('created_at'))]:
+        elements.append(Paragraph('<b>'+safe(k)+':</b> '+safe(v),styles['Normal']))
+        elements.append(Spacer(1,5))
+    elements.append(Spacer(1,14))
+    rows=[[Paragraph(x,styles['BodyText']) for x in ('Description','Qty','Rate','Amount')]]
+    for item in doc.get('line_items',[]):
+        q=float(item.get('quantity') or 0);rate=float(item.get('rate') or 0)
+        rows.append([Paragraph(safe(item.get('description')),styles['BodyText']),
+                     f'{q:g}',f'${rate:,.2f}',f'${q*rate:,.2f}'])
+    if not doc.get('line_items'):
+        rows.append([Paragraph(safe(doc.get('description')),styles['BodyText']),'','',''])
+    table=Table(rows,colWidths=[285,50,85,88],repeatRows=1,hAlign='LEFT')
+    table.setStyle(TableStyle([('BACKGROUND',(0,0),(-1,0),colors.HexColor('#e7eee7')),
+        ('VALIGN',(0,0),(-1,-1),'TOP'),('BOTTOMPADDING',(0,0),(-1,-1),9),
+        ('TOPPADDING',(0,0),(-1,-1),9),('LINEBELOW',(0,0),(-1,-1),0.35,colors.lightgrey)]))
+    elements.extend([table,Spacer(1,16),Paragraph('<b>Total: $'+f"{float(doc.get('amount') or 0):,.2f}"+'</b>',styles['Heading2'])])
+    if doc.get('note'):elements.extend([Spacer(1,10),Paragraph('Notes: '+safe(doc['note']),styles['Normal'])])
+    pdf.build(elements);buffer.seek(0);return buffer
+
+@router.get('/vendor-account/commercial-documents/{document_id}/pdf')
+def vendor_commercial_pdf(document_id:str,request:Request):
+    account=_vendor_user(request)
+    with _lock:
+        doc=next((d.copy() for d in read(store(request)).get('vendor_commercial_documents',[])
+                  if d.get('id')==document_id and d.get('vendor_id')==account['vendor_id']),None)
+    if not doc:raise HTTPException(404,'Vendor document not found')
+    _vendor_assignment_owned(request,account,doc['assignment_id'])
+    return StreamingResponse(_vendor_pdf_bytes(doc,account['company']),media_type='application/pdf',
+         headers={'Content-Disposition':'inline; filename="vendor-document.pdf"','Cache-Control':'private, no-store',
+                  'X-Content-Type-Options':'nosniff'})
+
+@router.get('/admin/vendor-commercial-documents/{document_id}/pdf')
+def admin_vendor_commercial_pdf(document_id:str,request:Request):
+    admin(request)
+    with _lock:
+        doc=next((d.copy() for d in read(store(request)).get('vendor_commercial_documents',[])
+                  if d.get('id')==document_id),None)
+    if not doc:raise HTTPException(404,'Vendor document not found')
+    vendor=next((v for v in workspace_items(request,'vendors') if str(v.get('id'))==str(doc['vendor_id'])),{})
+    return StreamingResponse(_vendor_pdf_bytes(doc,vendor.get('name') or vendor.get('company') or 'Vendor'),
+         media_type='application/pdf',headers={'Content-Disposition':'inline; filename="vendor-document.pdf"',
+         'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff'})
+
+# Cron-safe, idempotent reminder generation. Run once daily via an external
+# authenticated scheduler; notifications are office-only until a mail provider
+# is explicitly configured. No vendor email is sent by this endpoint.
+@router.post('/admin/vendor-compliance/generate-reminders')
+def generate_compliance_reminders(request:Request, days:int=30):
+    # Either a real Doorks office admin or a dedicated scheduler bearer secret.
+    # The secret must be configured on Render and in the external cron service.
+    secret=os.environ.get('DOORKS_COMPLIANCE_CRON_TOKEN','')
+    supplied=request.headers.get('x-doorks-compliance-cron-token','') if hasattr(request,'headers') else ''
+    if not (len(secret)>=32 and hmac.compare_digest(supplied,secret)):
+        admin(request)
+    if not 0<=days<=365:raise HTTPException(422,'Days must be between 0 and 365')
+    today=now().date();created=[]
+    with _lock:
+        p=store(request);obj=read(p)
+        for entry in obj.get('submissions',[]):
+            if entry.get('source_record_type')!='vendor_profile' or entry.get('status')!='approved':continue
+            try:expires=datetime.strptime(str(entry.get('expires_on') or ''),'%Y-%m-%d').date()
+            except ValueError:continue
+            remaining=(expires-today).days
+            if remaining>days:continue
+            key='compliance:'+str(entry['id'])+':'+expires.isoformat()+':'+today.isoformat()
+            if any(x.get('dedupe_key')==key for x in obj['notifications']):continue
+            notice={'id':uuid.uuid4().hex,'kind':'vendor_compliance_reminder','created_at':iso(now()),
+                    'delivery':'office_only','dedupe_key':key,'vendor_id':entry.get('record_id'),
+                    'submission_id':entry['id'],'expires_on':expires.isoformat(),
+                    'message':str(entry.get('compliance_type') or 'Vendor compliance document')+' '+
+                              ('expired' if remaining<0 else 'expires in '+str(remaining)+' days')}
+            obj['notifications'].append(notice);created.append(notice)
+        if created:write(p,obj)
+    return {'created':len(created),'notifications':created,'delivery':'office_only'}
