@@ -13407,6 +13407,7 @@ function renderSdcSoftwareSales(){
 
 
 async function openDoorksVendorCommercialReview(){
+  const fetchJSON=async(url,opts={})=>{const response=await fetch(url,{credentials:'same-origin',...opts});const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Request failed');return data};
   const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;background:#17213388;z-index:12550;display:flex;justify-content:flex-end';
   const panel=document.createElement('div');panel.style.cssText='background:#fff;width:min(760px,100vw);height:100%;overflow:auto;padding:24px';backdrop.append(panel);document.body.append(backdrop);
   const header=document.createElement('h2');header.textContent='Vendor Documents & Assignment Messages';const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=()=>backdrop.remove();panel.append(header,close);

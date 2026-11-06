@@ -9,7 +9,7 @@ router = APIRouter(prefix="/moses", tags=["moses"])
 @router.post("/form-assist")
 async def assist_form(request: Request, payload: dict, x_api_key: Optional[str] = Header(default=None)):
     """AI draft only. Does not save forms or mutate existing records."""
-    if not getattr(request.state, "auth_user", None):
+    if not getattr(request.state, "auth_user", None) and not getattr(request.state, "portal_moses_authorized", False):
         request.app.state.require_key(x_api_key)
     import os
     import httpx
@@ -59,7 +59,7 @@ async def assist_form(request: Request, payload: dict, x_api_key: Optional[str] 
 @router.post("/document-assist")
 async def assist_business_document(request: Request, payload: dict, x_api_key: Optional[str] = Header(default=None)):
     """Draft-only document extraction. No persistence or financial transactions."""
-    if not getattr(request.state, "auth_user", None):
+    if not getattr(request.state, "auth_user", None) and not getattr(request.state, "portal_moses_authorized", False):
         request.app.state.require_key(x_api_key)
     import os
     import httpx

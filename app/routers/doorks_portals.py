@@ -1066,6 +1066,64 @@ def portal_account_documents(request:Request):
     a=_portal_user(request)
     return {'documents':customer_documents(request,{'kind':'customer','record_id':a['customer_id']})}
 
+class PortalEstimateDecision(BaseModel):
+    document_id: str = Field(min_length=1, max_length=100)
+    decision: Literal['approve', 'decline', 'question']
+    note: str = Field(default='', max_length=1000)
+
+@router.post('/accounts/estimates/respond')
+def portal_account_estimate_response(payload: PortalEstimateDecision, request: Request):
+    """Authenticated, customer-scoped decision; office reviews before changing the source estimate."""
+    _portal_origin(request)
+    account = _portal_user(request)
+    with _lock:
+        path = store(request)
+        obj = read(path)
+        docs = customer_documents(request, {'kind': 'customer', 'record_id': account['customer_id']})
+        doc = next((d for d in docs if d['id'] == payload.document_id and d['document_type'] == 'Estimate'), None)
+        if not doc:
+            raise HTTPException(404, 'Estimate unavailable')
+        if str(doc['status']).strip().lower() not in ('sent', 'quote sent', 'pending approval'):
+            raise HTTPException(409, 'This estimate is not awaiting a response')
+        # Prevent accidental duplicate submissions while office review is pending.
+        if any(x.get('kind') == 'customer_estimate_response' and x.get('document_id') == doc['id']
+               and x.get('customer_id') == account['customer_id'] and x.get('status') == 'pending_review'
+               for x in obj.get('submissions', [])):
+            raise HTTPException(409, 'A response for this estimate is already awaiting office review')
+        entry = {'id': str(uuid.uuid4()), 'kind': 'customer_estimate_response',
+                 'customer_id': account['customer_id'], 'company': account['company'],
+                 'contact_name': account['contact_name'], 'contact_email': account['email'],
+                 'document_id': doc['id'], 'reference': doc['document_number'],
+                 'subject': 'Estimate ' + doc['document_number'] + ' — ' + payload.decision,
+                 'decision': payload.decision, 'message': payload.note.strip() or 'No additional notes',
+                 'status': 'pending_review', 'created_at': iso(now())}
+        obj['submissions'].append(entry)
+        obj.setdefault('notifications', []).append({'id': uuid.uuid4().hex,
+            'kind': 'customer_estimate_response', 'created_at': entry['created_at'],
+            'delivery': 'office_only', 'message': entry['subject']})
+        write(path, obj)
+    return {'ok': True, 'status': 'pending_review', 'submission_id': entry['id']}
+
+@router.post('/vendor-account/moses-document')
+async def portal_vendor_moses_document(request: Request,
+                                       assignment_id: str = Form(...),
+                                       document_type: str = Form(...),
+                                       file: UploadFile = File(...)):
+    """Draft-only Moses document extraction scoped to the authenticated vendor's assignment."""
+    _portal_origin(request)
+    account = _vendor_user(request)
+    if document_type not in ('estimate', 'invoice'):
+        raise HTTPException(400, 'Unsupported document type')
+    _vendor_assignment_owned(request, account, assignment_id)
+    from app.routers import moses
+    # Shared Moses handlers accept this internal authorization only for this
+    # verified request; never accept it from client headers or payload.
+    request.state.portal_moses_authorized = True
+    try:
+        return await moses.upload_business_document(request, document_type, file, None)
+    finally:
+        request.state.portal_moses_authorized = False
+
 @router.get('/accounts/payments')
 def portal_account_payments(request:Request):
     a=_portal_user(request)
@@ -1100,6 +1158,13 @@ class CustomerNewWorkOrderRequest(BaseModel):
     description: str = Field(min_length=3, max_length=3000)
     access_instructions: str = Field(default='', max_length=3000)
     preferred_date: str = Field(default='', max_length=30)
+    preferred_time: str = Field(default='', max_length=30)
+    contact_name: str = Field(default='', max_length=150)
+    contact_phone: str = Field(default='', max_length=80)
+    contact_email: str = Field(default='', max_length=250)
+    reference: str = Field(default='', max_length=200)
+    service_type: str = Field(default='', max_length=200)
+    priority: str = Field(default='Normal', max_length=80)
 
 @router.post('/accounts/work-orders/new-request')
 def customer_new_work_order_request(payload:CustomerNewWorkOrderRequest, request:Request):
@@ -1121,6 +1186,13 @@ def customer_new_work_order_request(payload:CustomerNewWorkOrderRequest, request
                'message':payload.description.strip(),
                'access_instructions':payload.access_instructions.strip(),
                'preferred_date':payload.preferred_date,
+               'preferred_time':payload.preferred_time.strip(),
+               'requested_contact_name':payload.contact_name.strip(),
+               'requested_contact_phone':payload.contact_phone.strip(),
+               'requested_contact_email':payload.contact_email.strip(),
+               'reference':payload.reference.strip(),
+               'service_type':payload.service_type.strip(),
+               'priority':payload.priority.strip(),
                'preferred_vendor_id':preferred_vendor_id}
         obj['submissions'].append(entry)
         obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'customer_new_work_order',
@@ -1445,6 +1517,11 @@ def vendor_assignment_progress(payload:dict, request:Request):
 
 # Rev 73: vendor-authored commercial documents and assignment conversation.
 # These are vendor proposals, NOT posted customer invoices or supplier bills.
+class VendorLineItem(BaseModel):
+    description: str = Field(min_length=1, max_length=1000)
+    quantity: float = Field(gt=0, le=100000)
+    rate: float = Field(ge=0, le=100000000)
+
 class VendorCommercialDocument(BaseModel):
     assignment_id: str = Field(min_length=1, max_length=100)
     document_type: Literal['estimate','invoice']
@@ -1452,6 +1529,7 @@ class VendorCommercialDocument(BaseModel):
     amount: float = Field(ge=0, le=100000000)
     reference: str = Field(default='', max_length=100)
     note: str = Field(default='', max_length=2000)
+    line_items: list[VendorLineItem] = Field(default_factory=list, max_length=100)
 
 class VendorThreadMessage(BaseModel):
     assignment_id: str = Field(min_length=1, max_length=100)
@@ -1476,6 +1554,10 @@ def vendor_commercial_documents(request:Request):
 def create_vendor_commercial_document(payload:VendorCommercialDocument,request:Request):
     _portal_origin(request)
     account=_vendor_user(request)
+    if payload.line_items:
+        computed = round(sum(x.quantity * x.rate for x in payload.line_items), 2)
+        if abs(computed - round(payload.amount, 2)) > 0.02:
+            raise HTTPException(422, 'Line item total does not match submitted amount')
     with _lock:
         assignment=_vendor_assignment_owned(request,account,payload.assignment_id)
         p=store(request);obj=read(p)
@@ -1483,7 +1565,8 @@ def create_vendor_commercial_document(payload:VendorCommercialDocument,request:R
         entry={'id':uuid.uuid4().hex,'vendor_id':account['vendor_id'],'vendor_account_id':account['id'],
                'assignment_id':payload.assignment_id,'work_order_number':assignment.get('work_order_number',''),
                'document_type':payload.document_type,'description':payload.description.strip(),
-               'amount':round(payload.amount,2),'reference':payload.reference.strip(),
+               'amount':round(payload.amount,2),'line_items':[x.model_dump() for x in payload.line_items],
+               'reference':payload.reference.strip(),
                'note':payload.note.strip(),'status':'submitted_for_review','created_at':iso(now())}
         docs.append(entry)
         obj['notifications'].append({'id':uuid.uuid4().hex,'kind':'vendor_document_review',
