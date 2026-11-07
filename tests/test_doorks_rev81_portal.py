@@ -24,4 +24,5 @@ def test_portal_ui_exposes_real_routes():
     assert 'vendor-account/assignments/change-request' in html
     assert 'vendor-account/compliance' in html
     assert "fd.append('expires_on',expires.value)" in html
-    assert 'This document has no itemized lines available' in html
+    assert 'DoorksSharedTicket.renderDocument(preview' in html
+    assert 'No itemized lines were released' in (ROOT/'static/doorks_shared_ticket.js').read_text()

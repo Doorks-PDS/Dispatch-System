@@ -251,6 +251,8 @@ from app.routers.doorks_workflow import router as doorks_workflow_router
 app.include_router(doorks_workflow_router)
 from app.routers.doorks_operations import router as doorks_operations_router
 app.include_router(doorks_operations_router)
+from app.routers.doorks_storefront import router as doorks_storefront_router
+app.include_router(doorks_storefront_router)
 from app.routers.doorks_portals import router as doorks_portals_router
 app.include_router(doorks_portals_router)
 from app.routers.doorks_assistant import router as doorks_assistant_router

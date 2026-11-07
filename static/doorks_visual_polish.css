@@ -1,0 +1,17 @@
+/* Doorks Rev 122 — cosmetic-only visual polish. No layout, sizing, or behavior changes. */
+:root { --bg:#f5f6f8; --panel:#ffffff; --text:#1d1d1f; --muted:#6e737b; --line:#e2e5e9; --shadow:0 4px 18px rgba(20,30,40,.055); }
+html { -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+body { font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",system-ui,sans-serif; background-color:var(--bg); color:var(--text); }
+.panel,.card,.tile,.portal-sidebar,.portal-card,.portal-stat,section:not(.unstyled) { border-color:var(--line); box-shadow:0 4px 18px rgba(20,30,40,.055); }
+.panel,.card,.tile,.portal-sidebar,.portal-card,.portal-stat { border-radius:16px; }
+.panel-hd { color:#262a30; border-bottom-color:var(--line); letter-spacing:-.015em; }
+.btn,button,.portal-nav,button.submit { transition:background-color .16s ease,border-color .16s ease,box-shadow .16s ease,filter .16s ease; }
+.btn:not(:disabled):hover,button:not(:disabled):hover { filter:brightness(.975); }
+.btn:focus-visible,button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible { outline:2px solid #438d68; outline-offset:2px; }
+.input,input:not([type=checkbox]):not([type=radio]),select,textarea { border-color:#d9dee4; background-color:#fff; color:#20252a; }
+.input:focus,input:not([type=checkbox]):not([type=radio]):focus,select:focus,textarea:focus { border-color:#6d9d82; box-shadow:0 0 0 3px rgba(54,111,79,.11); }
+.portal-nav.selected { background-color:#eaf2eb; border-color:#9db9a4; }
+.portal-card:hover,.tile:hover { border-color:#a6bcb0; box-shadow:0 7px 22px rgba(24,49,32,.085); }
+.portal-ticket-header { border-color:#e1e8e3; background-color:#f8faf8; }
+.portal-drawer-tabs button.active { box-shadow:0 2px 8px rgba(20,58,34,.12); }
+@media (prefers-reduced-motion:reduce) { .btn,button,.portal-nav { transition:none; } }

@@ -8,7 +8,11 @@ from collections import defaultdict
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 from threading import RLock
+import json
+import os
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
+from pathlib import Path
 from pydantic import BaseModel
 from app.routers import workspaces as ws, doorks_accounting as ac
 
@@ -689,3 +693,455 @@ def relationship_hubs(request:Request):
     def hub(items, vendor=False):
         return [dict(record=x,work_orders=[j for j in jobs if match(j,x)],documents=[d for d in docs if match(d,x)],assignments=[a for a in assignments if match(a,x)] if vendor else []) for x in items]
     return {'customers':hub(customers),'vendors':hub(vendors,True),'note':'Relationships match exact company names; review records with aliases or renamed companies.'}
+
+
+# Workspace-specific settings live alongside the existing Doorks records.
+# They do not change legacy PDS settings or overwrite existing documents.
+class WorkspaceSettingsUpdate(BaseModel):
+    settings: dict
+
+
+def _settings_path(request: Request, scope: str):
+    if scope not in ('business', 'accounting'):
+        raise HTTPException(404, 'Unknown settings section')
+    ws.guard(request, 'doorks', 'work_orders')
+    return ws.location(request, 'doorks', 'work_orders').parent / ('settings_' + scope + '.json')
+
+
+@router.get('/settings/{scope}')
+def read_workspace_settings(scope: str, request: Request):
+    path = _settings_path(request, scope)
+    with _lock:
+        if not path.exists():
+            return {'settings': {}}
+        try:
+            settings = json.loads(path.read_text(encoding='utf-8'))
+        except (OSError, ValueError) as exc:
+            raise HTTPException(500, 'Stored settings could not be read') from exc
+        if not isinstance(settings, dict):
+            raise HTTPException(500, 'Invalid stored settings')
+        return {'settings': settings}
+
+
+@router.put('/settings/{scope}')
+def update_workspace_settings(scope: str, payload: WorkspaceSettingsUpdate, request: Request):
+    path = _settings_path(request, scope)
+    if len(payload.settings) > 40:
+        raise HTTPException(400, 'Too many settings')
+    cleaned = {}
+    for key, value in payload.settings.items():
+        if not isinstance(key, str) or not key.replace('_', '').isalnum() or len(key) > 64:
+            raise HTTPException(400, 'Invalid settings key')
+        if not isinstance(value, str) or len(value) > 4000:
+            raise HTTPException(400, 'Settings values must be text (maximum 4000 characters)')
+        cleaned[key] = value
+    with _lock:
+        existing = {}
+        if path.exists():
+            try:
+                existing = json.loads(path.read_text(encoding='utf-8'))
+            except (OSError, ValueError) as exc:
+                raise HTTPException(500, 'Stored settings could not be read') from exc
+            if not isinstance(existing, dict):
+                raise HTTPException(500, 'Invalid stored settings')
+        existing.update(cleaned)
+        temp = path.with_name(path.name + '.tmp')
+        try:
+            with temp.open('w', encoding='utf-8') as output:
+                json.dump(existing, output, ensure_ascii=False, indent=2)
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temp, path)
+        finally:
+            if temp.exists():
+                temp.unlink()
+    return {'ok': True, 'settings': existing}
+
+@router.get('/workflow-readiness')
+def workflow_readiness(request: Request):
+    """Read-only preflight for the end-to-end office workflow; never posts transactions."""
+    guard(request)
+    collections = ('customer_inquiries','work_orders','vendor_assignments',
+                   'estimates_invoices','purchase_orders')
+    counts = {kind:len(ws.load(ws.location(request,'doorks',kind))) for kind in collections}
+    from app.routers import accounting_ledger as ledger
+    counts['payments'] = len(ledger.load(ledger.path(request,'doorks','payments')))
+    counts['supplier_bills'] = len(ac.read(ac.base(request)/'supplier_bills.json'))
+    counts['receivables'] = len(ac.read(ac.base(request)/'receivables.json'))
+    from app.routers.pds_purchase_orders import _receive_events
+    counts['receiving_events'] = len(_receive_events(request,'doorks'))
+    report = reconciliation(request)
+    return {'ok':len(report['issues'])==0,
+            'counts':counts,
+            'reconciliation_issues':report['issues'],
+            'stages':['Customer inquiry','Work order','Vendor assignment',
+                      'Completion','Estimate','Invoice','Purchase order',
+                      'Receiving','Supplier bill','Payment allocation'],
+            'note':'Read-only inventory and accounting preflight; does not prove that a full browser workflow passed.'}
+
+# Rev 115: read-only, job-scoped workflow trace. No automatic status changes or postings.
+def _workflow_job_key(record):
+    """Only explicit job references are trusted; customer names are not unique."""
+    for field in ('job_number', 'work_order_number', 'job_no', 'jobNumber'):
+        value = record.get(field)
+        if value is not None and str(value).strip():
+            return str(value).strip().casefold()
+    return ''
+
+
+def _workflow_trace_rows(job_number, records):
+    """Summarize persisted links without claiming a step is complete from a count."""
+    key = str(job_number).strip().casefold()
+    if not key:
+        raise HTTPException(400, 'Job number required')
+    stages = {}
+    for name, rows in records.items():
+        matches = [row for row in rows if isinstance(row, dict) and _workflow_job_key(row) == key]
+        stages[name] = {
+            'count': len(matches),
+            'records': [
+                {'id': str(row.get('id') or ''),
+                 'status': str(row.get('status') or ''),
+                 'reference': str(row.get('document_number') or row.get('po_number') or row.get('invoice_number') or '')}
+                for row in matches[:50]
+            ],
+            'truncated': len(matches) > 50,
+        }
+    return stages
+
+
+def _workflow_completion_stage(job_number, work_orders):
+    """Find actual completion forms embedded in explicitly linked work orders.
+
+    Completion forms live on work-order records; they are not a separate
+    workspace collection. A completed status alone is not proof of a form.
+    """
+    key = str(job_number).strip().casefold()
+    matches = []
+    for order in work_orders:
+        if not isinstance(order, dict) or _workflow_job_key(order) != key:
+            continue
+        forms = order.get('completion_forms')
+        if not isinstance(forms, list):
+            continue
+        for index, form in enumerate(forms):
+            if not isinstance(form, dict) or not form:
+                continue
+            matches.append({
+                'id': str(form.get('id') or ''),
+                'status': str(form.get('status') or 'Saved'),
+                'reference': str(order.get('job_number') or order.get('work_order_number') or ''),
+                'work_order_id': str(order.get('id') or ''),
+                'form_index': index,
+            })
+    unique = []
+    seen = set()
+    for item in matches:
+        identity = (item['work_order_id'] or item['reference'].casefold(),
+                    item['id'] or str(item['form_index']))
+        if identity in seen:
+            continue
+        seen.add(identity)
+        unique.append(item)
+    return {'count': len(unique), 'records': unique[:50], 'truncated': len(unique) > 50}
+
+
+@router.get('/workflow-trace/{job_number}')
+def workflow_trace(job_number: str, request: Request):
+    """Inspect explicitly linked Doorks records for a job; does not write or infer payment."""
+    guard(request)
+    if not job_number.strip() or len(job_number) > 80:
+        raise HTTPException(400, 'Invalid job number')
+    collections = ('customer_inquiries', 'work_orders', 'vendor_assignments',
+                   'estimates_invoices', 'purchase_orders')
+    records = {kind: ws.load(ws.location(request, 'doorks', kind)) for kind in collections}
+    records['receivables'] = ac.read(ac.base(request) / 'receivables.json')
+    records['supplier_bills'] = ac.read(ac.base(request) / 'supplier_bills.json')
+    # Receiving journal references PO IDs, not job numbers. Resolve only through
+    # purchase orders explicitly linked to this job; never match by customer name.
+    from app.routers.pds_purchase_orders import _receive_events
+    from app.routers import accounting_ledger as ledger
+    receiving = _receive_events(request, 'doorks')
+    payments = ledger.load(ledger.path(request, 'doorks', 'payments'))
+    stages = _workflow_trace_rows(job_number, records)
+    # Dispatch completion forms are persisted by CalendarStore, not necessarily
+    # in the separate Doorks workspace work_orders collection. Read the actual
+    # dispatch record first, retaining workspace forms for older installations.
+    dispatch_store = getattr(request.app.state, 'calendar_store', None)
+    dispatch_job = None
+    if dispatch_store is not None:
+        dispatch_job = dispatch_store.get_by_job_number(job_number.strip())
+    completion_sources = list(records['work_orders'])
+    if isinstance(dispatch_job, dict):
+        completion_sources.append(dispatch_job)
+        # The dispatch calendar is the canonical job store for older Doorks
+        # work orders. Include it in the review without double-counting a
+        # workspace record that references the same underlying job.
+        existing_ids = {str(row.get('id') or '').strip() for row in records['work_orders']
+                        if isinstance(row, dict) and row.get('id')}
+        dispatch_id = str(dispatch_job.get('id') or '').strip()
+        if not dispatch_id or dispatch_id not in existing_ids:
+            work_order_stage = stages['work_orders']
+            work_order_stage['count'] += 1
+            if len(work_order_stage['records']) < 50:
+                work_order_stage['records'].append({
+                    'id': dispatch_id,
+                    'status': str(dispatch_job.get('status') or ''),
+                    'reference': str(dispatch_job.get('job_number') or job_number.strip()),
+                })
+            else:
+                work_order_stage['truncated'] = True
+    stages['completion_forms'] = _workflow_completion_stage(job_number, completion_sources)
+    stages['receiving_events'] = _workflow_linked_receipts(
+        job_number, records['purchase_orders'], receiving)
+    stages['payments'] = _workflow_trace_rows(job_number, {'payments': payments})['payments']
+    stages.update(_workflow_document_stages(job_number, records['estimates_invoices']))
+    allocations = ws.load(ws.location(request, 'doorks', 'payment_allocations'))
+    financial = _workflow_financial_reconciliation(
+        job_number, records['estimates_invoices'], records['receivables'],
+        records['supplier_bills'], payments, allocations)
+    receiving_balances = _workflow_receiving_balances(job_number, records['purchase_orders'], receiving)
+    return {
+        'job_number': job_number.strip(), 'stages': stages,
+        'receiving_balances': receiving_balances,
+        'financial_reconciliation': financial,
+        'linked_record_count': sum(stage['count'] for stage in stages.values()),
+        'note': ('Only explicit job references and receiving events linked through '
+                 'job-linked purchase order IDs are included. Payment entries are '
+                 'manual/unverified and are not evidence of bank settlement. '
+                 'Missing links do not prove a transaction is absent.'),
+        'read_only': True,
+    }
+
+
+def _unique_po_ids(purchase_orders):
+    """Only globally unique persisted PO IDs can safely attribute receiving."""
+    counts = defaultdict(int)
+    for po in purchase_orders:
+        if isinstance(po, dict):
+            po_id = str(po.get('id') or '').strip()
+            if po_id:
+                counts[po_id] += 1
+    return {po_id for po_id, count in counts.items() if count == 1}
+
+
+def _workflow_linked_receipts(job_number, purchase_orders, events):
+    """Resolve PO receiving by stable PO ID; never guess using supplier/customer."""
+    key = str(job_number).strip().casefold()
+    unique_ids = _unique_po_ids(purchase_orders)
+    linked_ids = {str(po.get('id') or '').strip() for po in purchase_orders
+                  if isinstance(po, dict) and _workflow_job_key(po) == key
+                  and str(po.get('id') or '').strip() in unique_ids}
+    matches = [event for event in events if isinstance(event, dict)
+               and str(event.get('po_id') or '') in linked_ids]
+    return {'count': len(matches), 'records': [
+        {'id': str(event.get('id') or ''),
+         'status': 'Recorded receipt (not invoice/payment confirmation)',
+         'reference': str(event.get('po_number') or event.get('reference') or '')}
+        for event in matches[:50]], 'truncated': len(matches) > 50}
+
+
+def _workflow_document_stages(job_number, documents):
+    """Separate estimates from invoices; never count an estimate as an invoice."""
+    key = str(job_number).strip().casefold()
+    stages = {}
+    for kind in ('estimate', 'invoice'):
+        rows = [row for row in documents if isinstance(row, dict)
+                and _workflow_job_key(row) == key
+                and str(row.get('document_type') or '').strip().casefold() == kind]
+        stages[kind + 's'] = {
+            'count': len(rows),
+            'records': [{'id': str(row.get('id') or ''),
+                         'status': str(row.get('status') or ''),
+                         'reference': str(row.get('document_number') or '')}
+                        for row in rows[:50]],
+            'truncated': len(rows) > 50,
+        }
+    return stages
+
+
+def _workflow_receiving_balances(job_number, purchase_orders, events):
+    """Summarize receiving by explicit PO IDs; flag invalid quantities for review."""
+    key = str(job_number).strip().casefold()
+    orders = [row for row in purchase_orders if isinstance(row, dict)
+              and _workflow_job_key(row) == key]
+    results = []
+    unique_ids = _unique_po_ids(purchase_orders)
+    for po in orders:
+        po_id = str(po.get('id') or '').strip()
+        if not po_id:
+            results.append({'po_id': '', 'po_number': str(po.get('po_number') or ''),
+                            'status': 'Needs Review', 'reason': 'Missing purchase order ID'})
+            continue
+        if po_id not in unique_ids:
+            results.append({'po_id': po_id, 'po_number': str(po.get('po_number') or ''),
+                            'status': 'Needs Review', 'reason': 'Duplicate purchase order ID; receiving attribution withheld'})
+            continue
+        linked = [e for e in events if isinstance(e, dict)
+                  and str(e.get('po_id') or '') == po_id]
+        try:
+            ordered = Decimal(str(po.get('quantity') or 0))
+            # Validate every receipt independently. A negative event must not be
+            # hidden by a positive event in the aggregate, and non-finite values
+            # must never enter a reconciliation balance.
+            quantities = [Decimal(str(e.get('quantity') if e.get('quantity') is not None else 0))
+                          for e in linked]
+            if any(not q.is_finite() or q <= 0 for q in quantities):
+                raise ValueError('Invalid receipt quantity')
+            # A repeated persisted receipt ID can indicate duplicate posting.
+            # Withhold the balance instead of double-counting it.
+            event_ids = [str(e.get('id')).strip() for e in linked if e.get('id') is not None and str(e.get('id')).strip()]
+            if len(event_ids) != len(set(event_ids)):
+                raise ValueError('Duplicate receipt event ID')
+            received = sum(quantities, Decimal(0))
+            if not ordered.is_finite() or received < 0:
+                raise ValueError('Invalid quantity')
+            if ordered <= 0:
+                raise ValueError('Nonpositive quantity')
+            status = ('Over Received' if received > ordered else
+                      'Received' if received == ordered else
+                      'Partially Received' if received else 'Not Received')
+            results.append({'po_id': po_id, 'po_number': str(po.get('po_number') or ''),
+                            'ordered': float(ordered), 'received': float(received),
+                            'outstanding': float(max(Decimal(0), ordered - received)),
+                            'status': status})
+        except (HTTPException, InvalidOperation, ValueError, TypeError):
+            results.append({'po_id': po_id, 'po_number': str(po.get('po_number') or ''),
+                            'status': 'Needs Review', 'reason': 'Invalid PO quantity, receipt quantity, or duplicate receipt ID'})
+    return results
+
+
+
+
+def _workflow_financial_reconciliation(job_number, documents, receivables, supplier_bills,
+                                       payments, allocations):
+    """Read-only financial linkage report; never infer a payment from customer names.
+
+    Match receivables only by invoice number on a job-linked invoice, and
+    allocations only by stable receivable/payment IDs. A missing identifier
+    is an exception for manual review, not permission to guess.
+    """
+    key = str(job_number).strip().casefold()
+    invoices = [d for d in documents if isinstance(d, dict)
+                and _workflow_job_key(d) == key
+                and str(d.get('document_type') or '').strip().casefold() == 'invoice']
+    invoice_numbers = {str(d.get('document_number') or '').strip().casefold()
+                       for d in invoices if str(d.get('document_number') or '').strip()}
+    # A reused invoice number on another job makes receivable attribution ambiguous.
+    # Do not assign those receivables to either job based on the number alone.
+    other_job_numbers = {str(d.get('document_number') or '').strip().casefold()
+                         for d in documents if isinstance(d, dict)
+                         and str(d.get('document_type') or '').strip().casefold() == 'invoice'
+                         and _workflow_job_key(d) != key
+                         and str(d.get('document_number') or '').strip()}
+    ambiguous_numbers = invoice_numbers & other_job_numbers
+    safe_numbers = invoice_numbers - ambiguous_numbers
+    linked_ar = [r for r in receivables if isinstance(r, dict)
+                 and str(r.get('invoice_number') or '').strip().casefold() in safe_numbers
+                 and str(r.get('invoice_number') or '').strip()]
+    # Multiple receivables for the same invoice cannot safely be treated as
+    # separate balances. Withhold them until the duplicate is resolved.
+    ar_number_counts = defaultdict(int)
+    for row in receivables:
+        if isinstance(row, dict):
+            number = str(row.get('invoice_number') or '').strip().casefold()
+            if number in safe_numbers:
+                ar_number_counts[number] += 1
+    duplicate_ar_numbers = {n for n, count in ar_number_counts.items() if count > 1}
+    linked_ar = [r for r in linked_ar
+                 if str(r.get('invoice_number') or '').strip().casefold() not in duplicate_ar_numbers]
+    ar_ids = {str(r.get('id')) for r in linked_ar if r.get('id')}
+    linked_allocations = [a for a in allocations if isinstance(a, dict)
+                          and str(a.get('receivable_id') or '') in ar_ids]
+    payment_ids = {str(p.get('id')) for p in payments if isinstance(p, dict)
+                   and str(p.get('direction') or '').casefold() == 'received' and p.get('id')}
+    problems = []
+    if ambiguous_numbers:
+        problems.append('Invoice number also used on another job; receivable matching withheld for safety')
+    if duplicate_ar_numbers:
+        problems.append('Multiple receivables share an invoice number; matching withheld for safety')
+    if invoices and len(invoice_numbers) != len(invoices):
+        problems.append('Invoice missing number or duplicate invoice number')
+    if invoices and not linked_ar:
+        problems.append('No receivable explicitly matched to job invoice number')
+    payment_by_id = {str(p['id']): p for p in payments if isinstance(p, dict)
+                     and p.get('id') and str(p.get('direction') or '').casefold() == 'received'}
+    posted_by_payment = defaultdict(list)
+    posted_by_receivable = defaultdict(Decimal)
+    for a in linked_allocations:
+        payment_id = str(a.get('payment_id') or '')
+        if payment_id not in payment_ids:
+            problems.append('Allocation references missing received payment')
+        if a.get('status') != 'posted':
+            problems.append('Allocation not confirmed posted; manual review required')
+            continue
+        posted_by_payment[payment_id].append(a)
+        if a.get('amount') in (None, ''):
+            # Older allocations may lack a stored amount; do not infer zero.
+            continue
+        try:
+            allocated = money(a.get('amount'))
+            if allocated <= 0:
+                problems.append('Posted allocation has zero amount')
+            posted_by_receivable[str(a.get('receivable_id'))] += allocated
+            if payment_id in payment_by_id and allocated > money(payment_by_id[payment_id].get('amount')):
+                problems.append('Posted allocation exceeds received payment amount')
+        except HTTPException:
+            problems.append('Invalid posted allocation amount')
+    if any(len(rows) > 1 for rows in posted_by_payment.values()):
+        problems.append('Received payment has multiple posted allocations; review for duplicate posting')
+    for r in linked_ar:
+        try:
+            amount, paid = money(r.get('amount')), money(r.get('paid'))
+            if paid > amount:
+                problems.append('Receivable paid amount exceeds invoice amount')
+            if posted_by_receivable.get(str(r.get('id')), Decimal(0)) > amount:
+                problems.append('Posted allocations exceed receivable invoice amount')
+            if posted_by_receivable.get(str(r.get('id')), Decimal(0)) > paid:
+                problems.append('Posted allocations exceed receivable recorded paid balance')
+        except HTTPException:
+            problems.append('Invalid receivable amount')
+    bills = [b for b in supplier_bills if isinstance(b, dict)
+             and _workflow_job_key(b) == key]
+    return {'invoice_count': len(invoices), 'matched_receivable_count': len(linked_ar),
+            'posted_allocation_count': sum(a.get('status') == 'posted' for a in linked_allocations),
+            'supplier_bill_count': len(bills), 'issues': sorted(set(problems)),
+            'read_only': True,
+            'note': 'Payment allocation is not proof of bank settlement. Supplier bills are linked only by explicit job reference.'}
+
+@router.get('/workflow-handoffs/{job_number}')
+def workflow_handoffs(job_number: str, request: Request):
+    """Read-only visibility of missing job links, not a transaction processor."""
+    trace = workflow_trace(job_number, request)
+    stages = trace['stages']
+    checks = []
+    for name, description in (
+        ('work_orders', 'Work order'),
+        ('vendor_assignments', 'Vendor assignment'),
+        ('completion_forms', 'Saved completion form'),
+        ('estimates', 'Estimate record'),
+        ('invoices', 'Invoice record'),
+        ('purchase_orders', 'Purchase order'),
+        ('receiving_events', 'PO-linked receiving event'),
+        ('supplier_bills', 'Supplier bill'),
+        ('payments', 'Job-linked payment entry'),
+    ):
+        count = stages.get(name, {}).get('count', 0)
+        checks.append({'stage': name, 'label': description,
+                       'linked_records': count, 'has_explicit_link': count > 0})
+    return {'job_number': trace['job_number'], 'checks': checks,
+            'receiving_balances': trace['receiving_balances'],
+            'financial_reconciliation': trace['financial_reconciliation'],
+            'missing_explicit_links': [c['stage'] for c in checks if not c['has_explicit_link']],
+            'read_only': True,
+            'note': ('A missing explicit link does not mean a step is required or incomplete. '
+                     'Payments are not proof of bank settlement. Estimates and invoices '
+                     'are counted separately by document type.')}
+
+
+@router.get('/workflow-review')
+def workflow_review_page(request: Request):
+    """Protected read-only job reconciliation screen on the existing Doorks service."""
+    guard(request)
+    root = Path(getattr(request.app.state, 'project_root', Path(__file__).resolve().parents[2]))
+    return FileResponse(root / 'static' / 'doorks_workflow_review.html', media_type='text/html')

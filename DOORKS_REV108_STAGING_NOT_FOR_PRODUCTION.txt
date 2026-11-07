@@ -1,0 +1,5 @@
+Doorks Rev 108 cumulative staging-only patch from November baseline.
+Changes: shared vendor document workspace with editable line items, reference and preview; shared office draft preflight before existing native issuance.
+Office native builder retains pricing, RE/JS numbering, attachments and issuance APIs. Vendor cannot issue office documents.
+Tests: 99 passed in focused revision suite excluding baseline rev65 (requires full application main.py). JS syntax passed. Browser testing NOT performed.
+This is not full office/vendor document-editor parity; do not deploy production.

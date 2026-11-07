@@ -1,0 +1,5 @@
+Doorks Rev112 - cumulative staging-only checkpoint.
+Changes: shared document validation rejects individual line items above $100,000,000 before office issuance or vendor submission; executable Node test added; outdated revision-87 preview contract test corrected to follow the shared workspace preview.
+The original office builder and vendor portal are NOT a single complete editing implementation. No browser test was performed. Do not deploy to production.
+Testing: 108 passing revision tests, 1 legacy baseline assertion failure (test_doorks_rev82.py expects a removed button label), no other revision failures.
+Source: November baseline plus cumulative Rev111.
