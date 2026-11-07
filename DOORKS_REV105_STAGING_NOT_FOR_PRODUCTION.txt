@@ -1,0 +1,1 @@
+Doorks Rev105 cumulative staging patch (Nov baseline + Rev84-105).\nRev105 centralizes vendor proposal serialization, amount calculation, and validation in shared document module.\nThis is NOT complete office/vendor document editor parity. Do not deploy to production.\n

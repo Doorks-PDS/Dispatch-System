@@ -1,0 +1,1 @@
+Rev 109: Field-level verification for structured customer/vendor schedule requests. Non-schedule requests remain office-attested; no automatic source mutation. Cumulative staging-only patch; not browser tested.

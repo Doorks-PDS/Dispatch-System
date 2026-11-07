@@ -594,7 +594,7 @@
     clearWorkspaceActions();setWorkspace('Doorks — Portal Operations');
     workspaceBody.innerHTML=`<div style="display:grid;gap:16px;max-width:1400px;margin:auto" id="dpRoot">
       <section class="card"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2 style="margin:0">Service Center · Action Queue</h2><p class="hint">Review incoming customer requests and vendor updates in one place. Select a request to see details or prepare a vendor assignment.</p></div><div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" id="dpGoInquiries">📥 Customer Requests</button><button class="btn" id="dpGoVendors">🛠 Vendor Assignments</button></div></div><div id="dpMessage" role="status"></div><div id="dpMetrics" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin-top:14px"></div></section>
-      <section class="card"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0">📋 Action queue</h3><button class="btn" id="dpRefresh" title="Reload activity">↻ Refresh</button><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="dpFilter" aria-label="Filter portal submissions"><option value="pending">Needs review</option><option value="all">All activity</option><option value="customer">Customer activity</option><option value="vendor">Vendor activity</option><option value="resolved">Resolved</option><option value="rejected">Rejected / Archived</option></select><input id="dpSearch" placeholder="Search company, reference, subject…" type="search" style="min-width:240px"></div></div><div id="dpQueue" style="margin-top:14px"></div></section>
+      <section class="card"><div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><h3 style="margin:0">📋 Action queue</h3><button class="btn" id="dpRefresh" title="Reload activity">↻ Refresh</button><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="dpFilter" aria-label="Filter portal submissions"><option value="pending">Needs review</option><option value="all">All activity</option><option value="customer">Customer activity</option><option value="vendor">Vendor activity</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option><option value="archived">Archived / deleted inquiries</option></select><input id="dpSearch" placeholder="Search company, reference, subject…" type="search" style="min-width:240px"></div></div><div id="dpQueue" style="margin-top:14px"></div></section>
       <section class="card" id="dpDetails" hidden><div style="display:flex;justify-content:space-between;align-items:center"><h3 id="dpDetailTitle">Submission details</h3><button class="btn" id="dpCloseDetail">Close</button></div><div id="dpDetailBody"></div><label style="display:block;margin:12px 0">Office review note<textarea id="dpReviewNote" rows="2" class="input" style="width:100%"></textarea></label><div style="display:flex;gap:8px;flex-wrap:wrap"><select id="dpReviewStatus"><option value="pending_review">Needs review</option><option value="reviewed">Reviewed</option><option value="resolved">Resolved</option><option value="rejected">Rejected</option></select><button class="btn" id="dpSaveReview">Save review</button><a id="dpAttachment" hidden target="_blank" rel="noopener" class="btn">Download attachment</a></div></section>
       <section class="card"><h3>Recent office notifications</h3><div id="dpNotifications"></div></section>
       <section class="card"><details open><summary style="cursor:pointer;font-weight:700">Portal access & invitation links</summary><p class="hint">Select a saved customer or vendor below — no record ID copying required. Linked invitations show only that account’s permitted records. Unlinked invitations accept messages only. Permanent vendor service access is available through verified accounts. Optional invitation links can be revoked at any time.</p><div style="display:flex;flex-wrap:wrap;gap:8px;margin:12px 0"><select id="dpKind"><option value="customer">Customer</option><option value="vendor">Vendor</option></select><input id="dpCompany" placeholder="Company" aria-label="Company"><input id="dpName" placeholder="Contact name" aria-label="Contact name"><input id="dpEmail" type="email" placeholder="Email" aria-label="Email"><div style="display:grid;gap:4px;min-width:245px;flex:1"><input id="dpRecordSearch" class="input" type="search" autocomplete="off" placeholder="Search saved customer / vendor or type new…" aria-label="Search saved customer or vendor"><div id="dpRecordResults" style="max-height:190px;overflow:auto;display:none;border:1px solid #d6dfe9;border-radius:8px;background:white"></div><input id="dpRecord" type="hidden" value=""><small id="dpRecordSelection" class="hint">New or unlinked — message access only</small></div><button class="btn" id="dpCreate">Create portal access link</button></div><div id="dpLink" style="overflow-wrap:anywhere;margin:10px 0"></div><p id="dpLinkScope" class="hint" role="status">Unlinked: guests can send messages but cannot view documents or assignments.</p><button class="btn" id="dpSecurity">Run Portal Security Check</button><div id="dpSecurityResults" role="status"></div><h4>Invitations</h4><div id="dpInvites"></div></details></section>
@@ -645,16 +645,47 @@
     function closePortalDrawer(){const panel=portalDrawerBackdrop?.querySelector('#dpDetails')||$('dpDetails');if(panel){panel.hidden=true;panel.style.cssText='';const queue=$('dpQueue');if(queue)queue.closest('section').after(panel);}if(portalDrawerBackdrop){portalDrawerBackdrop.remove();portalDrawerBackdrop=null;}}
     function openPortalDrawer(){closePortalDrawer();const panel=$('dpDetails');const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;z-index:12000;background:rgba(15,23,42,.48);display:flex;justify-content:flex-end';panel.hidden=false;panel.style.cssText='background:white;width:min(690px,100vw);height:100%;overflow-y:auto;box-sizing:border-box;padding:24px;border-radius:18px 0 0 18px;box-shadow:-10px 0 35px #0002';backdrop.append(panel);backdrop.ondblclick=e=>{if(e.target===backdrop)closePortalDrawer();};document.body.append(backdrop);portalDrawerBackdrop=backdrop;}
     function showDetails(item){openPortalDrawer();$('dpDetailTitle').textContent=(item.subject||item.kind||'Portal submission');$('dpDetailBody').innerHTML=`<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px">${[['Company',item.company],['Type',item.kind],['Contact',item.contact_name||item.name],['Email',item.contact_email||item.email],['Phone',item.contact_phone||item.phone],['Service address',item.service_address||item.address||item.job_address],['Urgency',item.urgency||item.priority],['Preferred visit',[item.preferred_date||item.scheduled_date,item.preferred_time||item.scheduled_time].filter(Boolean).join(' ')],['Work order',item.work_order_number],['Request type',item.request_type],['Submitted',date(item.created_at)],['Reference / Job / PO',item.reference||item.work_order_number||item.po_number],['Current status',status(item.status)],['Linked record',item.record_id]].map(([k,v])=>`<div><span class="hint">${safe(k)}</span><div style="font-weight:600;overflow-wrap:anywhere">${safe(v||'—')}</div></div>`).join('')}</div><h4>Message / details</h4><p style="white-space:pre-wrap;overflow-wrap:anywhere">${safe(item.message||item.description||'—')}</p>`;
-      const nav=document.createElement('div');nav.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';const go=document.createElement('button');go.className='btn';go.textContent=isCustomer(item)?'Open Customer Inquiry Center':'Open Vendor Operations';go.onclick=isCustomer(item)?renderDoorksInquiryOperations:renderDoorksVendorOperations;nav.append(go);if(isCustomer(item)&&item.kind!=='customer_work_order_change'){const send=document.createElement('button');send.className='btn btn-orange';send.textContent='Send to Vendor';send.onclick=()=>{closePortalDrawer();linkVendorButton.onclick(item.id)};nav.prepend(send)}$('dpDetailBody').append(nav);
+      const nav=document.createElement('div');nav.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:12px';const go=document.createElement('button');go.className='btn';go.textContent=isCustomer(item)?'Open Customer Inquiry Center':'Open Vendor Operations';go.onclick=isCustomer(item)?renderDoorksInquiryOperations:renderDoorksVendorOperations;nav.append(go);if(isCustomer(item)&&item.kind!=='customer_work_order_change'){const send=document.createElement('button');send.className='btn btn-orange';send.textContent='Send to Vendor';send.onclick=()=>{closePortalDrawer();linkVendorButton.onclick(item.id)};nav.prepend(send)}if(item.work_order_id){const ticket=document.createElement('button');ticket.className='btn btn-orange';ticket.textContent='Open linked Doorks work order';ticket.onclick=async()=>{closePortalDrawer();await renderBusinessCollection('doorks','work_orders');const search=document.getElementById('businessSearch');if(search){search.value=item.work_order_number||'';search.dispatchEvent(new Event('input'))}};nav.prepend(ticket)}$('dpDetailBody').append(nav);
       if(Array.isArray(item.upload_ids)&&item.upload_ids.length){const attachments=document.createElement('div');attachments.style.marginTop='12px';const label=document.createElement('strong');label.textContent='Attached files';attachments.append(label);for(const f of item.upload_ids){const id=typeof f==='string'?f:(f.upload_id||f.id);if(!id)continue;const a=document.createElement('a');a.href='/doorks-portals/admin/public-attachment/'+encodeURIComponent(item.id)+'/'+encodeURIComponent(id);a.textContent='Open attachment: '+(f.filename||f.name||id);a.target='_blank';a.rel='noopener noreferrer';a.style.cssText='display:block;margin:8px 0';attachments.append(a);if(/\.(png|jpe?g|gif|webp|bmp)$/i.test(f.filename||f.name||'')){const img=document.createElement('img');img.src=a.href;img.alt=f.filename||'Inquiry image';img.loading='lazy';img.style.cssText='max-width:180px;max-height:140px;object-fit:contain;border:1px solid #d9dee7;border-radius:10px;cursor:zoom-in;margin:6px';img.onclick=()=>window.open(a.href,'_blank','noopener');attachments.append(img)}}$('dpDetailBody').append(attachments)}
       $('dpReviewNote').value=item.review_note||'';$('dpReviewStatus').value=['pending_review','reviewed','resolved','rejected'].includes(status(item.status))?status(item.status):'pending_review';
       $('dpAttachment').hidden=!item.upload_id;if(item.upload_id){$('dpAttachment').href='/doorks-portals/admin/uploads/'+encodeURIComponent(item.id);const preview=document.createElement('div');preview.style.margin='12px 0';const image=document.createElement('img');image.src=$('dpAttachment').href;image.alt='Submitted attachment preview';image.loading='lazy';image.style.cssText='max-width:100%;max-height:260px;object-fit:contain;border-radius:12px;border:1px solid #d9dee7';image.onerror=()=>preview.remove();preview.append(image);$('dpAttachment').before(preview);}
+      // Operational requests require an explicit decision and separately saved source edit.
+      const operational=['customer_work_order_change','vendor_assignment_change_request'].includes(item.kind);
+      $('dpReviewStatus').disabled=operational;
+      $('dpSaveReview').disabled=operational;
+      if(operational){
+        const workflow=document.createElement('section');workflow.style.cssText='border:1px solid #cbd5e1;padding:14px;border-radius:10px;margin:14px 0';
+        const heading=document.createElement('strong');heading.textContent='Operational change decision';workflow.append(heading);
+        const info=document.createElement('p');info.className='hint';info.textContent='Approving does not edit the source ticket. Save the change in the original office editor, then confirm application here.';workflow.append(info);
+        const recordId=String(item.kind==='customer_work_order_change'?item.work_order_id||'':item.assignment_id||'');
+        const reference=document.createElement('p');reference.textContent='Source record ID: '+(recordId||'Unavailable');workflow.append(reference);
+        if(item.status==='pending_review'){
+          const choices=document.createElement('select');choices.className='input';for(const [v,t] of [['approve','Approve for office application'],['reject','Reject'],['request_clarification','Request clarification']])choices.add(new Option(t,v));
+          const button=document.createElement('button');button.className='btn';button.textContent='Record decision';
+          button.onclick=async()=>{if(!confirm('Record this decision? This will not modify the work order or assignment.'))return;button.disabled=true;try{await fetchJSON('/doorks-portals/admin/operational-change-requests/'+encodeURIComponent(item.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision:choices.value,note:$('dpReviewNote').value})});closePortalDrawer();await refresh()}catch(e){msg.textContent=e.message;button.disabled=false}};
+          workflow.append(choices,button);
+        }else if(item.status==='approved_pending_application'){
+          const button=document.createElement('button');button.className='btn';button.textContent='Confirm source edit was saved';
+          button.disabled=!recordId;
+          button.onclick=async()=>{const note=$('dpReviewNote').value.trim();if(note.length<5){msg.textContent='Describe the change actually saved in the office editor (at least 5 characters).';return}if(!confirm('Confirm you already saved the approved change to the original source record?'))return;button.disabled=true;try{await fetchJSON('/doorks-portals/admin/operational-change-requests/'+encodeURIComponent(item.id)+'/mark-applied',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_record_id:recordId,note})});closePortalDrawer();await refresh()}catch(e){msg.textContent=e.message;button.disabled=false}};
+          workflow.append(button);
+        }else{const current=document.createElement('p');current.textContent='Decision status: '+String(item.status).replaceAll('_',' ');workflow.append(current)}
+        $('dpDetailBody').append(workflow);
+      }
       $('dpSaveReview').onclick=async()=>{const btn=$('dpSaveReview');btn.disabled=true;try{await fetchJSON('/doorks-portals/admin/submissions/'+encodeURIComponent(item.id)+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:$('dpReviewStatus').value,note:$('dpReviewNote').value})});msg.textContent='Review saved. Operational and financial records were not changed.';closePortalDrawer();await refresh()}catch(e){msg.textContent='Review failed: '+e.message}finally{btn.disabled=false}};
+      const queueActions=document.createElement('div');queueActions.style.cssText='display:flex;gap:10px;flex-wrap:wrap;margin:20px 0';
+      for(const [action,label] of [['archive','Archive inquiry'],['delete','Delete from queue'],['restore','Restore inquiry']]){
+        if(action==='restore'&&!item.archived_at&&!item.deleted_at)continue;
+        if(action!=='restore'&&(item.archived_at||item.deleted_at))continue;
+        const button=document.createElement('button');button.className='btn';button.textContent=label;
+        button.onclick=async()=>{if(!confirm((action==='delete'?'Hide this inquiry from the queue? The work order, files and financial records will NOT be deleted.':label+'?')))return;button.disabled=true;try{await fetchJSON('/doorks-portals/admin/submissions/'+encodeURIComponent(item.id)+'/queue-action',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action})});closePortalDrawer();await refresh()}catch(e){alert(e.message)}finally{button.disabled=false}};queueActions.append(button);
+      }
+      $('dpDetailBody').append(queueActions);
       $('dpDetails').scrollTop=0;
     }
     function draw(){const items=cache.submissions||[],invitations=cache.invitations||[];const now=Date.now();const active=invitations.filter(x=>!x.revoked&&Date.parse(x.expires_at)>now).length;
-      const metrics=[['Needs review',items.filter(pending).length,'pending'],['Customer requests / responses',items.filter(isCustomer).length,'customer'],['Vendor updates',items.filter(x=>!isCustomer(x)).length,'vendor'],['Active invitations',active,'invites']];$('dpMetrics').replaceChildren();for(const [label,count,filter] of metrics){const b=document.createElement('button');b.className='btn';b.style.cssText='text-align:left;padding:16px;min-height:90px;display:flex;flex-direction:column;gap:8px';b.innerHTML=`<strong style="font-size:27px">${count}</strong><span>${safe(label)}</span>`;b.onclick=()=>{if(filter==='invites'){$('dpInvites').closest('details').open=true;$('dpInvites').scrollIntoView({behavior:'smooth'});}else{$('dpFilter').value=filter;draw();}};$('dpMetrics').append(b)}
-      const filter=$('dpFilter').value,query=$('dpSearch').value.toLowerCase().trim();const matches=items.slice().reverse().filter(x=>(filter==='all'&&status(x.status)!=='rejected'||filter==='pending'&&pending(x)||filter==='resolved'&&status(x.status)==='resolved'||filter==='rejected'&&status(x.status)==='rejected'||filter==='customer'&&isCustomer(x)||filter==='vendor'&&!isCustomer(x))&&(!query||[x.company,x.subject,x.kind,x.reference,x.message,x.contact_name,x.contact_email].some(v=>String(v||'').toLowerCase().includes(query))));const host=$('dpQueue');host.replaceChildren();if(!matches.length){host.textContent=items.length?'No submissions match this filter.':'No portal submissions yet. New customer requests and vendor updates will appear here.';}for(const x of matches){const b=document.createElement('button');b.className='btn';b.style.cssText='display:flex;width:100%;text-align:left;justify-content:space-between;gap:12px;align-items:center;padding:13px;margin:6px 0;white-space:normal';const left=document.createElement('span');left.style.cssText='display:grid;gap:5px';const title=document.createElement('strong');title.textContent=(x.subject||x.kind||'Submission')+' — '+(x.company||'Unknown company');const meta=document.createElement('span');meta.className='hint';meta.textContent=[x.priority&&'Priority: '+x.priority,x.address||x.service_address||x.job_address,x.contact_name||x.name,x.contact_email||x.email,x.reference,date(x.created_at)].filter(Boolean).join(' · ');left.append(title,meta);const badge=document.createElement('span');badge.textContent=status(x.status).replaceAll('_',' ');b.append(left,badge);b.onclick=()=>showDetails(x);host.append(b)}
+      const metrics=[['Needs review',items.filter(x=>!x.archived_at&&!x.deleted_at&&pending(x)).length,'pending'],['Customer requests / responses',items.filter(isCustomer).length,'customer'],['Vendor updates',items.filter(x=>!isCustomer(x)).length,'vendor'],['Active invitations',active,'invites']];$('dpMetrics').replaceChildren();for(const [label,count,filter] of metrics){const b=document.createElement('button');b.className='btn';b.style.cssText='text-align:left;padding:16px;min-height:90px;display:flex;flex-direction:column;gap:8px';b.innerHTML=`<strong style="font-size:27px">${count}</strong><span>${safe(label)}</span>`;b.onclick=()=>{if(filter==='invites'){$('dpInvites').closest('details').open=true;$('dpInvites').scrollIntoView({behavior:'smooth'});}else{$('dpFilter').value=filter;draw();}};$('dpMetrics').append(b)}
+      const filter=$('dpFilter').value,query=$('dpSearch').value.toLowerCase().trim();const matches=items.slice().reverse().filter(x=>filter==='archived'?(x.archived_at||x.deleted_at):(!x.archived_at&&!x.deleted_at)).filter(x=>(filter==='archived'||filter==='all'&&status(x.status)!=='rejected'||filter==='pending'&&pending(x)||filter==='resolved'&&status(x.status)==='resolved'||filter==='rejected'&&status(x.status)==='rejected'||filter==='customer'&&isCustomer(x)||filter==='vendor'&&!isCustomer(x))&&(!query||[x.company,x.subject,x.kind,x.reference,x.message,x.contact_name,x.contact_email].some(v=>String(v||'').toLowerCase().includes(query))));const host=$('dpQueue');host.replaceChildren();if(!matches.length){host.textContent=items.length?'No submissions match this filter.':'No portal submissions yet. New customer requests and vendor updates will appear here.';}for(const x of matches){const b=document.createElement('button');b.className='btn';b.style.cssText='display:flex;width:100%;text-align:left;justify-content:space-between;gap:12px;align-items:center;padding:13px;margin:6px 0;white-space:normal';const left=document.createElement('span');left.style.cssText='display:grid;gap:5px';const title=document.createElement('strong');title.textContent=(x.subject||x.kind||'Submission')+' — '+(x.company||'Unknown company');const meta=document.createElement('span');meta.className='hint';meta.textContent=[x.priority&&'Priority: '+x.priority,x.address||x.service_address||x.job_address,x.contact_name||x.name,x.contact_email||x.email,x.work_order_number,x.message||x.description,x.reference,date(x.created_at)].filter(Boolean).join(' · ');left.append(title,meta);const badge=document.createElement('span');badge.textContent=status(x.status).replaceAll('_',' ');b.append(left,badge);b.onclick=()=>showDetails(x);host.append(b)}
       const notices=$('dpNotifications');notices.replaceChildren();const events=(cache.notifications||[]).slice(-20).reverse();for(const n of events){const row=document.createElement('div');row.style.cssText='padding:9px 0;border-bottom:1px solid #ddd';row.textContent=date(n.created_at)+' · '+(n.message||n.kind||'Notification');notices.append(row)}if(!events.length)notices.textContent='No office notifications yet.';
       const invites=$('dpInvites');invites.replaceChildren();for(const i of invitations.slice().reverse()){const row=document.createElement('div');row.style.cssText='padding:9px 0;border-bottom:1px solid #ddd;display:flex;gap:10px;align-items:center;flex-wrap:wrap';const label=document.createElement('span');label.textContent=[i.kind,i.company,i.contact_email,i.revoked?'Revoked':Date.parse(i.expires_at)<=now?'Expired':'Active',i.record_id?'Linked record: '+i.record_id:'Unlinked'].join(' · ');row.append(label);if(!i.revoked){const b=document.createElement('button');b.className='btn';b.textContent='Revoke';b.onclick=async()=>{if(!confirm('Revoke this portal invitation?'))return;try{await fetchJSON('/doorks-portals/admin/invitations/'+encodeURIComponent(i.id)+'/revoke',{method:'POST'});await refresh()}catch(e){msg.textContent=e.message}};row.append(b)}invites.append(row)}if(!invitations.length)invites.textContent='No invitations created.';
       const payments=$('dpPayments');payments.replaceChildren();for(const x of (cache.payment_links||[]).slice().reverse()){const row=document.createElement('div');row.textContent='Invoice '+x.document_id+' · configured '+date(x.updated_at);payments.append(row)}if(!cache.payment_links?.length)payments.textContent='No checkout links configured.';
@@ -4821,6 +4852,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
     const fields = document.createElement("div");
     fields.className = "grid2";
     fields.style.marginTop = "10px";
+    // The office ticket uses the same field renderer as the customer/vendor ticket.
+    // Keep the original markup as a fail-safe if the shared module cannot load.
     fields.innerHTML = `
       <div><div class="label">${job.kind === "sales_lead" ? "Sales Lead #" : "Job #"}</div><div class="field">${job.job_number || ""}</div></div>
       <div><div class="label">Address</div><div class="field">${job.address || ""}</div></div>
@@ -4834,6 +4867,15 @@ function renderAttachmentSection(titleText, items, options = {}) {
       <div><div class="label">Invoice #</div><div class="field">${job.invoice_number || ""}</div></div>
     `;
  
+    doorksLoadSharedTicket().then(shared => {
+      if (fields.isConnected && shared?.renderTicketFields) {
+        shared.renderTicketFields(fields, job, { role: 'office', only: [
+          'Job #','Address','Contact','Phone','Email','PO #','Estimate #',
+          'Sent Estimate #','Quote Assigned To','Invoice #'
+        ] });
+      }
+    }).catch(() => {});
+
     const officeNotes = document.createElement("div");
     officeNotes.style.marginTop = "10px";
     officeNotes.innerHTML = `<div class="label">Office Notes</div><div class="field" style="white-space:pre-wrap;">${job.office_notes || ""}</div>`;
@@ -4880,7 +4922,54 @@ function renderAttachmentSection(titleText, items, options = {}) {
     btnEdit.className = "btn btn-orange";
     btnEdit.textContent = "Edit";
     primaryActions.appendChild(btnEdit);
- 
+
+    // Shared, authenticated ticket quick editor: uses the exact same field
+    // controller as portal requests, but saves through the existing office API.
+    // The full legacy Edit drawer remains available for all other fields.
+    const btnSharedEdit = document.createElement("button");
+    btnSharedEdit.className = "btn";
+    btnSharedEdit.textContent = "Quick Edit Ticket Details";
+    btnSharedEdit.type = "button";
+    primaryActions.appendChild(btnSharedEdit);
+    btnSharedEdit.addEventListener("click", async () => {
+      try {
+        const shared = await doorksLoadSharedTicket();
+        if (!shared?.createTicketEditPanel) throw Error("Shared ticket editor unavailable");
+        const editorHost = document.createElement("div");
+        editorHost.className = "card";
+        editorHost.style.cssText = "margin-top:12px;padding:16px;width:100%;box-sizing:border-box";
+        const heading = document.createElement("h3");
+        heading.textContent = "Edit Work Order Details";
+        const close = document.createElement("button");
+        close.type = "button";
+        close.className = "btn";
+        close.textContent = "Cancel";
+        close.addEventListener("click", () => editorHost.remove());
+        editorHost.append(heading, close);
+        const editBody = document.createElement("div");
+        editorHost.append(editBody);
+        btnSharedEdit.after(editorHost);
+        btnSharedEdit.disabled = true;
+        const fieldsToEdit = ['address','contact','phone','email','po_number',
+          'estimate_number','invoice_number','quote_assigned_to','sent_quote_number'];
+        shared.createTicketEditPanel(editBody, {
+          role: 'office', fields: fieldsToEdit, values: job,
+          submit: async values => {
+            // Server-side office authorization remains in apiUpdateJob.
+            const updated = await apiUpdateJob(job.id, {...values});
+            if (ctx?.afterSave) await ctx.afterSave();
+            renderJobDetails(container, updated, ctx);
+            refreshBadges();
+            return {message: 'Work order saved.'};
+          }
+        });
+        close.addEventListener("click", () => {btnSharedEdit.disabled = false});
+      } catch (error) {
+        btnSharedEdit.disabled = false;
+        alert(error.message || String(error));
+      }
+    });
+
     const btnForm = document.createElement("button");
     styleActionButton(btnForm, "green", false);
     btnForm.textContent = (job.kind === "sales_lead") ? "Recommendation Form" : "Completion Form";
@@ -5104,6 +5193,26 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       row3.querySelector("#ej_po").value = job.po_number || "";
       row3.querySelector("#ej_est").value = job.estimate_number || "";
  
+      // Shared ticket input controls: preserve the existing office form IDs,
+      // autocomplete and save handler, while reusing the portal input factory.
+      const sharedTicketEditor = await doorksLoadSharedTicket().catch(() => null);
+      if (sharedTicketEditor?.createTicketFieldInput) {
+        const inputs = [
+          [row1, 'ej_address', 'address'], [row1, 'ej_contact', 'contact'],
+          [row2, 'ej_phone', 'phone'], [row2, 'ej_email', 'email'],
+          [row3, 'ej_po', 'po_number'], [row3, 'ej_est', 'estimate_number']
+        ];
+        for (const [section, id, field] of inputs) {
+          const oldInput = section.querySelector('#' + id);
+          if (!oldInput) continue;
+          const replacement = sharedTicketEditor.createTicketFieldInput(field, {
+            role: 'office', id, value: oldInput.value,
+            list: oldInput.getAttribute('list'), label: field.replace(/_/g, ' ')
+          });
+          oldInput.replaceWith(replacement);
+        }
+      }
+
       const row4 = document.createElement("div");
       row4.className = "grid2";
       row4.innerHTML = `
@@ -5121,7 +5230,26 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       rowQuote.querySelector("#ej_quote_assigned").value = job.quote_assigned_to || "";
       rowQuote.querySelector("#ej_sent_quote").value = job.sent_quote_number || "";
- 
+
+      // Rev100: finish routing the office-controlled ticket reference inputs
+      // through the same factory used by portal scheduling requests. Keep IDs,
+      // existing save handlers, and office authorization unchanged.
+      if (sharedTicketEditor?.createTicketFieldInput) {
+        for (const [section, id, field] of [
+          [row4, 'ej_inv', 'invoice_number'],
+          [rowQuote, 'ej_quote_assigned', 'quote_assigned_to'],
+          [rowQuote, 'ej_sent_quote', 'sent_quote_number']
+        ]) {
+          const original = section.querySelector('#' + id);
+          if (!original) continue;
+          const replacement = sharedTicketEditor.createTicketFieldInput(field, {
+            role: 'office', id, value: original.value,
+            label: original.closest('div')?.querySelector('.label')?.textContent || field
+          });
+          original.replaceWith(replacement);
+        }
+      }
+
       const notes = document.createElement("div");
       notes.innerHTML = `<div class="label">Job Notes</div>`;
       const ta = document.createElement("textarea");
@@ -10271,7 +10399,8 @@ function serializeDocItems(items, laborOnly) {
       .join("\n");
   }
  
-  function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
+  async function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
+    await doorksLoadSharedTicket();
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
       const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
@@ -10448,13 +10577,36 @@ function serializeDocItems(items, laborOnly) {
       if (job) { dom.customer.value = (editDoc && editDoc.customer) || job.customer || ""; dom.address.value = (editDoc && editDoc.address) || job.address || ""; dom.ship.value = (editDoc && editDoc.ship_to) || job.address || job.customer || ""; dom.po.value = (editDoc && editDoc.po_number) || job.po_number || ""; dom.job.value = (editDoc && editDoc.job_number) || job.job_number || ""; }
       if (editDoc) { dom.work.value = editDoc.work || ""; setTaxRateValue(editDoc.tax_rate ?? 7.75); dom.completedBy.value = editDoc.completed_by || ""; dom.number.value = editDoc.number || ""; }
       function applyDocTypeMeta(){ docType=dom.type.value; const defaultNumber=nextDocNumberFromStorage(docType); dom.numberLabel.textContent = docType === "estimate" ? "Estimate #" : "Invoice #"; if (editDoc) return; if (!String(dom.number.value||"").trim() || (docType==="estimate" && String(dom.number.value||"").startsWith("JS")) || (docType==="invoice" && String(dom.number.value||"").startsWith("RE"))) dom.number.value = docType === "estimate" ? defaultNumber : (job?.invoice_number || defaultNumber); }
-      function categoryTotals(){ const sums={trip:0,fuel:0,labor:0,parts:0,other:0}; items.forEach(it=>{ const total=Number(it.qty||0)*Number(it.rate||0); const kind=String(it.kind||"other").toLowerCase(); if (kind==="trip") sums.trip+=total; else if (kind==="fuel") sums.fuel+=total; else if (kind==="labor") sums.labor+=total; else if (kind==="part") sums.parts+=total; else sums.other+=total;}); return sums; }
-      function updateTotals(){ const subtotal=items.reduce((s,it)=>s+(Number(it.qty||0)*Number(it.rate||0)),0); const taxableSubtotal=getTaxableSubtotal(items); const taxRate=Number(getCurrentTaxRateValue()||0)/100; const tax=taxableSubtotal*taxRate; const sums=categoryTotals(); dom.subtotal.textContent=`$${money(subtotal)}`; dom.taxable.textContent=`$${money(taxableSubtotal)}`; dom.tax.textContent=`$${money(tax)}`; dom.total.textContent=`$${money(subtotal+tax)}`; dom.tripTotal.textContent=`$${money(sums.trip)}`; dom.fuelTotal.textContent=`$${money(sums.fuel)}`; dom.laborTotal.textContent=`$${money(sums.labor)}`; dom.partsTotal.textContent=`$${money(sums.parts)}`; dom.otherTotal.textContent=`$${money(sums.other)}`; }
+      function updateTotals(){
+        const sharedMath=window.DoorksSharedTicket?.calculateDocumentTotals;
+        const totals=sharedMath ? sharedMath(items,Number(getCurrentTaxRateValue()||0)) : null;
+        const subtotal=totals ? totals.subtotal : items.reduce((s,it)=>s+(Number(it.qty||0)*Number(it.rate||0)),0);
+        const taxableSubtotal=totals ? totals.taxableSubtotal : getTaxableSubtotal(items);
+        const tax=totals ? totals.tax : taxableSubtotal*Number(getCurrentTaxRateValue()||0)/100;
+        const sums=totals?.categories || items.reduce((acc,it)=>{const k=String(it.kind||'other').toLowerCase();const key=k==='part'||k==='parts'?'parts':(['trip','fuel','labor'].includes(k)?k:'other');acc[key]+=Number(it.qty||0)*Number(it.rate||0);return acc},{trip:0,fuel:0,labor:0,parts:0,other:0});
+        dom.subtotal.textContent=`$${money(subtotal)}`; dom.taxable.textContent=`$${money(taxableSubtotal)}`;
+        dom.tax.textContent=`$${money(tax)}`; dom.total.textContent=`$${money(subtotal+tax)}`;
+        dom.tripTotal.textContent=`$${money(sums.trip)}`; dom.fuelTotal.textContent=`$${money(sums.fuel)}`;
+        dom.laborTotal.textContent=`$${money(sums.labor)}`; dom.partsTotal.textContent=`$${money(sums.parts)}`;
+        dom.otherTotal.textContent=`$${money(sums.other)}`;
+      }
       function renderPartLookupResults(results){ currentPartResults=Array.isArray(results)?results:[]; dom.partResults.innerHTML=""; dom.partLookupHint.textContent=currentPartResults.length?`${currentPartResults.length} matching part${currentPartResults.length===1?"":"s"}`:"No matching parts found yet."; currentPartResults.slice(0,10).forEach(p=>{ const row=document.createElement("button"); row.className="btn"; row.style.textAlign="left"; row.innerHTML=`<strong>${escapeHtml(p.Item||"")}</strong><br><span class="hint">${escapeHtml(p.Description||"")}${p.Price?` - $${money(p.Price)}`:""}</span>`; row.addEventListener("click",()=>addPartToItems(p)); dom.partResults.appendChild(row); }); }
       let searchTimer=null; async function searchParts(q){ try{ renderPartLookupResults(await apiListParts({ q, limit:25 })); } catch { renderPartLookupResults([]); } }
       function addPartToItems(part){ if(!part) return; items.push(createDocLineItem({ code:part.Item||"", description:part.Description||"", qty:1, rate:Number(part.Price||0), kind:"part", taxable:true })); dom.partLookup.value=""; renderPartLookupResults([]); renderItems(); }
       function findPartMatch(q){ const n=String(q||"").trim().toLowerCase(); if(!n) return null; return currentPartResults.find(p=>String(p.Item||"").trim().toLowerCase()===n) || currentPartResults.find(p=>String(p.Description||"").trim().toLowerCase()===n) || currentPartResults.find(p=>`${p.Item||""} ${p.Description||""}`.toLowerCase().includes(n)) || null; }
-      function makeRow(item,idx){ const tr=document.createElement("tr"); const total=Number(item.qty||0)*Number(item.rate||0); tr.innerHTML=`<td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" data-k="code" value="${item.code||""}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" data-k="description" value="${item.description||""}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" style="min-width:72px;" data-k="qty" type="number" min="0" step="0.25" value="${Number(item.qty||0)}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><input class="input" style="min-width:96px;" data-k="rate" type="number" min="0" step="0.01" value="${Number(item.rate||0)}" /></td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><label style="display:flex; align-items:center; gap:6px;"><input type="checkbox" data-k="taxable" ${item.taxable===false?"":"checked"}/> <span class="hint">Tax</span></label></td><td style="padding:8px; border-bottom:1px solid #f3f4f6; white-space:nowrap;" data-k="line_total">$${money(total)}</td><td style="padding:8px; border-bottom:1px solid #f3f4f6;"><button class="btn" data-k="del">&times;</button></td>`; const updateLine=()=>{ tr.querySelector('[data-k="line_total"]').textContent=`$${money(Number(item.qty||0)*Number(item.rate||0))}`; updateTotals(); }; tr.querySelector('[data-k="code"]').addEventListener("change", async e => { item.code=e.target.value; const hit=await apiListParts({ q:item.code, limit:10 }).catch(()=>[]); const part=hit.find(p=>String(p.Item||"").trim().toLowerCase()===String(item.code||"").trim().toLowerCase())||hit[0]; if(part){ item.code=part.Item||item.code; item.description=part.Description||item.description; item.rate=Number(part.Price||item.rate||0); item.kind="part"; item.taxable=true; renderItems(); return; } updateLine(); }); tr.querySelector('[data-k="description"]').addEventListener("input", e => { item.description=e.target.value; }); tr.querySelector('[data-k="qty"]').addEventListener("input", e => { item.qty=Number(e.target.value||0); updateLine(); }); tr.querySelector('[data-k="rate"]').addEventListener("input", e => { item.rate=Number(e.target.value||0); updateLine(); }); tr.querySelector('[data-k="taxable"]').addEventListener("change", e => { item.taxable=!!e.target.checked; updateLine(); }); tr.querySelector('[data-k="del"]').addEventListener("click", ()=>{ items.splice(idx,1); renderItems(); }); return tr; }
+      function makeRow(item,idx){
+        const shared=window.DoorksSharedTicket?.createDocumentLineRow;
+        if(!shared)throw Error('Shared document line editor is unavailable');
+        const tr=shared(item,idx,{mode:'office',onRemove:(i)=>{items.splice(i,1);renderItems()},onChange:()=>{
+          tr.querySelector('[data-k="line_total"]').textContent='$'+money(Number(item.qty||0)*Number(item.rate||0));updateTotals();
+        },onFieldChange:async (line,key,value)=>{
+          if(key!=='code')return;
+          const hit=await apiListParts({q:line.code,limit:10}).catch(()=>[]);
+          const part=hit.find(p=>String(p.Item||'').trim().toLowerCase()===String(line.code||'').trim().toLowerCase())||hit[0];
+          if(part){line.code=part.Item||line.code;line.description=part.Description||line.description;line.rate=Number(part.Price||line.rate||0);line.kind='part';line.taxable=true;renderItems()}
+        }});
+        return tr;
+      }
       function renderItems(){ applyDocTypeMeta(); dom.tbody.innerHTML=""; items.forEach((item,idx)=>dom.tbody.appendChild(makeRow(item,idx))); updateTotals(); }
       dom.partLookup.addEventListener("input", ()=>{ clearTimeout(searchTimer); const q=dom.partLookup.value.trim(); if(!q){ renderPartLookupResults([]); return; } searchTimer=setTimeout(()=>searchParts(q), 180); });
       dom.partLookup.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addPartToItems(findPartMatch(dom.partLookup.value)||currentPartResults[0]); }});
@@ -10641,7 +10793,13 @@ function serializeDocItems(items, laborOnly) {
           ship_to: dom.ship.value.trim()
         };
       }
-card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const newDocNumber = (resp.doc && resp.doc.number) || dom.number.value.trim();
+card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const lineCheck = window.DoorksSharedTicket?.validateDocumentLines?.(items);
+      if (!lineCheck) { alert("Shared document validation is unavailable. Please reload before issuing a document."); return; }
+      if (!lineCheck.valid) { alert(lineCheck.errors.join("\n")); return; }
+      const draftCheck=window.DoorksSharedTicket?.validateDocumentDraft?.({role:'office',items,customer:dom.customer.value,number:dom.number.value,preparedBy:dom.completedBy.value,taxRate:Number(getCurrentTaxRateValue())});
+      if(!draftCheck){alert('Shared document draft validation is unavailable. Please reload.');return;}
+      if(!draftCheck.valid){alert(draftCheck.errors.join("\n"));return;}
+      const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const newDocNumber = (resp.doc && resp.doc.number) || dom.number.value.trim();
 const updated = await apiUpdateJob(job.id, {
   po_number: dom.po.value.trim(),
   // Estimate/follow-up quote creation should populate Sent Estimate # only.
@@ -13390,6 +13548,7 @@ function renderSaddlebackView() {
     }).catch(() => {});
     refreshBadges();
   })();
+window.__doorksOpenCustomerDocumentDraft=(type)=>renderWorkspaceEstimateInvoice('doorks',true,null,type==='invoice'?'Invoice':'Estimate');
 })();
 
 
@@ -13406,10 +13565,75 @@ function renderSdcSoftwareSales(){
 }
 
 
+// Rev93: register real office controllers on every load, including when the
+// shared script was loaded earlier by a portal. Never mark registration complete
+// unless both existing office functions are available.
+function doorksRegisterOfficeControllers(shared){
+ if(!shared?.registerOfficeControllers)return shared;
+ shared.registerOfficeControllers({
+   ...(typeof openEstimateInvoiceDrawer==='function'?{document:({job=null,type='estimate',container=null,ctx=null})=>openEstimateInvoiceDrawer(job,type,container,ctx)}:{}),
+   ...(typeof renderJobDetails==='function'?{ticket:({host,record,ctx})=>renderJobDetails(host,record,ctx)}:{})
+ });
+ return shared;
+}
+async function doorksLoadSharedTicket(){
+ if(window.DoorksSharedTicket)return doorksRegisterOfficeControllers(window.DoorksSharedTicket);
+ if(!document.querySelector('link[data-doorks-shared-ticket]')){const css=document.createElement('link');css.rel='stylesheet';css.href='/static/doorks_shared_ticket.css';css.dataset.doorksSharedTicket='1';document.head.append(css)}
+ if(!window.__doorksSharedTicketPromise){window.__doorksSharedTicketPromise=new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='/static/doorks_shared_ticket.js';script.onload=()=>resolve(window.DoorksSharedTicket);script.onerror=()=>reject(Error('Unable to load shared ticket component'));document.head.append(script)})}
+ return doorksRegisterOfficeControllers(await window.__doorksSharedTicketPromise);
+}
 async function openDoorksVendorCommercialReview(){
-  const fetchJSON=async(url,opts={})=>{const response=await fetch(url,{credentials:'same-origin',...opts});const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Request failed');return data};
-  const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;background:#17213388;z-index:12550;display:flex;justify-content:flex-end';
-  const panel=document.createElement('div');panel.style.cssText='background:#fff;width:min(760px,100vw);height:100%;overflow:auto;padding:24px';backdrop.append(panel);document.body.append(backdrop);
-  const header=document.createElement('h2');header.textContent='Vendor Documents & Assignment Messages';const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=()=>backdrop.remove();panel.append(header,close);
-  const load=async()=>{try{const result=await fetchJSON('/doorks-portals/admin/vendor-commercial-documents');const old=panel.querySelector('#vendorCommercialRows');if(old)old.remove();const host=document.createElement('div');host.id='vendorCommercialRows';panel.append(host);for(const doc of (result.documents||[]).slice().reverse()){const card=document.createElement('section');card.style.cssText='border:1px solid #d8e1e9;border-radius:12px;padding:16px;margin:12px 0';const title=document.createElement('h3');title.textContent=doc.document_type.toUpperCase()+' · '+(doc.work_order_number||doc.assignment_id)+' · $'+Number(doc.amount).toFixed(2);const info=document.createElement('p');info.textContent=doc.description+' · '+doc.status+(doc.reference?' · Ref '+doc.reference:'');card.append(title,info);if(doc.status==='submitted_for_review')for(const decision of ['approved','rejected']){const button=document.createElement('button');button.className='btn';button.textContent=decision==='approved'?'Approve vendor document':'Reject';button.onclick=async()=>{if(!confirm('Mark this vendor document '+decision+'? This will not post an accounting transaction.'))return;try{await fetchJSON('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});await load()}catch(e){alert(e.message)}};card.append(button)}const thread=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Office ↔ vendor messages';thread.append(summary);const messages=document.createElement('div');thread.append(messages);thread.ontoggle=async()=>{if(!thread.open)return;try{const r=await fetchJSON('/doorks-portals/admin/vendor-assignments/'+encodeURIComponent(doc.assignment_id)+'/messages');messages.replaceChildren();for(const m of r.messages){const p=document.createElement('p');p.textContent=m.sender+': '+m.message;messages.append(p)}}catch(e){messages.textContent=e.message}};const reply=document.createElement('textarea');reply.className='input';reply.placeholder='Reply to vendor';reply.style.width='100%';const send=document.createElement('button');send.className='btn';send.textContent='Send reply';send.onclick=async()=>{try{await fetchJSON('/doorks-portals/admin/vendor-assignments/'+encodeURIComponent(doc.assignment_id)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignment_id:doc.assignment_id,message:reply.value})});reply.value='';thread.open=false;thread.open=true}catch(e){alert(e.message)}};thread.append(reply,send);card.append(thread);host.append(card)}if(!result.documents?.length)host.textContent='No vendor estimates or invoices submitted.'}catch(e){const err=document.createElement('p');err.textContent=e.message;panel.append(err)}};await load();
+ await doorksLoadSharedTicket();
+ const call=async(url,opts={})=>{const response=await fetch(url,{credentials:'same-origin',...opts});const data=await response.json();if(!response.ok)throw Error(typeof data.detail==='string'?data.detail:'Request failed');return data};
+ const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;background:#17213388;z-index:12550;display:flex;justify-content:flex-end';
+ const panel=document.createElement('div');panel.style.cssText='background:#fff;width:min(950px,100vw);height:100%;overflow:auto;padding:24px;box-sizing:border-box';backdrop.append(panel);backdrop.ondblclick=e=>{if(e.target===backdrop)backdrop.remove()};document.body.append(backdrop);
+ const heading=document.createElement('h2');heading.textContent='Doorks · Vendor Documents';const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=()=>backdrop.remove();panel.append(heading,close);
+ const description=document.createElement('p');description.className='hint';description.textContent='Review vendor proposals, edit itemized pricing and reply to vendors. Vendor cost documents remain private and never automatically become customer invoices.';panel.append(description);
+ const search=document.createElement('input');search.className='input';search.placeholder='Search work order, reference, status or document type';search.style.cssText='width:100%;margin:12px 0';panel.append(search);
+ const host=document.createElement('div');panel.append(host);
+ const money=n=>Number(n||0).toLocaleString('en-US',{style:'currency',currency:'USD'});
+ let documents=[];
+ const load=async()=>{try{const result=await call('/doorks-portals/admin/vendor-commercial-documents');documents=result.documents||[];draw()}catch(e){host.textContent=e.message}};
+ const draw=()=>{host.replaceChildren();const q=search.value.toLowerCase().trim();for(const doc of documents.slice().reverse().filter(d=>[d.work_order_number,d.reference,d.status,d.document_type].some(v=>String(v||'').toLowerCase().includes(q)))){
+ const card=document.createElement('section');card.style.cssText='border:1px solid #d8e1e9;border-left:5px solid #365b3b;border-radius:12px;padding:20px;margin:12px 0;background:#fff';
+ const title=document.createElement('h3');title.textContent=(doc.document_type||'Document').toUpperCase()+' · Work Order '+(doc.work_order_number||'—');const meta=document.createElement('p');meta.textContent=[doc.reference&&'Ref '+doc.reference,doc.status,money(doc.amount),doc.created_at&&new Date(doc.created_at).toLocaleString()].filter(Boolean).join(' · ');card.append(title,meta);
+ const sharedDoc=document.createElement('div');window.DoorksSharedTicket.renderDocument(sharedDoc,doc,{vendor:true});card.append(sharedDoc);
+ const summary=document.createElement('details');summary.open=doc.status==='submitted_for_review';const summaryLabel=document.createElement('summary');summaryLabel.textContent='Open itemized review ticket';summary.append(summaryLabel);
+ const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse;margin:16px 0';const tr=document.createElement('tr');for(const x of ['Description','Quantity','Rate','Amount']){const th=document.createElement('th');th.textContent=x;th.style.cssText='padding:10px;text-align:left;border-bottom:2px solid #365b3b';tr.append(th)}table.append(tr);
+ for(const item of doc.line_items||[]){const row=document.createElement('tr');for(const val of [item.description,item.quantity,money(item.rate),money(Number(item.quantity)*Number(item.rate))]){const td=document.createElement('td');td.textContent=val;td.style.cssText='padding:10px;border-bottom:1px solid #d8e1e9';row.append(td)}table.append(row)}summary.append(table);
+ const total=document.createElement('strong');total.textContent='Vendor proposal total: '+money(doc.amount);summary.append(total);const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin:12px 0';
+ const openJob=document.createElement('button');openJob.className='btn';openJob.textContent='Open Doorks work orders';openJob.onclick=()=>{backdrop.remove();renderBusinessCollection('doorks','work_orders').then(()=>{const search=document.getElementById('businessSearch');if(search){search.value=doc.work_order_number||'';search.dispatchEvent(new Event('input'))}})};actions.append(openJob);const customerEstimate=document.createElement('button');customerEstimate.className='btn btn-orange';customerEstimate.textContent='Prepare customer-facing '+(doc.document_type==='invoice'?'invoice':'estimate')+' in Doorks';customerEstimate.onclick=()=>{if(doc.status!=='approved'&&!confirm('Vendor proposal is not approved. Continue preparing an office draft?'))return;window.__doorksAiIntakeDraft={platform:'doorks',type:doc.document_type==='invoice'?'invoice':'estimate',text:'Work order '+(doc.work_order_number||'')+'\n'+(doc.line_items||[]).map(x=>x.description).join('\n')};backdrop.remove();window.__doorksOpenCustomerDocumentDraft(doc.document_type)};actions.append(customerEstimate);
+ // Rev 85: an office-approved vendor proposal can be explicitly associated with an
+ // existing issued Doorks document. Never publish vendor pricing to customers.
+ if(doc.status==='approved'){
+  const handoff=document.createElement('details');handoff.style.cssText='margin:14px 0;padding:14px;border:1px solid #d8e1e9;border-radius:12px;background:#f7faf8';
+  const handoffTitle=document.createElement('summary');handoffTitle.textContent=doc.office_document_id?'Customer document linked · '+(doc.office_document_number||doc.office_document_id):'Link issued customer document';handoff.append(handoffTitle);
+  const help=document.createElement('p');help.className='hint';help.textContent='First prepare and issue the customer-facing document in the Doorks Estimate/Invoice builder. Then link the issued document here. Vendor costs stay private.';handoff.append(help);
+  const selection=document.createElement('select');selection.className='input';selection.style.cssText='width:100%;margin:8px 0';handoff.append(selection);
+  const feedback=document.createElement('p');feedback.setAttribute('role','status');handoff.append(feedback);
+  handoff.ontoggle=async()=>{if(!handoff.open)return;selection.replaceChildren();const option=document.createElement('option');option.textContent='Loading eligible issued documents…';option.value='';selection.append(option);try{const response=await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/eligible-office-documents');selection.replaceChildren();const first=document.createElement('option');first.textContent='Select an issued document';first.value='';selection.append(first);for(const d of response.documents||[]){const opt=document.createElement('option');opt.value=d.id;opt.textContent=[d.number||d.id,d.status,money(d.amount),d.has_original?'PDF published':'PDF not published'].join(' · ');selection.append(opt)}if(doc.office_document_id)selection.value=doc.office_document_id;if(!(response.documents||[]).length)feedback.textContent='No eligible issued documents found. Check customer ID and document status.'}catch(e){feedback.textContent=e.message}};
+  const link=document.createElement('button');link.className='btn btn-orange';link.textContent='Link issued document';link.disabled=!!doc.office_document_id;link.onclick=async()=>{if(!selection.value)return alert('Select a document.');if(!confirm('Link this issued customer document to the vendor proposal? This will not alter pricing or send email.'))return;link.disabled=true;try{await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/link-office-document',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({office_document_id:selection.value})});await load()}catch(e){feedback.textContent=e.message;link.disabled=false}};handoff.append(link);
+  if(doc.office_document_id){const published=document.createElement('p');published.className='hint';published.textContent='Linked office document: '+(doc.office_document_number||doc.office_document_id)+'. Customer visibility requires an issued document with the correct customer ID; original PDF publication is separate.';handoff.append(published)}
+  if(doc.office_document_id){
+   const uploadLabel=document.createElement('label');uploadLabel.textContent='Publish actual customer-facing PDF/image';uploadLabel.style.cssText='display:block;margin-top:14px;font-weight:600';handoff.append(uploadLabel);
+   const upload=document.createElement('input');upload.type='file';upload.accept='.pdf,.png,.jpg,.jpeg,.webp';upload.style.cssText='display:block;margin:8px 0';handoff.append(upload);
+   const publish=document.createElement('button');publish.className='btn';publish.textContent='Publish original to customer portal';publish.onclick=async()=>{const file=upload.files&&upload.files[0];if(!file)return alert('Choose the approved customer-facing PDF or image.');if(!confirm('Publish this document to the linked customer portal? Confirm it contains NO private vendor pricing.'))return;publish.disabled=true;feedback.textContent='Uploading…';try{const form=new FormData();form.append('file',file);const response=await fetch('/doorks-portals/admin/document-originals/'+encodeURIComponent(doc.office_document_id),{method:'POST',credentials:'same-origin',body:form});const result=await response.json();if(!response.ok)throw Error(result.detail||'Publication failed');feedback.textContent='Published successfully. The customer can now open the original document.';upload.value=''}catch(e){feedback.textContent=e.message}finally{publish.disabled=false}};handoff.append(publish);
+   const mailSection=document.createElement('details');mailSection.style.cssText='margin-top:16px;padding-top:12px;border-top:1px solid #d8e1e9';const mailTitle=document.createElement('summary');mailTitle.textContent='Email published customer document (office only)';mailSection.append(mailTitle);
+   const mailHelp=document.createElement('p');mailHelp.className='hint';mailHelp.textContent='Requires configured SMTP. Only a saved contact email for this customer is accepted. The published customer-facing original is attached automatically.';mailSection.append(mailHelp);
+   const recipient=document.createElement('input');recipient.className='input';recipient.type='email';recipient.placeholder='Saved customer contact email';recipient.style.cssText='width:100%;margin:6px 0';mailSection.append(recipient);
+   const subject=document.createElement('input');subject.className='input';subject.placeholder='Email subject';subject.value='Doorks · '+(doc.document_type==='invoice'?'Invoice':'Estimate')+' for work order '+(doc.work_order_number||'');subject.style.cssText='width:100%;margin:6px 0';mailSection.append(subject);
+   const body=document.createElement('textarea');body.className='input';body.value='Hello,\n\nPlease find the attached '+(doc.document_type==='invoice'?'invoice':'estimate')+' for your review.\n\nThank you.';body.style.cssText='width:100%;min-height:120px;margin:6px 0';mailSection.append(body);
+   const sendMail=document.createElement('button');sendMail.className='btn btn-orange';sendMail.textContent='Send customer email with attachment';sendMail.onclick=async()=>{if(!recipient.value.trim()||!subject.value.trim()||!body.value.trim())return alert('Complete recipient, subject and message.');if(!confirm('Send the published customer-facing document to '+recipient.value+'?'))return;sendMail.disabled=true;feedback.textContent='Sending email…';try{const result=await call('/doorks-portals/admin/document-originals/'+encodeURIComponent(doc.office_document_id)+'/email',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({recipient:recipient.value,subject:subject.value,message:body.value})});feedback.textContent=result.message||'Email sent';mailSection.open=false}catch(e){feedback.textContent=e.message}finally{sendMail.disabled=false}};mailSection.append(sendMail);handoff.append(mailSection);
+  }
+  summary.append(handoff);
+ }
+ const email=document.createElement('button');email.className='btn';email.textContent='Prepare office email';email.title='Opens an email draft; does not send or attach the vendor document';email.onclick=()=>{const subject=encodeURIComponent('Work order '+(doc.work_order_number||'')+' — '+(doc.document_type||'Document')+' update');const body=encodeURIComponent('Regarding work order '+(doc.work_order_number||'')+'\n\nOur office has reviewed the '+doc.document_type+' details. Please contact us with any questions.\n\n[Attach the approved customer-facing estimate/invoice before sending.]');location.href='mailto:?subject='+subject+'&body='+body};actions.append(email);summary.append(actions);
+ if(doc.status==='submitted_for_review'){
+ const edit=document.createElement('details');edit.style.margin='16px 0';const label=document.createElement('summary');label.textContent='Edit vendor proposal before review';edit.append(label);
+ const rows=document.createElement('div');edit.append(rows);const items=(doc.line_items||[]).map(x=>({...x}));const redraw=()=>{rows.replaceChildren();items.forEach((item,i)=>{const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,3fr) 75px 100px 40px;gap:6px;margin:8px 0';for(const [key,type] of [['description','text'],['quantity','number'],['rate','number']]){const input=document.createElement('input');input.className='input';input.type=type;input.value=item[key]??'';input.style.minWidth='0';input.oninput=()=>item[key]=input.value;row.append(input)}const del=document.createElement('button');del.className='btn';del.textContent='×';del.onclick=()=>{items.splice(i,1);redraw()};row.append(del);rows.append(row)})};redraw();
+ const add=document.createElement('button');add.className='btn';add.textContent='+ Add line';add.onclick=()=>{items.push({description:'',quantity:1,rate:0});redraw()};const note=document.createElement('textarea');note.className='input';note.placeholder='Internal edit note';note.style.cssText='display:block;width:100%;margin:12px 0';const save=document.createElement('button');save.className='btn btn-orange';save.textContent='Save vendor proposal edits';save.onclick=async()=>{if(!items.length||items.some(x=>!String(x.description||'').trim()||Number(x.quantity)<=0||Number(x.rate)<0)){alert('Complete all line items first.');return}save.disabled=true;try{await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({line_items:items.map(x=>({description:x.description,quantity:Number(x.quantity),rate:Number(x.rate)})),reference:doc.reference||'',note:note.value})});await load()}catch(e){alert(e.message)}finally{save.disabled=false}};edit.append(add,note,save);summary.append(edit);
+ for(const [decision,label] of [['approved','Approve vendor proposal'],['rejected','Reject vendor proposal']]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.style.margin='8px 8px 8px 0';btn.onclick=async()=>{if(!confirm(label+'? This does not issue a customer estimate or invoice.'))return;btn.disabled=true;try{await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});await load()}catch(e){alert(e.message)}finally{btn.disabled=false}};summary.append(btn)}
+ }
+ const thread=document.createElement('details');thread.style.marginTop='18px';const threadLabel=document.createElement('summary');threadLabel.textContent='Office ↔ Vendor Messages';thread.append(threadLabel);const messages=document.createElement('div');thread.append(messages);thread.ontoggle=async()=>{if(!thread.open)return;try{const data=await call('/doorks-portals/admin/vendor-assignments/'+encodeURIComponent(doc.assignment_id)+'/messages');messages.replaceChildren();for(const m of data.messages||[]){const p=document.createElement('p');p.textContent=m.sender+' · '+m.message;messages.append(p)}}catch(e){messages.textContent=e.message}};
+ const reply=document.createElement('textarea');reply.className='input';reply.placeholder='Reply to vendor';reply.style.cssText='width:100%;margin:12px 0';const send=document.createElement('button');send.className='btn';send.textContent='Send reply';send.onclick=async()=>{if(!reply.value.trim())return;send.disabled=true;try{await call('/doorks-portals/admin/vendor-assignments/'+encodeURIComponent(doc.assignment_id)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignment_id:doc.assignment_id,message:reply.value})});reply.value='';thread.open=false;thread.open=true}catch(e){alert(e.message)}finally{send.disabled=false}};thread.append(reply,send);summary.append(thread);card.append(summary);host.append(card)}if(!host.childNodes.length)host.textContent='No matching vendor documents.'};search.oninput=draw;await load();
 }

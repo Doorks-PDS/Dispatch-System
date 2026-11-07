@@ -304,6 +304,12 @@ class SubmissionReview(BaseModel):
 def review_submission(submission_id: str, payload: SubmissionReview, request: Request):
     """Office-only review metadata; never posts to source financial or operational records."""
     admin(request)
+    # Operational requests have a dedicated auditable state machine.
+    with _lock:
+        existing = next((x for x in read(store(request)).get('submissions', [])
+                         if x.get('id') == submission_id), None)
+    if existing and existing.get('kind') in ('customer_work_order_change', 'vendor_assignment_change_request'):
+        raise HTTPException(409, 'Use the operational change decision workflow')
     with _lock:
         p = store(request); obj = read(p)
         item = next((x for x in obj['submissions'] if x.get('id') == submission_id), None)
@@ -318,6 +324,154 @@ def review_submission(submission_id: str, payload: SubmissionReview, request: Re
             'note': payload.note.strip(), 'at': item['reviewed_at'], 'by': item['reviewed_by']})
         write(p, obj)
     return {'ok': True, 'status': payload.status}
+
+# Rev 102: explicit office decision for customer/vendor operational change requests.
+# Approval records authorization for a subsequent office edit; it never silently
+# overwrites a live work order or a vendor assignment.
+class OperationalChangeDecision(BaseModel):
+    decision: Literal['approve', 'reject', 'request_clarification']
+    note: str = Field(default='', max_length=1000)
+
+@router.post('/admin/operational-change-requests/{submission_id}/decision')
+def decide_operational_change(submission_id: str, payload: OperationalChangeDecision, request: Request):
+    admin(request)
+    if payload.decision in ('reject', 'request_clarification') and not payload.note.strip():
+        raise HTTPException(422, 'A review note is required for rejection or clarification')
+    kinds = {'customer_work_order_change', 'vendor_assignment_change_request'}
+    with _lock:
+        path = store(request); data = read(path)
+        item = next((row for row in data.get('submissions', [])
+                     if row.get('id') == submission_id), None)
+        if not item or item.get('kind') not in kinds:
+            raise HTTPException(404, 'Operational change request not found')
+        if item.get('status') != 'pending_review':
+            raise HTTPException(409, 'Request has already been decided')
+        # A decision is not a dispatch mutation: the office must explicitly
+        # edit the source ticket using its existing authenticated save path.
+        status = {'approve': 'approved_pending_application',
+                  'reject': 'rejected',
+                  'request_clarification': 'clarification_requested'}[payload.decision]
+        actor = getattr(request.state, 'auth_user', None) or {}
+        reviewer = str(actor.get('id', '') if isinstance(actor, dict) else actor)[:120]
+        timestamp = iso(now())
+        item.update(status=status, review_note=payload.note.strip(),
+                    reviewed_at=timestamp, reviewed_by=reviewer,
+                    applied_to_source=False)
+        data.setdefault('review_history', []).append({
+            'submission_id': submission_id, 'kind': item['kind'],
+            'decision': payload.decision, 'to_status': status,
+            'note': payload.note.strip(), 'at': timestamp, 'by': reviewer})
+        write(path, data)
+    return {'ok': True, 'status': status, 'applied_to_source': False,
+            'message': 'Office decision recorded; apply approved changes in the original work order editor.'
+                       if payload.decision == 'approve' else 'Office decision recorded.'}
+
+def _operational_source_fingerprint(record):
+    """Hash the saved source record, excluding only volatile read metadata."""
+    if not isinstance(record, dict):
+        raise HTTPException(409, 'Original source record is unavailable')
+    stable = {k: v for k, v in record.items() if k not in ('_loaded_at', '_fetched_at')}
+    return hashlib.sha256(json.dumps(stable, sort_keys=True, default=str, separators=(',', ':')).encode()).hexdigest()
+
+def _operational_schedule_evidence(item, source):
+    """For explicit schedule requests require the saved scheduled fields to match.
+
+    A change to unrelated metadata cannot satisfy a requested schedule change.
+    Non-schedule requests still require office attestation and fingerprint evidence.
+    """
+    kind = item.get('kind')
+    schedule_request = (kind == 'customer_work_order_change' and item.get('request_type') == 'schedule_change') or (kind == 'vendor_assignment_change_request' and item.get('change_type') == 'schedule')
+    if not schedule_request:
+        return {'verification': 'source_changed_office_attested'}
+    date = str(item.get('preferred_date') if kind == 'customer_work_order_change' else item.get('proposed_date') or '').strip()
+    time = str(item.get('preferred_time') if kind == 'customer_work_order_change' else item.get('proposed_time') or '').strip()
+    if not date and not time:
+        raise HTTPException(409, 'Schedule request has no structured date/time to verify; manual review required')
+    original = item.get('source_schedule_at_request')
+    if not isinstance(original, dict):
+        raise HTTPException(409, 'Schedule request predates field snapshots; manual review required')
+    checked = {}
+    for key, expected in (('scheduled_date', date), ('scheduled_time', time)):
+        if not expected:
+            continue
+        actual = str(source.get(key) or '').strip()
+        if actual != expected:
+            raise HTTPException(409, f'Saved {key} does not match the requested value')
+        if actual == str(original.get(key) or '').strip():
+            raise HTTPException(409, f'Saved {key} has not changed from the request snapshot')
+        checked[key] = {'requested': expected, 'saved': actual}
+    return {'verification': 'schedule_fields_matched', 'verified_fields': checked}
+
+class OperationalChangeApplied(BaseModel):
+    note: str = Field(min_length=5, max_length=1000)
+    source_record_id: str = Field(min_length=1, max_length=100)
+
+@router.post('/admin/operational-change-requests/{submission_id}/mark-applied')
+def mark_operational_change_applied(submission_id: str, payload: OperationalChangeApplied, request: Request):
+    """Audit a separately saved source edit; never mutate source data here."""
+    admin(request)
+    with _lock:
+        path = store(request); data = read(path)
+        item = next((x for x in data.get('submissions', []) if x.get('id') == submission_id), None)
+        if not item or item.get('kind') not in ('customer_work_order_change', 'vendor_assignment_change_request'):
+            raise HTTPException(404, 'Operational change request not found')
+        if item.get('status') != 'approved_pending_application':
+            raise HTTPException(409, 'Only approved requests awaiting application can be marked applied')
+        expected = str(item.get('work_order_id') if item['kind'] == 'customer_work_order_change'
+                       else item.get('assignment_id') or '')
+        if not expected or expected != payload.source_record_id:
+            raise HTTPException(422, 'Source record ID must match the original request')
+        collection = 'work_orders' if item['kind'] == 'customer_work_order_change' else 'vendor_assignments'
+        source = next((x for x in workspace_items(request, collection)
+                       if str(x.get('id') or '') == expected), None)
+        if source is None:
+            raise HTTPException(409, 'Original source record no longer exists')
+        original_fingerprint = item.get('source_fingerprint_at_request')
+        if not original_fingerprint:
+            raise HTTPException(409, 'Legacy request has no source snapshot; verify the saved edit manually before closing this request')
+        saved_fingerprint = _operational_source_fingerprint(source)
+        if saved_fingerprint == original_fingerprint:
+            raise HTTPException(409, 'Source record has not changed since the request was submitted; save the edit before confirming')
+        actor = getattr(request.state, 'auth_user', None) or {}
+        reviewer = str(actor.get('id', '') if isinstance(actor, dict) else actor)[:120]
+        timestamp = iso(now())
+        evidence = _operational_schedule_evidence(item, source)
+        item.update(application_verification=evidence, status='applied', applied_to_source=True, applied_at=timestamp,
+                    applied_by=reviewer, application_note=payload.note.strip(),
+                    source_fingerprint_at_application=saved_fingerprint)
+        data.setdefault('review_history', []).append({
+            'submission_id': submission_id, 'action': 'mark_applied',
+            'source_record_id': expected, 'note': payload.note.strip(),
+            'at': timestamp, 'by': reviewer})
+        write(path, data)
+    return {'ok': True, 'status': 'applied', 'source_record_id': expected}
+
+class SubmissionQueueAction(BaseModel):
+    action: Literal['archive', 'restore', 'delete']
+    reason: str = Field(default='', max_length=500)
+
+@router.post('/admin/submissions/{submission_id}/queue-action')
+def submission_queue_action(submission_id: str, payload: SubmissionQueueAction, request: Request):
+    """Soft delete/archive a portal inquiry, never its linked operational records."""
+    admin(request)
+    with _lock:
+        path = store(request); data = read(path)
+        entry = next((x for x in data.get('submissions', []) if x.get('id') == submission_id), None)
+        if not entry: raise HTTPException(404, 'Submission not found')
+        if payload.action == 'restore':
+            entry.pop('archived_at', None)
+            entry.pop('deleted_at', None)
+        else:
+            entry['archived_at'] = iso(now())
+            if payload.action == 'delete':
+                entry['deleted_at'] = iso(now())
+        data.setdefault('review_history', []).append({
+            'submission_id': submission_id, 'action': payload.action,
+            'note': payload.reason.strip(), 'at': iso(now()),
+            'by': str(getattr(request.state, 'auth_user', '') or '')[:120]})
+        write(path, data)
+    return {'ok': True, 'action': payload.action,
+            'message': 'Inquiry updated. Linked jobs, financial documents and files were preserved.'}
 
 @router.get('/admin/security-check')
 def portal_security_check(request: Request):
@@ -414,7 +568,7 @@ def vendor_records(request, invite):
         if not isinstance(a,dict) or str(a.get('vendor_id') or '') != vendor_id: continue
         if str(a.get('status') or '').lower() in ('draft','cancelled'): continue
         assignments.append({k:str(a.get(k) or '')[:1000] for k in
-            ('id','work_order_id','work_order_number','scheduled_date','scheduled_time','status','scope','address','notes','customer','priority','urgency','service_type','contact','contact_phone','contact_email','job_location','access_instructions')})
+            ('id','work_order_id','work_order_number','scheduled_date','scheduled_time','status','scope','address','notes','customer','priority','urgency','service_type','contact','contact_phone','contact_email','job_location','access_instructions','vendor_field_notes','vendor_parts_needed','vendor_estimated_arrival')})
     orders=[]
     for po in items('purchase_orders'):
         if not isinstance(po,dict) or str(po.get('vendor_id') or '') != vendor_id: continue
@@ -849,6 +1003,59 @@ def _vendor_user(request):
         raise HTTPException(403,'Vendor account unavailable')
     return account
 
+@router.get('/tickets/{work_order_id}')
+def shared_work_order_ticket(work_order_id: str, request: Request):
+    """One underlying Doorks work order, with role-scoped projections for all three interfaces."""
+    jobs=workspace_items(request,'work_orders')
+    job=next((x for x in jobs if str(x.get('id'))==work_order_id and not x.get('deactivated_at')),None)
+    if not job: raise HTTPException(404,'Work order not found')
+    office=(getattr(request.state,'auth_role',None)=='office_admin'
+            and request.session.get('active_platform')=='doorks')
+    assignments=workspace_items(request,'vendor_assignments')
+    related=[x for x in assignments if str(x.get('work_order_id') or '')==work_order_id]
+    if office:
+        role='office'
+    else:
+        aid=str(request.session.get('doorks_portal_account') or '')
+        with _lock:
+            account=next((x for x in read(store(request)).get('accounts',[])
+                if str(x.get('id'))==aid and x.get('status')=='active'),None)
+        if not account: raise HTTPException(401,'Login required')
+        if account.get('role')=='customer':
+            account=_portal_user(request)
+            if str(job.get('customer_id') or '')!=str(account['customer_id']):
+                raise HTTPException(404,'Work order not found')
+            role='customer'
+        elif account.get('role')=='vendor':
+            account=_vendor_user(request)
+            if not any(str(a.get('vendor_id') or '')==str(account['vendor_id'])
+                       and str(a.get('status') or '').lower() not in ('draft','cancelled') for a in related):
+                raise HTTPException(404,'Work order not found')
+            role='vendor'
+        else: raise HTTPException(403,'Portal role not allowed')
+    public_fields=('id','job_number','work_order_number','status','customer','address',
+        'service_type','scheduled_date','scheduled_time','description','priority','urgency',
+        'schedule_confirmation','customer_visible_notes','customer_notes','customer_visible_tech_notes')
+    ticket={key:job.get(key) for key in public_fields}
+    if role=='office':
+        ticket=dict(job)
+        ticket['assignments']=related
+    elif role=='vendor':
+        owned=[a for a in related if str(a.get('vendor_id'))==str(account['vendor_id'])
+               and str(a.get('status','')).lower() not in ('draft','cancelled')]
+        ticket['vendor_assignments']=[{key:a.get(key) for key in (
+            'id','status','scope','scheduled_date','scheduled_time','vendor_field_notes',
+            'vendor_parts_needed','vendor_estimated_arrival','vendor_progress_history')}
+            for a in owned]
+    else:
+        visible=[a for a in related if str(a.get('customer_id') or '')==str(account['customer_id'])
+                 and str(a.get('status','')).lower() not in ('draft','cancelled','declined')]
+        ticket['vendor_status']=str(visible[-1].get('status') or '') if visible else ''
+    return {'role':role,'ticket':ticket,'permissions':{
+        'edit_dispatch':role=='office', 'review_financials':role=='office',
+        'field_updates':role=='vendor', 'request_changes':role!='office',
+        'view_vendor_costs':role in ('office','vendor')}}
+
 @router.get('/vendor-account/me')
 def vendor_account_me(request:Request):
     a=_vendor_user(request)
@@ -1229,11 +1436,19 @@ def customer_work_order_change(payload:CustomerWorkOrderChange,request:Request):
         if str(r.get('id') or '')==payload.work_order_id
         and str(r.get('customer_id') or '')==str(a['customer_id']) and not r.get('deactivated_at')),None)
     if not job:raise HTTPException(404,'Work order not found')
+    if payload.requested_date:
+        try: datetime.strptime(payload.requested_date, '%Y-%m-%d')
+        except ValueError: raise HTTPException(422, 'Use YYYY-MM-DD for requested date')
+    if payload.requested_time:
+        try: datetime.strptime(payload.requested_time, '%H:%M')
+        except ValueError: raise HTTPException(422, 'Use HH:MM for requested time')
     with _lock:
         p=store(request);obj=read(p)
         entry={'id':uuid.uuid4().hex,'kind':'customer_work_order_change','status':'pending_review',
             'created_at':iso(now()),'record_id':str(a['customer_id']),
-            'work_order_id':str(job['id']),'work_order_number':str(job.get('job_number') or job.get('work_order_number') or ''),
+            'work_order_id':str(job['id']),
+            'source_fingerprint_at_request':_operational_source_fingerprint(job),
+            'source_schedule_at_request':{k:job.get(k) for k in ('scheduled_date','scheduled_time')},'work_order_number':str(job.get('job_number') or job.get('work_order_number') or ''),
             'company':str(a.get('company') or job.get('customer') or ''),
             'contact_name':str(a.get('contact_name') or a.get('name') or ''),
             'contact_email':str(a.get('email') or ''),
@@ -1617,6 +1832,33 @@ def create_vendor_commercial_document(payload:VendorCommercialDocument,request:R
         write(p,obj)
     return {'ok':True,'document':entry}
 
+class VendorDocumentOfficeEdit(BaseModel):
+    line_items: list[VendorLineItem] = Field(min_length=1, max_length=100)
+    reference: str = Field(default='', max_length=100)
+    note: str = Field(default='', max_length=2000)
+
+@router.post('/admin/vendor-commercial-documents/{document_id}/edit')
+def office_edit_vendor_document(document_id: str, payload: VendorDocumentOfficeEdit, request: Request):
+    """Edit a vendor proposal in office review without creating customer charges."""
+    admin(request)
+    with _lock:
+        path = store(request); data = read(path)
+        doc = next((d for d in data.get('vendor_commercial_documents', []) if d.get('id') == document_id), None)
+        if not doc: raise HTTPException(404, 'Vendor document not found')
+        if doc.get('status') not in ('submitted_for_review', 'returned_for_revision'):
+            raise HTTPException(409, 'Only pending proposals may be edited')
+        old = {'line_items': doc.get('line_items', []), 'amount': doc.get('amount', 0), 'reference': doc.get('reference', '')}
+        doc['line_items'] = [x.model_dump() for x in payload.line_items]
+        doc['amount'] = round(sum(x.quantity * x.rate for x in payload.line_items), 2)
+        doc['description'] = '\n'.join(f'{x.quantity} × {x.description} @ ${x.rate:.2f}' for x in payload.line_items)
+        doc['reference'] = payload.reference.strip()
+        doc['office_edit_note'] = payload.note.strip()
+        doc['office_edited_at'] = iso(now())
+        doc.setdefault('revision_history', []).append({'at': doc['office_edited_at'], 'before': old,
+            'by': str(getattr(request.state, 'auth_user', '') or '')[:120]})
+        write(path, data)
+        return {'ok': True, 'document': doc, 'message': 'Vendor proposal edited; no customer or accounting record changed'}
+
 class VendorDocumentReview(BaseModel):
     decision: Literal['approved','rejected']
     note: str = Field(default='',max_length=2000)
@@ -1637,6 +1879,84 @@ def office_review_vendor_document(document_id:str,payload:VendorDocumentReview,r
         entry.update(status=payload.decision,review_note=payload.note.strip(),reviewed_at=iso(now()))
         write(p,obj)
         return {'ok':True,'document':entry,'message':'Review recorded; no accounting entry or payment was posted'}
+
+
+# Rev 85: explicit, auditable bridge from a reviewed vendor proposal to an
+# existing office-issued document. Never copy vendor costs into customer rates.
+class VendorOfficeDocumentLink(BaseModel):
+    office_document_id: str = Field(min_length=1, max_length=100)
+
+@router.post('/admin/vendor-commercial-documents/{document_id}/link-office-document')
+def link_vendor_proposal_to_office_document(document_id: str, payload: VendorOfficeDocumentLink, request: Request):
+    _portal_origin(request)
+    admin(request)
+    with _lock:
+        p = store(request); obj = read(p)
+        proposal = next((x for x in obj.get('vendor_commercial_documents', []) if x.get('id') == document_id), None)
+        if not proposal: raise HTTPException(404, 'Vendor proposal not found')
+        if proposal.get('status') != 'approved':
+            raise HTTPException(409, 'Approve the vendor proposal before linking a customer document')
+        doc = next((x for x in workspace_items(request, 'estimates_invoices')
+                    if str(x.get('id') or '') == payload.office_document_id), None)
+        if not doc: raise HTTPException(404, 'Office estimate or invoice not found')
+        expected = 'Invoice' if str(proposal.get('document_type')).lower() == 'invoice' else 'Estimate'
+        if doc.get('document_type') != expected:
+            raise HTTPException(409, 'Office document type does not match vendor proposal')
+        if str(doc.get('status') or '').lower() in ('draft', 'voided', 'cancelled'):
+            raise HTTPException(409, 'Office document must be issued before linking to a customer')
+        if not str(doc.get('customer_id') or '').strip():
+            raise HTTPException(409, 'Office document must be linked to a verified customer ID')
+        assignments = workspace_items(request, 'vendor_assignments')
+        assignment = next((a for a in assignments if str(a.get('id') or '') == str(proposal.get('assignment_id') or '')), None)
+        if not assignment: raise HTTPException(409, 'Vendor assignment no longer exists')
+        work_order_id = str(assignment.get('work_order_id') or '')
+        job = next((j for j in workspace_items(request, 'work_orders')
+                    if str(j.get('id') or '') == work_order_id), None)
+        if not job: raise HTTPException(409, 'Vendor assignment must be linked to an existing work order')
+        if str(job.get('customer_id') or '') != str(doc['customer_id']):
+            raise HTTPException(409, 'Customer IDs do not match; no document linked')
+        # When an office document carries a job reference, require it to match.
+        for field in ('work_order_id', 'job_id'):
+            if doc.get(field) and str(doc[field]) != work_order_id:
+                raise HTTPException(409, 'Office document is linked to another work order')
+        existing = proposal.get('office_document_id')
+        if existing and str(existing) != payload.office_document_id:
+            raise HTTPException(409, 'Proposal already linked; contact administrator to correct it')
+        if existing == payload.office_document_id:
+            return {'ok': True, 'already_linked': True, 'office_document_id': existing}
+        proposal['office_document_id'] = payload.office_document_id
+        proposal['office_document_number'] = str(doc.get('document_number') or '')
+        proposal['office_document_linked_at'] = iso(now())
+        proposal.setdefault('history', []).append({'event': 'office_document_linked',
+            'document_id': payload.office_document_id, 'at': proposal['office_document_linked_at']})
+        write(p, obj)
+        return {'ok': True, 'already_linked': False, 'office_document_id': payload.office_document_id,
+                'office_document_number': proposal['office_document_number']}
+
+@router.get('/admin/vendor-commercial-documents/{document_id}/eligible-office-documents')
+def eligible_vendor_office_documents(document_id: str, request: Request):
+    admin(request)
+    with _lock:
+        proposal = next((x for x in read(store(request)).get('vendor_commercial_documents', [])
+                         if x.get('id') == document_id), None)
+    if not proposal: raise HTTPException(404, 'Vendor proposal not found')
+    assignment = next((a for a in workspace_items(request, 'vendor_assignments')
+                       if str(a.get('id') or '') == str(proposal.get('assignment_id') or '')), None)
+    job = next((j for j in workspace_items(request, 'work_orders')
+                if assignment and str(j.get('id') or '') == str(assignment.get('work_order_id') or '')), None)
+    if not job or not job.get('customer_id'): return {'documents': []}
+    expected = 'Invoice' if str(proposal.get('document_type')).lower() == 'invoice' else 'Estimate'
+    rows = []
+    for d in workspace_items(request, 'estimates_invoices'):
+        if (d.get('document_type') == expected and str(d.get('customer_id') or '') == str(job['customer_id'])
+                and str(d.get('status') or '').lower() not in ('draft', 'voided', 'cancelled')
+                and (not d.get('work_order_id') or str(d['work_order_id']) == str(job['id']))
+                and (not d.get('job_id') or str(d['job_id']) == str(job['id']))):
+            rows.append({'id': str(d.get('id') or ''), 'number': str(d.get('document_number') or ''),
+                         'status': str(d.get('status') or ''), 'amount': d.get('amount'),
+                         'has_original': any(x.get('document_id') == str(d.get('id') or '')
+                            for x in read(store(request)).get('published_originals', []))})
+    return {'documents': rows}
 
 @router.get('/vendor-account/assignments/{assignment_id}/messages')
 def vendor_assignment_messages(assignment_id:str,request:Request):
@@ -1707,6 +2027,8 @@ def vendor_assignment_change_request(payload: VendorAssignmentChangeRequest, req
         entry = {'id': uuid.uuid4().hex, 'kind':'vendor_assignment_change_request',
                  'vendor_id':account['vendor_id'], 'vendor_account_id':account['id'],
                  'assignment_id':payload.assignment_id,
+                 'source_fingerprint_at_request':_operational_source_fingerprint(assignment),
+                 'source_schedule_at_request':{k:assignment.get(k) for k in ('scheduled_date','scheduled_time')},
                  'reference':str(assignment.get('work_order_number') or ''),
                  'company':account['company'], 'contact_name':account['contact_name'],
                  'subject':'Vendor '+payload.change_type+' change request',
@@ -1815,6 +2137,92 @@ async def publish_document_original(document_id: str, request: Request, file: Up
         except Exception:target.unlink(missing_ok=True);raise
         # Old files are left on disk for manual recovery/audit; no destructive replacement.
     return {'ok':True,'document_id':document_id,'replaced':bool(old)}
+
+
+# Explicit office-only delivery of the published, customer-facing original.
+# SMTP is opt-in via environment variables; no vendor draft is ever attached.
+class OfficeDocumentEmail(BaseModel):
+    recipient: str = Field(min_length=5, max_length=250)
+    subject: str = Field(min_length=1, max_length=200)
+    message: str = Field(min_length=1, max_length=4000)
+
+@router.post('/admin/document-originals/{document_id}/email')
+def email_published_customer_document(document_id: str, payload: OfficeDocumentEmail, request: Request):
+    _portal_origin(request)
+    admin(request)
+    from email.message import EmailMessage
+    from email.utils import parseaddr
+    import smtplib, ssl
+    recipient = payload.recipient.strip().lower()
+    if (not recipient or any(c in recipient for c in '\r\n,;') or
+            parseaddr(recipient)[1].lower() != recipient or
+            recipient.count('@') != 1 or '.' not in recipient.rsplit('@',1)[-1]):
+        raise HTTPException(422, 'Valid single recipient email required')
+    if any(c in payload.subject for c in '\r\n'):
+        raise HTTPException(422, 'Subject must be one line')
+    doc = next((d for d in workspace_items(request, 'estimates_invoices')
+                if str(d.get('id') or '') == document_id), None)
+    if (not doc or doc.get('document_type') not in ('Estimate','Invoice') or
+            str(doc.get('status') or '').lower() in ('draft','voided','cancelled') or not doc.get('customer_id')):
+        raise HTTPException(404, 'Issued customer document not found')
+    customer_id = str(doc['customer_id'])
+    customer = next((c for c in workspace_items(request,'customers')
+                     if str(c.get('id') or '') == customer_id), None)
+    if not customer: raise HTTPException(409, 'Customer record unavailable')
+    # Never allow an arbitrary external address: the email must be recorded
+    # against the verified customer or one of its saved contacts.
+    allowed = {str(customer.get(k) or '').strip().lower() for k in ('email','contact_email','billing_email')}
+    allowed.update(str(c.get('email') or c.get('contact_email') or '').strip().lower()
+                   for c in workspace_items(request,'contacts')
+                   if str(c.get('customer_id') or '') == customer_id)
+    if recipient not in allowed:
+        raise HTTPException(403, 'Recipient must be a saved contact for this customer')
+    with _lock:
+        original = next((x for x in read(store(request)).get('published_originals', [])
+                         if x.get('document_id') == document_id and x.get('customer_id') == customer_id), None)
+    if not original: raise HTTPException(409, 'Publish the approved customer-facing original first')
+    file_path = store(request).parent/'portal_private_uploads'/(original['file_id']+'.'+original['extension'])
+    if not file_path.is_file(): raise HTTPException(404, 'Published document file missing')
+    host = os.environ.get('DOORKS_SMTP_HOST','').strip()
+    sender = os.environ.get('DOORKS_SMTP_FROM','').strip()
+    username = os.environ.get('DOORKS_SMTP_USERNAME','').strip()
+    password = os.environ.get('DOORKS_SMTP_PASSWORD','')
+    if not host or not sender or not username or not password:
+        raise HTTPException(503, 'Office email not configured; set Doorks SMTP environment variables')
+    try: port = int(os.environ.get('DOORKS_SMTP_PORT','465'))
+    except ValueError: raise HTTPException(503,'SMTP port invalid')
+    if not (1 <= port <= 65535): raise HTTPException(503,'SMTP port invalid')
+    msg = EmailMessage()
+    msg['From'] = sender
+    msg['To'] = recipient
+    msg['Subject'] = payload.subject.strip()
+    msg.set_content(payload.message.strip())
+    attachment = file_path.read_bytes()
+    if len(attachment)>10*1024*1024: raise HTTPException(413,'Document exceeds email attachment limit')
+    mime = original.get('mime','application/pdf').split('/',1)
+    safe_name = Path(original.get('filename') or ('customer-document.'+original['extension'])).name
+    msg.add_attachment(attachment,maintype=mime[0],subtype=mime[1],filename=safe_name)
+    try:
+        context = ssl.create_default_context()
+        if port == 465:
+            with smtplib.SMTP_SSL(host,port,timeout=15,context=context) as smtp:
+                smtp.login(username,password)
+                smtp.send_message(msg)
+        else:
+            with smtplib.SMTP(host,port,timeout=15) as smtp:
+                smtp.starttls(context=context)
+                smtp.login(username,password)
+                smtp.send_message(msg)
+    except (OSError, smtplib.SMTPException) as exc:
+        raise HTTPException(502, 'Email delivery failed; check SMTP configuration and try again') from exc
+    with _lock:
+        p=store(request); data=read(p)
+        data.setdefault('document_email_history',[]).append({'id':uuid.uuid4().hex,
+            'document_id':document_id,'customer_id':customer_id,'recipient':recipient,
+            'sent_at':iso(now()),'subject':payload.subject.strip(),
+            'original_file_id':original['file_id']})
+        write(p,data)
+    return {'ok':True,'recipient':recipient,'document_id':document_id,'message':'Email sent with published original attached'}
 
 @router.get('/accounts/document-originals/{document_id}')
 def customer_document_original(document_id: str, request: Request):

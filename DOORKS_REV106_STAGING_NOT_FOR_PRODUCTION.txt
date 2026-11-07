@@ -1,0 +1,9 @@
+Doorks Rev 106 — cumulative development/staging only
+Based on November baseline + all Rev 84–105 cumulative changes.
+New: operational change requests store a source-record fingerprint at submission.
+Office mark-applied now checks that the saved source record differs from the submission snapshot, and records the new fingerprint.
+This verifies a change to the source record occurred, NOT that the requested fields were correctly applied. Legacy requests without snapshots cannot be automatically marked applied.
+Fixed an outdated integration test assertion for the actual portal ticket call.
+Tests: 69 passed (focused tests included in cumulative package), Python compilation and JS syntax passed.
+Outstanding: shared office/customer/vendor editor parity, browser workflow testing, field-level verification, staging deployment.
+Do not deploy to production. No operational data files are included.

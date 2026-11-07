@@ -17,5 +17,5 @@ def test_approved_snapshot_immutable_after_raise():
 
 def test_permanent_vendor_invitation_and_account_role():
     assert Invite(kind='vendor',contact_name='A',contact_email='a@example.com',company='V',days=0).days==0
-    assert PortalRegistration(email='v@example.com',contact_name='Vendor',company='V',password='123456789012',role='vendor').role=='vendor'
+    assert PortalRegistration(email='v@example.com',contact_name='Vendor',company='V',password='123456789012',password_confirm='123456789012',role='vendor',role_confirm='vendor').role=='vendor'
     assert PortalApproval(vendor_id='vendor-id').vendor_id=='vendor-id'

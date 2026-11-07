@@ -23,6 +23,6 @@ def test_vendor_moses_requires_owned_assignment():
 def test_customer_preview_and_moses_draft_ui():
     html=(ROOT/'static/doorks_home.html').read_text()
     assert "accounts/estimates/respond" in html
-    assert "doc.line_items||[]" in html
+    assert "DoorksSharedTicket.renderDocument" in html
     assert "vendor-account/moses-document" in html
     assert 'Moses draft populated' in html
