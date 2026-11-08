@@ -4,7 +4,7 @@ import csv, io, json, os, uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, HTMLResponse
 from pydantic import BaseModel, Field
 
 router = APIRouter(tags=['sdc-storefront'])
@@ -187,7 +187,7 @@ def export_software_inquiries(request: Request):
     with _shared_workspace_lock():
         rows = ws.load(ws.location(request, 'sdc', 'software_leads'))
     headers = ('company', 'contact', 'email', 'phone', 'package', 'status',
-               'created_at', 'follow_up_date', 'demo_date', 'notes', 'internal_notes',
+               'created_at', 'follow_up_date', 'demo_date', 'proposal_date', 'proposal_amount', 'proposal_terms', 'notes', 'internal_notes',
                'utm_source', 'utm_medium', 'utm_campaign', 'landing_page')
     stream = io.StringIO(newline='')
     writer = csv.writer(stream)
@@ -212,6 +212,9 @@ class LeadStatusUpdate(BaseModel):
     internal_notes: str | None = Field(default=None, max_length=4000)
     follow_up_date: str | None = Field(default=None, max_length=10)
     demo_date: str | None = Field(default=None, max_length=10)
+    proposal_date: str | None = Field(default=None, max_length=10)
+    proposal_amount: str | None = Field(default=None, max_length=20)
+    proposal_terms: str | None = Field(default=None, max_length=2000)
     onboarding_completed: list[str] | None = None
 
 LEAD_STATUSES = ('New', 'Contacted', 'Demo Scheduled', 'Demo Completed', 'Proposal Sent', 'Won', 'Lost')
@@ -233,7 +236,7 @@ def update_software_inquiry(lead_id: str, payload: LeadStatusUpdate, request: Re
     if payload.status is not None and payload.status not in LEAD_STATUSES:
         raise HTTPException(400, 'Invalid lead status')
     from datetime import date
-    for field_name in ('follow_up_date', 'demo_date'):
+    for field_name in ('follow_up_date', 'demo_date', 'proposal_date'):
         value = getattr(payload, field_name)
         if value is not None:
             try:
@@ -241,10 +244,26 @@ def update_software_inquiry(lead_id: str, payload: LeadStatusUpdate, request: Re
                     raise ValueError('Non-ISO date')
             except (TypeError, ValueError) as exc:
                 raise HTTPException(400, field_name.replace('_', ' ').capitalize() + ' must be YYYY-MM-DD') from exc
+    # Store proposal prices as a normalized decimal string rather than a
+    # floating-point number. Blank means no price has been agreed.
+    from decimal import Decimal, InvalidOperation
+    normalized_amount = None
+    if payload.proposal_amount is not None:
+        raw_amount = payload.proposal_amount.strip()
+        if raw_amount:
+            try:
+                amount = Decimal(raw_amount)
+            except InvalidOperation as exc:
+                raise HTTPException(400, 'Proposal amount must be a valid dollar amount') from exc
+            if not amount.is_finite() or amount < 0 or amount > Decimal('99999999.99') or amount.as_tuple().exponent < -2:
+                raise HTTPException(400, 'Proposal amount must be between $0 and $99,999,999.99 with at most two decimals')
+            normalized_amount = format(amount.quantize(Decimal('0.01')), 'f')
+        else:
+            normalized_amount = ''
     if payload.onboarding_completed is not None:
         if len(payload.onboarding_completed) != len(set(payload.onboarding_completed)) or any(step not in ONBOARDING_STEPS for step in payload.onboarding_completed):
             raise HTTPException(400, 'Invalid onboarding checklist')
-    if payload.status is None and payload.internal_notes is None and payload.follow_up_date is None and payload.demo_date is None and payload.onboarding_completed is None:
+    if payload.status is None and payload.internal_notes is None and payload.follow_up_date is None and payload.demo_date is None and payload.proposal_date is None and payload.proposal_amount is None and payload.proposal_terms is None and payload.onboarding_completed is None:
         raise HTTPException(400, 'No changes supplied')
     if len(lead_id) != 32 or any(ch not in '0123456789abcdef' for ch in lead_id):
         raise HTTPException(400, 'Invalid lead identifier')
@@ -268,6 +287,12 @@ def update_software_inquiry(lead_id: str, payload: LeadStatusUpdate, request: Re
             target['follow_up_date'] = payload.follow_up_date
         if payload.demo_date is not None:
             target['demo_date'] = payload.demo_date
+        if payload.proposal_date is not None:
+            target['proposal_date'] = payload.proposal_date
+        if normalized_amount is not None:
+            target['proposal_amount'] = normalized_amount
+        if payload.proposal_terms is not None:
+            target['proposal_terms'] = payload.proposal_terms.strip()
         if payload.onboarding_completed is not None:
             target['onboarding_completed'] = [step for step in ONBOARDING_STEPS if step in payload.onboarding_completed]
         target['updated_at'] = now
@@ -275,7 +300,52 @@ def update_software_inquiry(lead_id: str, payload: LeadStatusUpdate, request: Re
     return {'ok': True, 'id': lead_id, 'status': target.get('status', 'New'),
             'follow_up_date': target.get('follow_up_date', ''),
             'demo_date': target.get('demo_date', ''),
+            'proposal_date': target.get('proposal_date', ''),
+            'proposal_amount': target.get('proposal_amount', ''),
+            'proposal_terms': target.get('proposal_terms', ''),
             'onboarding_completed': target.get('onboarding_completed', [])}
+
+
+@router.get('/api/software/inquiries/{lead_id}/proposal')
+def printable_software_proposal(lead_id: str, request: Request):
+    """Admin-only printable proposal; browser Print > Save as PDF.
+
+    Read-only: viewing a draft never marks a lead as Proposal Sent.
+    """
+    from app.routers import workspaces as ws
+    ws.guard(request, 'sdc', 'software_leads')
+    if len(lead_id) != 32 or any(ch not in '0123456789abcdef' for ch in lead_id):
+        raise HTTPException(400, 'Invalid lead identifier')
+    with _shared_workspace_lock():
+        rows = ws.load(ws.location(request, 'sdc', 'software_leads'))
+        lead = next((row.copy() for row in rows if isinstance(row, dict) and row.get('id') == lead_id), None)
+    if lead is None:
+        raise HTTPException(404, 'Inquiry not found')
+    from html import escape
+    def safe(value):
+        return escape(str(value or ''), quote=True)
+    def multiline(value):
+        return safe(value).replace('\n', '<br>')
+    package = str(lead.get('package') or 'Custom')
+    description = next((p['description'] for p in PACKAGES if p['name'] == package), 'Custom software configuration, subject to agreed scope.')
+    amount = lead.get('proposal_amount')
+    from decimal import Decimal, InvalidOperation
+    try:
+        formatted_amount = '${:,.2f}'.format(Decimal(str(amount))) if amount not in (None, '') else 'To be confirmed'
+    except (InvalidOperation, ValueError):
+        formatted_amount = 'To be confirmed'
+    terms = lead.get('proposal_terms') or 'Implementation scope, pricing, billing cadence, and delivery dates are subject to written agreement.'
+    proposal_date = lead.get('proposal_date') or datetime.now(timezone.utc).date().isoformat()
+    content = f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SDC Proposal — {safe(lead.get('company'))}</title>
+<style>
+:root{{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#1c3024;background:#f1f5f1}}
+*{{box-sizing:border-box}}body{{margin:0;padding:34px 18px}}.sheet{{max-width:850px;margin:auto;background:white;border-radius:22px;padding:58px;box-shadow:0 16px 55px #18352114}}
+header{{display:flex;justify-content:space-between;gap:20px;align-items:flex-start;border-bottom:2px solid #e3ebe3;padding-bottom:28px}}.brand{{font-size:18px;font-weight:800;letter-spacing:-.03em}}.brand small{{display:block;color:#66806c;font-size:11px;font-weight:600;letter-spacing:.13em;margin-top:5px}}.date{{font-size:13px;color:#58705e;text-align:right}}
+h1{{font-size:42px;letter-spacing:-.055em;line-height:1.1;margin:40px 0 12px}}.subtitle{{color:#627768;font-size:16px;line-height:1.5}}.eyebrow{{font-size:11px;text-transform:uppercase;letter-spacing:.13em;color:#477455;font-weight:800;margin-bottom:10px}}.section{{margin-top:40px}}.grid{{display:grid;grid-template-columns:1fr 1fr;gap:18px}}.tile{{background:#f5f8f5;border:1px solid #e5ece5;border-radius:14px;padding:20px}}.tile strong{{display:block;font-size:17px;margin-top:6px}}.tile span{{color:#637568;font-size:12px}}h2{{font-size:19px;letter-spacing:-.035em}}p{{line-height:1.65}}.price{{font-size:30px;font-weight:800;letter-spacing:-.05em;color:#245137}}.terms{{white-space:normal;overflow-wrap:anywhere}}.footer{{margin-top:50px;padding-top:22px;border-top:1px solid #e1e9e2;color:#738277;font-size:12px}}.toolbar{{max-width:850px;margin:0 auto 20px;display:flex;justify-content:space-between;align-items:center;gap:16px}}button{{background:#245137;border:0;color:white;padding:12px 20px;border-radius:10px;font-weight:700;cursor:pointer}}.hint{{font-size:13px;color:#536a59}}
+@media(max-width:600px){{.sheet{{padding:27px 22px}}h1{{font-size:32px}}.grid{{grid-template-columns:1fr}}.toolbar{{flex-direction:column;align-items:flex-start}}}}
+@media print{{@page{{size:letter;margin:16mm}}body{{background:white;padding:0}}.toolbar{{display:none}}.sheet{{padding:0;box-shadow:none;border-radius:0;max-width:none}}.tile{{break-inside:avoid}}}}
+</style></head><body><div class="toolbar"><span class="hint">Internal preview · Print or save as PDF · Not automatically sent</span><button type="button" onclick="window.print()">Print / Save PDF</button></div><main class="sheet"><header><div class="brand">SADDLEBACK DESIGN CO.<small>SOFTWARE SOLUTIONS</small></div><div class="date">Proposal date<br><strong>{safe(proposal_date)}</strong><br>Reference {safe(lead_id[:8].upper())}</div></header><h1>Software proposal</h1><p class="subtitle">A tailored operations platform designed to simplify how your team works.</p><section class="section"><div class="eyebrow">Prepared for</div><h2>{safe(lead.get('company'))}</h2><p>{safe(lead.get('contact'))}<br>{safe(lead.get('email'))}<br>{safe(lead.get('phone'))}</p></section><section class="section grid"><div class="tile"><span>Recommended package</span><strong>{safe(package)}</strong><p>{safe(description)}</p></div><div class="tile"><span>Proposed investment (USD)</span><div class="price">{safe(formatted_amount)}</div><p>Billing frequency and any applicable taxes must be specified in the final agreement.</p></div></section><section class="section"><div class="eyebrow">Scope and commercial terms</div><div class="terms">{multiline(terms)}</div></section><section class="section"><div class="eyebrow">Next steps</div><p>Review the proposed scope, confirm implementation requirements and payment terms, and execute a separate written agreement before work begins.</p></section><div class="footer">Saddleback Design Co. · Proposal for discussion only; not an invoice, contract, or payment request.</div></main></body></html>"""
+    return HTMLResponse(content, headers={'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Robots-Tag': 'noindex, nofollow'})
 
 
 @router.post('/api/software/inquiries/{lead_id}/convert-customer')
