@@ -345,7 +345,7 @@
   let switchingPlatform = false;
   const workspaceKinds = {
     doorks: {customers:"Customers",vendors:"Vendors",work_orders:"Work Orders",estimates_invoices:"Estimates / Invoices",purchase_orders:"Purchase Orders",customer_inquiries:"Customer Inquiries",vendor_assignments:"Vendor Assignments",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"},
-    sdc: {customers:"Customers",vendors:"Suppliers",purchase_orders:"Purchase Orders",orders:"Orders & Production",software_leads:"Doorks Software Sales",products:"Products",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"}
+    sdc: {customers:"Customers",vendors:"Suppliers",purchase_orders:"Purchase Orders",orders:"Orders & Production",software_leads:"Atlas Software Sales",products:"Products",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"}
   };
   const workspaceFields = {
     customers:["name","contact","email","phone","cell_phone","address","customer_type","preferred_visit_type","notes"], vendors:["name","contact","email","phone","address","service_area","trade","vendor_type","onboarding_status","license_number","license_expiration","insurance_expiration","payment_terms","tax_form_status","notes"],
@@ -2114,6 +2114,25 @@
     if(platform==='sdc'){
       businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="sdcJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="sdcOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Business Development</div><div class="panel-bd" id="sdcDevelopmentNav"></div></section>`;
       const addSdc=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};
+      function renderAtlasSales(view='overview'){
+        // Same-origin embedded SDC workspace: keep the Doorks navigation, login and
+        // platform selector visible instead of navigating away to another page.
+        clearWorkspaceActions();
+        setWorkspace(view==='inquiries'?'SDC — Atlas Software Inquiries':'SDC — Atlas Software Sales');
+        workspaceBody.replaceChildren();
+        const shell=document.createElement('section');shell.style.cssText='width:100%;max-width:1550px;margin:auto;display:grid;gap:14px';
+        const bar=document.createElement('div');bar.className='card';bar.style.cssText='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;padding:16px 20px';
+        const heading=document.createElement('div');const title=document.createElement('h2');title.textContent='Atlas · Software Sales';title.style.margin='0 0 4px';
+        const subtitle=document.createElement('p');subtitle.className='hint';subtitle.textContent='Manage inquiries, demos, proposals and onboarding without leaving SDC.';subtitle.style.margin='0';heading.append(title,subtitle);bar.append(heading);
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+        const refresh=document.createElement('button');refresh.className='btn';refresh.textContent='Refresh inquiries';
+        const storefront=document.createElement('button');storefront.className='btn btn-orange';storefront.textContent='Open public Atlas storefront ↗';storefront.onclick=()=>window.open('/software','_blank','noopener');
+        actions.append(refresh,storefront);bar.append(actions);shell.append(bar);
+        const frame=document.createElement('iframe');frame.title='Atlas software sales and inquiry management';frame.src='/sdc/software-leads?embedded=1';frame.style.cssText='width:100%;height:1100px;min-height:70vh;border:1px solid #dce5dd;border-radius:18px;background:#f7faf7;display:block';frame.setAttribute('loading','eager');
+        refresh.onclick=()=>{frame.src='/sdc/software-leads?embedded=1&refresh='+Date.now()};
+        shell.append(frame);workspaceBody.append(shell);
+        frame.addEventListener('load',()=>{try{const doc=frame.contentDocument;if(!doc)return;const resize=()=>{const height=Math.max(800,doc.documentElement.scrollHeight,doc.body?.scrollHeight||0);frame.style.height=Math.min(height+30,12000)+'px'};resize();if(typeof ResizeObserver!=='undefined'){const obs=new ResizeObserver(resize);obs.observe(doc.body)}else frame.style.height='1400px'}catch(e){/* Browser may block measurement; frame remains scrollable. */}});
+      }
       addSdc('sdcJobNav','Dashboard',()=>showPlatformShell('sdc'));
       addSdc('sdcJobNav','Orders & Production',()=>renderBusinessCollection('sdc','orders'));
       
@@ -2123,8 +2142,8 @@
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
       addSdc('sdcOfficeNav','Legacy Saddleback Records',()=>renderSdcLegacyNotice());
-      addSdc('sdcDevelopmentNav','Doorks Software Sales',renderSdcSoftwareSales);
-      addSdc('sdcDevelopmentNav','Software Inquiries',()=>{window.location.assign('/sdc/software-leads');});
+      addSdc('sdcDevelopmentNav','Atlas Software Sales',()=>renderAtlasSales('overview'));
+      addSdc('sdcDevelopmentNav','Software Inquiries',()=>renderAtlasSales('inquiries'));
       addSdc('sdcDevelopmentNav','Public Software Storefront',()=>{window.open('/software','_blank','noopener');});
     }
     if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbJobNav','Job Flow',renderDoorksJobFlow);add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Payroll',()=>renderDoorksStaff('payroll'));add('dbOfficeNav','Employees',()=>renderDoorksStaff('employees'));add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer & Vendor Portals',renderDoorksPortalAdmin);add('dbPortalNav','Customer Hub',()=>renderDoorksRelationshipHub('customers'));add('dbPortalNav','Vendor Hub',()=>renderDoorksRelationshipHub('vendors'));}
@@ -13569,16 +13588,6 @@ window.__doorksOpenCustomerDocumentDraft=(type)=>renderWorkspaceEstimateInvoice(
 
 
 // Rev 73: SDC software-package overview; sales leads remain in existing workspace.
-function renderSdcSoftwareSales(){
-  renderBusinessCollection('sdc','software_leads');
-  const target=workspaceBody;
-  const overview=document.createElement('section');overview.className='panel';overview.style.cssText='padding:22px;margin:18px 0;border:1px solid #d8e1e9;border-radius:16px;background:white';
-  const h=document.createElement('h2');h.textContent='Doorks Software · Package Overview';overview.append(h);
-  const intro=document.createElement('p');intro.textContent='Draft product tiers for sales conversations. Final pricing, deployment and feature entitlements require configuration.';overview.append(intro);
-  const tiers=[['Basic','Dispatch, work orders, customers, scheduling, forms, employees, payroll/timecards/PTO, and reporting'],['Platinum','Everything in Basic plus customer/vendor portals, assignment workflows and document collaboration'],['Premium','Everything in Platinum plus accounting, purchasing, receiving, AI intake and connected workflows'],['Personalized','Custom integrations, workflows, onboarding, branding and deployment arrangements']];
-  const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px';
-  for(const [name,details] of tiers){const card=document.createElement('div');card.style.cssText='border:1px solid #d8e1e9;border-radius:12px;padding:16px';const title=document.createElement('h3');title.textContent=name;const p=document.createElement('p');p.textContent=details;card.append(title,p);grid.append(card)}overview.append(grid);target.prepend(overview);
-}
 
 
 // Rev93: register real office controllers on every load, including when the

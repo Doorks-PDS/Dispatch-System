@@ -1,4 +1,4 @@
-"""Public SDC software catalog and inquiry intake on the existing Doorks service."""
+"""Public Atlas software catalog and inquiry intake on the existing Doorks service."""
 from __future__ import annotations
 import csv, io, json, os, uuid
 from datetime import datetime, timezone, timedelta
@@ -31,7 +31,8 @@ class SoftwareInquiry(BaseModel):
     phone: str = Field(default='', max_length=40)
     package: str = Field(min_length=1, max_length=40)
     notes: str = Field(default='', max_length=2000)
-    website: str = Field(default='', max_length=200)  # hidden honeypot
+    website: str = Field(default='', max_length=200)  # hidden honeypot; never reuse for company URL
+    company_website: str = Field(default='', max_length=300)
     utm_source: str = Field(default='', max_length=100)
     utm_medium: str = Field(default='', max_length=100)
     utm_campaign: str = Field(default='', max_length=100)
@@ -88,6 +89,14 @@ def _recent_inquiry_count(rows, email, now, window=timedelta(hours=1)):
 def submit_software_inquiry(payload: SoftwareInquiry, request: Request):
     if payload.website:  # do not disclose honeypot
         return {'ok':True,'message':'Inquiry received'}
+    if payload.company_website.strip():
+        from urllib.parse import urlsplit
+        try:
+            parsed = urlsplit(payload.company_website.strip())
+            if parsed.scheme.lower() not in ('https', 'http') or not parsed.hostname or parsed.username or parsed.password or any(ch.isspace() for ch in payload.company_website):
+                raise ValueError('Invalid company website')
+        except ValueError as exc:
+            raise HTTPException(400, 'Enter a valid website URL beginning with https:// or http://') from exc
     if not payload.company.strip() or not payload.contact.strip():
         raise HTTPException(400,'Business name and contact are required')
     if any(ord(ch) < 32 and ch not in '\t\n\r' for ch in payload.notes):
@@ -100,7 +109,7 @@ def submit_software_inquiry(payload: SoftwareInquiry, request: Request):
     base = Path(request.app.state.data_dir) / 'business_workspaces' / 'sdc'
     path = base / 'software_leads.json'
     record = {'id':uuid.uuid4().hex, 'company':payload.company.strip(), 'contact':payload.contact.strip(),
-              'email':payload.email.strip(), 'phone':payload.phone.strip(), 'package':payload.package,
+              'email':payload.email.strip(), 'phone':payload.phone.strip(), 'company_website':payload.company_website.strip(), 'package':payload.package,
               'notes':payload.notes.strip(), 'setup_assistance':'Discuss during consultation',
               'status':'New', 'source':'public_software_storefront',
               'utm_source':payload.utm_source.strip(), 'utm_medium':payload.utm_medium.strip(),
@@ -186,7 +195,7 @@ def export_software_inquiries(request: Request):
     ws.guard(request, 'sdc', 'software_leads')
     with _shared_workspace_lock():
         rows = ws.load(ws.location(request, 'sdc', 'software_leads'))
-    headers = ('company', 'contact', 'email', 'phone', 'package', 'status',
+    headers = ('company', 'contact', 'email', 'phone', 'company_website', 'package', 'status',
                'created_at', 'follow_up_date', 'demo_date', 'proposal_date', 'proposal_amount', 'proposal_terms', 'notes', 'internal_notes',
                'utm_source', 'utm_medium', 'utm_campaign', 'landing_page')
     stream = io.StringIO(newline='')
