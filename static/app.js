@@ -699,7 +699,15 @@
     await Promise.all([refresh(),loadLinkOptions()]);
   }
 
-  function renderSdcLegacyNotice(){clearWorkspaceActions();setWorkspace('SDC — Legacy Records');workspaceBody.innerHTML='<div class="card"><h2>Legacy Saddleback Records</h2><p class="hint">The original PDS Saddleback orders and taxes records have not been migrated into SDC. They remain stored in PDS and are not overwritten. Use the PDS workspace to access the original records until a safe migration is available.</p><button class="btn" id="legacySdcBack">← Dashboard</button></div>';el('legacySdcBack').onclick=()=>showPlatformShell('sdc');}
+  async function renderSdcLegacyNotice(){
+    clearWorkspaceActions();setWorkspace('SDC — Historical Records');
+    workspaceBody.innerHTML='<div class="card" style="max-width:900px;margin:auto"><h2>Historical Saddleback Records</h2><p class="hint">Copy your original Saddleback orders, expenses and purchases into the current SDC workspace. Existing records are preserved; this does not delete or overwrite your historical data.</p><div id="sdcMigrationCounts">Checking historical records…</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:18px"><button class="btn btn-orange" id="sdcMigrationApply" disabled>Import historical records</button><button class="btn" id="sdcMigrationRefresh">Refresh preview</button><button class="btn" id="legacySdcBack">← Dashboard</button></div><p class="hint" id="sdcMigrationStatus" role="status"></p></div>';
+    el('legacySdcBack').onclick=()=>showPlatformShell('sdc');
+    const preview=async()=>{const host=el('sdcMigrationCounts'),button=el('sdcMigrationApply');button.disabled=true;try{const result=await fetchJSON('/saddleback/migration-preview');const data=result.preview||{};host.replaceChildren();const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse;margin:12px 0';for(const [name,entry] of Object.entries(data)){const tr=document.createElement('tr');for(const value of [name.charAt(0).toUpperCase()+name.slice(1),entry.source+' historical',entry.already_imported+' imported',entry.to_import+' ready to import']){const td=document.createElement('td');td.textContent=value;td.style.cssText='padding:12px;border-bottom:1px solid #dce5dd';tr.append(td)}table.append(tr)}host.append(table);button.disabled=!Object.values(data).some(x=>x.to_import>0);el('sdcMigrationStatus').textContent='Preview only — nothing has been modified.';}catch(e){host.textContent='Unable to read historical records: '+e.message;el('sdcMigrationStatus').textContent='No changes made.';}};
+    el('sdcMigrationRefresh').onclick=preview;
+    el('sdcMigrationApply').onclick=async()=>{if(!confirm('Copy the historical Saddleback records into the current SDC workspace? Original records will remain untouched.'))return;const button=el('sdcMigrationApply');button.disabled=true;el('sdcMigrationStatus').textContent='Importing…';try{const result=await fetchJSON('/saddleback/migrate-to-sdc',{method:'POST'});el('sdcMigrationStatus').textContent=result.message+' Orders: '+result.imported.orders+'; expenses: '+result.imported.expenses+'; purchases: '+result.imported.purchases+'.';await preview();}catch(e){el('sdcMigrationStatus').textContent='Import failed: '+e.message;}};
+    await preview();
+  }
   // Phase 2R-D: cross-workspace Accounts Payable visibility, derived from existing POs.
   // This is a purchasing exposure report, NOT a ledger of approved vendor bills.
 
@@ -2154,7 +2162,7 @@
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
-      addSdc('sdcOfficeNav','Legacy Saddleback Records',()=>renderSdcLegacyNotice());
+      addSdc('sdcOfficeNav','Import Historical SDC Records',()=>renderSdcLegacyNotice());
       addSdc('sdcDevelopmentNav','Atlas Software Sales',()=>renderAtlasSales('overview'));
       addSdc('sdcDevelopmentNav','Open Atlas Storefront',()=>{window.open('/software','_blank','noopener');});
     }
