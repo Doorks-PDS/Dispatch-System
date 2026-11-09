@@ -1153,6 +1153,17 @@
       if(!item){f('document_type').value=type;f('date').value=new Date(Date.now()-new Date().getTimezoneOffset()*60000).toISOString().slice(0,10);f('document_number').value='';} updateStatusOptions(f('document_type').value,data.status||'Draft');f('document_type').disabled=!!filterType;
       let lines=[];try{lines=Array.isArray(data.line_items)?data.line_items:JSON.parse(data.line_items||'[]');}catch{}
       if(!lines.length&&data.description)lines=[{description:data.description,quantity:1,rate:Number(data.amount)||0,taxable:false}];
+      const atlasDraft=(!item&&platform==='sdc')?window.__atlasProposalDraft:null;
+      if(atlasDraft){
+        window.__atlasProposalDraft=null;
+        f('customer').value=atlasDraft.company;
+        f('address').value=[atlasDraft.contact,atlasDraft.email,atlasDraft.phone,atlasDraft.website].filter(Boolean).join('\n');
+        f('notes').value=['Atlas software proposal · '+atlasDraft.package,atlasDraft.notes,atlasDraft.terms,'SDC lead reference: '+atlasDraft.lead_id].filter(Boolean).join('\n\n');
+        const amount=Number(atlasDraft.amount);
+        if(Number.isFinite(amount)&&amount>=0&&atlasDraft.amount!=='')lines=[{item:'ATLAS-'+atlasDraft.package.toUpperCase(),description:'Atlas '+atlasDraft.package+' software package — review scope and billing terms',quantity:1,rate:amount,taxable:false}];
+        else lines=[{item:'ATLAS-'+atlasDraft.package.toUpperCase(),description:'Atlas '+atlasDraft.package+' software package — set pricing and terms',quantity:1,rate:0,taxable:false}];
+        f('tax_rate').value='0';
+      }
       for(const line of lines.length?lines:[{}])addLine(line);
       q('wedEditorTitle').textContent=(item?'Edit ':'New ')+f('document_type').value;
       q('wedEditor').scrollIntoView({block:'start',behavior:'smooth'});
@@ -2131,6 +2142,8 @@
         const frame=document.createElement('iframe');frame.title='Atlas software sales and inquiry management';frame.src='/sdc/software-leads?embedded=1';frame.style.cssText='width:100%;height:1100px;min-height:70vh;border:1px solid #dce5dd;border-radius:18px;background:#f7faf7;display:block';frame.setAttribute('loading','eager');
         refresh.onclick=()=>{frame.src='/sdc/software-leads?embedded=1&refresh='+Date.now()};
         shell.append(frame);workspaceBody.append(shell);
+        window.__atlasOpenProposalEditor=(lead)=>{if(!lead||!lead.id)return;window.__atlasProposalDraft={company:String(lead.company||''),contact:String(lead.contact||''),email:String(lead.email||''),phone:String(lead.phone||''),website:String(lead.company_website||''),package:String(lead.package||''),notes:String(lead.notes||''),terms:String(lead.proposal_terms||''),amount:String(lead.proposal_amount||''),lead_id:String(lead.id)};renderWorkspaceEstimateInvoice('sdc',true,()=>renderAtlasSales('overview'),'Estimate');};
+
         frame.addEventListener('load',()=>{try{const doc=frame.contentDocument;if(!doc)return;const resize=()=>{const height=Math.max(800,doc.documentElement.scrollHeight,doc.body?.scrollHeight||0);frame.style.height=Math.min(height+30,12000)+'px'};resize();if(typeof ResizeObserver!=='undefined'){const obs=new ResizeObserver(resize);obs.observe(doc.body)}else frame.style.height='1400px'}catch(e){/* Browser may block measurement; frame remains scrollable. */}});
       }
       addSdc('sdcJobNav','Dashboard',()=>showPlatformShell('sdc'));
@@ -2143,8 +2156,7 @@
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
       addSdc('sdcOfficeNav','Legacy Saddleback Records',()=>renderSdcLegacyNotice());
       addSdc('sdcDevelopmentNav','Atlas Software Sales',()=>renderAtlasSales('overview'));
-      addSdc('sdcDevelopmentNav','Software Inquiries',()=>renderAtlasSales('inquiries'));
-      addSdc('sdcDevelopmentNav','Public Software Storefront',()=>{window.open('/software','_blank','noopener');});
+      addSdc('sdcDevelopmentNav','Open Atlas Storefront',()=>{window.open('/software','_blank','noopener');});
     }
     if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbJobNav','Job Flow',renderDoorksJobFlow);add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Payroll',()=>renderDoorksStaff('payroll'));add('dbOfficeNav','Employees',()=>renderDoorksStaff('employees'));add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer & Vendor Portals',renderDoorksPortalAdmin);add('dbPortalNav','Customer Hub',()=>renderDoorksRelationshipHub('customers'));add('dbPortalNav','Vendor Hub',()=>renderDoorksRelationshipHub('vendors'));}
     if(loginPanel){

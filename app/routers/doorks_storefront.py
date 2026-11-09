@@ -315,6 +315,22 @@ def update_software_inquiry(lead_id: str, payload: LeadStatusUpdate, request: Re
             'onboarding_completed': target.get('onboarding_completed', [])}
 
 
+@router.delete('/api/software/inquiries/{lead_id}')
+def delete_software_inquiry(lead_id: str, request: Request):
+    """Explicit admin-only lead deletion; does not touch linked customer records."""
+    from app.routers import workspaces as ws
+    ws.guard(request, 'sdc', 'software_leads')
+    if len(lead_id) != 32 or any(ch not in '0123456789abcdef' for ch in lead_id):
+        raise HTTPException(400, 'Invalid lead identifier')
+    with _shared_workspace_lock():
+        path = ws.location(request, 'sdc', 'software_leads')
+        rows = ws.load(path)
+        if not any(isinstance(row, dict) and row.get('id') == lead_id for row in rows):
+            raise HTTPException(404, 'Inquiry not found')
+        ws.save(path, [row for row in rows if not (isinstance(row, dict) and row.get('id') == lead_id)])
+    return {'ok': True, 'deleted_id': lead_id}
+
+
 @router.get('/api/software/inquiries/{lead_id}/proposal')
 def printable_software_proposal(lead_id: str, request: Request):
     """Admin-only printable proposal; browser Print > Save as PDF.
