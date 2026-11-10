@@ -76,7 +76,15 @@
     const input=document.createElement('textarea');input.className='input';input.rows=2;input.placeholder='Ask Moses a question…';input.style.width='100%';
     const send=document.createElement('button');send.className='btn';send.textContent='Send to Moses';send.style.margin='8px 0';
     const add=(who,content)=>{const line=document.createElement('div');line.style.cssText='padding:10px;border-radius:10px;background:'+(who==='You'?'#eef3eb':'#f2f4f7');line.textContent=who+': '+content;history.append(line);history.scrollTop=history.scrollHeight};
-    send.onclick=async()=>{const question=input.value.trim();if(!question)return;input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question})});add('Moses',r.answer||'No response');for(const m of r.matches||[])add('Record',m.type+' · '+m.name+(m.status?' · '+m.status:''));}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
+    send.onclick=async()=>{const question=input.value.trim();if(!question)return;input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question})});add('Moses',r.answer||'No response');for(const m of r.matches||[]){
+      const item=document.createElement('div');item.style.cssText='padding:10px;border:1px solid #d9dee7;border-radius:10px;display:grid;gap:6px';
+      const label=document.createElement('strong');label.textContent=[m.name,m.job_number,m.date,m.status].filter(Boolean).join(' · ');item.append(label);
+      if(m.address){const address=document.createElement('small');address.textContent=m.address;item.append(address)}
+      if(m.navigate==='all_jobs'){
+        const button=document.createElement('button');button.className='btn';button.textContent='Find in All Jobs';button.onclick=()=>{panel.hidden=true;renderAllJobsView();const field=document.getElementById('all_jobs_search');if(field){field.value=m.job_number||m.name;document.getElementById('all_jobs_refresh')?.click()}};item.append(button)
+      }history.append(item)
+    }
+    for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
     input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send.click()}});
     launch.onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden)input.focus()};panel.append(header,help,history,input,send);document.body.append(launch,panel);
 
@@ -6383,7 +6391,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const response=await fetch("/dispatch-ai/extract",{method:"POST",credentials:"same-origin",body:fd});
             const result=await response.json();if(!response.ok)throw Error(result.detail||"AI extraction failed");
             const fields=result.fields||{};
-            const mapping={customer:"#nj_customer",address:"#nj_address",contact:"#nj_contact",phone:"#nj_phone",email:"#nj_email",po_number:"#nj_po",estimate_number:"#nj_est",invoice_number:"#nj_inv",job_number:"#nj_job_number",office_notes:"#nj_office_notes"};
+            // Customer and service address are never silently assigned from AI output.
+            // The operator must choose/confirm them using existing saved-record inputs.
+            const identitySuggestions=['customer','address'].map(k=>fields[k]?k+': '+fields[k]:k+': not identified');
+            const verified=confirm('Moses extracted these UNVERIFIED identity suggestions:\n\n'+identitySuggestions.join('\n')+'\n\nPress OK to apply non-identity draft fields only. Select customer and service address manually using saved records.');
+            if(!verified){statusBox.textContent='Draft review cancelled; no fields were applied.';return;}
+            const mapping={contact:"#nj_contact",phone:"#nj_phone",email:"#nj_email",po_number:"#nj_po",estimate_number:"#nj_est",invoice_number:"#nj_inv",job_number:"#nj_job_number",office_notes:"#nj_office_notes"};
             let count=0;
             for(const [key,selector] of Object.entries(mapping)){
               const input=card.querySelector(selector),value=fields[key];
@@ -6393,7 +6406,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             }
             if(fields.job_notes&&!ta.value.trim()){ta.value=String(fields.job_notes);count++;}
             if(fields.date&&!row0.querySelector("#nj_date").value)row0.querySelector("#nj_date").value=fields.date;
-            statusBox.textContent=`AI suggested ${count} fields. Review the entire form before saving. ${result.message||""}`;
+            statusBox.textContent=`AI suggested ${count} non-identity fields. Customer and service address MUST be selected and verified manually. ${result.message||""}`;
             // Preserve the document as a job attachment when Save is clicked.
             if(file){const existing=row4.querySelector("#nj_files");if(existing&&(!existing.files||!existing.files.length)){
               try{const dt=new DataTransfer();dt.items.add(file);existing.files=dt.files;}catch(_){statusBox.textContent+=" Select the document again under Upload to attach it to the saved job.";}
