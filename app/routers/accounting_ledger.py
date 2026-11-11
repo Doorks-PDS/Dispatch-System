@@ -163,6 +163,25 @@ def update_bill(platform:str,record_id:str,request:Request,payload:Payload):
         for index,item in enumerate(items):
             if item['id']==record_id:
                 merged={**item,**payload.data};normalized=normalize('bills',merged)
+                # Existing payments are immutable manual records. Do not let edits silently
+                # invalidate their supplier/bill allocation or duplicate another bill.
+                if any(other.get('id') != record_id and
+                       str(other.get('supplier', '')).strip().casefold() == str(normalized['supplier']).strip().casefold() and
+                       str(other.get('bill_number', '')).strip().casefold() == str(normalized['bill_number']).strip().casefold()
+                       for other in items):
+                    raise HTTPException(409, 'Duplicate supplier bill number')
+                payments=load(path(request,platform,'payments'))
+                paid=sum((Decimal(str(payment.get('amount',0))) for payment in payments
+                          if payment.get('direction')=='sent'
+                          and str(payment.get('party') or '').strip().casefold()==str(item.get('supplier') or '').strip().casefold()
+                          and str(payment.get('reference_id') or '').strip().casefold()==str(item.get('bill_number') or '').strip().casefold()), Decimal('0'))
+                if paid and (str(normalized['supplier']).strip().casefold()!=str(item.get('supplier') or '').strip().casefold()
+                             or str(normalized['bill_number']).strip().casefold()!=str(item.get('bill_number') or '').strip().casefold()):
+                    raise HTTPException(409, 'Cannot change supplier or bill number after payments are allocated')
+                if normalized['status']=='Voided' and paid:
+                    raise HTTPException(409, 'Cannot void a bill with allocated payments')
+                if Decimal(str(normalized['amount']))<paid:
+                    raise HTTPException(409, 'Bill amount cannot be lower than allocated payments')
                 normalized['id']=item['id'];normalized['created_at']=item['created_at'];normalized['created_by']=item['created_by']
                 normalized['updated_at']=datetime.now(timezone.utc).isoformat();items[index]=normalized;write(p,items)
                 return {'item':normalized}
