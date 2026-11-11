@@ -464,44 +464,26 @@ def generate_description_from_data(data: dict[str, Any]) -> str:
         lines.append("********JOB COMPLETE*********")
         return " ".join(line for line in lines if line).strip()
 
-    # Estimates: selected recommendation/completion form first; dispatch/job notes only as fallback.
-    preferred_source = form_recs or form_tech_notes or payload_notes or office_notes or job_notes
-
+    # Estimates quote outstanding recommendations, never previously completed maintenance.
     title = _proposal_title(data, form)
-    lines: List[str] = [f"Proposal Includes – {title}"]
-
-    findings = _shorten_findings(preferred_source, door_location, door_type, tech)
-    if findings:
-        lines.append(f"Per our recent site visit, {findings}")
-    else:
-        lines.append(f"Per our recent site visit, {tech_lower} reviewed the opening and identified recommended repairs.")
-
-    scope_items = _scope_items_from_selected(data)
-    if not scope_items:
-        scope_items = _extract_parts_required(parts_required)
-    if not scope_items:
-        scope_items = _extract_approval_scope(job_notes)
-
-    scope_sentence = _proposal_scope_sentence(scope_items, tech)
-    if scope_sentence:
-        lines.append("")
-        lines.extend(scope_sentence.split("\n"))
-
-    if scope_items:
-        lines.append(f"Upon completion of work, {tech_lower} will test and adjust as needed to ensure proper function and security.")
-    else:
-        lines.append(f"Upon completion of work, {tech_lower} will test and adjust the opening as needed to ensure proper function and security.")
-
-    labor_text = _format_hours(time_required)
-    if labor_text:
-        lines.append("")
-        lines.append(f"Estimated onsite labor: {labor_text}.")
-
-    lines.append("")
-    lines.append("Please allow 1–3 weeks for scheduling and material procurement.")
-    lines.append("****EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS****")
-
-    return "\n".join(line for line in lines if line is not None).strip()
+    recommendations = form_recs.strip()
+    if not recommendations:
+        recommendations = _clean_text(data.get("custom_parts_text") or "")
+    if not recommendations:
+        selected = data.get("selected_parts") or []
+        recommendations = "; ".join(_clean_text(part.get("description") or part.get("Description") or part.get("Item")) for part in selected if isinstance(part, dict))
+    if not recommendations:
+        return (f"Proposal Includes - {title}\n\nDescription\n"
+                "Review the saved completion form and enter the proposed repairs. "
+                "No outstanding recommendations were recorded.\n\n"
+                "Please allow 1-3 weeks for material delivery and scheduling.\n\n"
+                "*EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS*")
+    # Fallback is intentionally conservative: only quote the technician's actual
+    # recommendation, not completed work, diagnoses or inferred replacement parts.
+    return (f"Proposal Includes - {title}\n\nDescription\n"
+            f"{recommendations}\n\n"
+            "Please allow 1-3 weeks for material delivery and scheduling.\n\n"
+            "*EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS*")
 
 
 def generate_description(payload: AutoDescriptionPayload) -> str:
@@ -739,22 +721,26 @@ def _ai_document_description(data: dict[str, Any]) -> str:
     }
 
     if doc_type == "invoice":
-        task = "Write a concise customer-facing invoice work description for completed commercial door service. State only work that the supplied field forms say was actually performed. Do not turn recommendations into completed work. End with ********JOB COMPLETE*********."
+        task = "Write a concise invoice description of completed work only. Do not quote future recommendations. End with ********JOB COMPLETE*********."
+        rules = ["You write invoice descriptions for Priority Door Systems.", task,
+                 "Only include documented completed work; do not invent details.",
+                 "Use plain customer-facing language without greetings or commentary."]
     else:
-        task = "Write a concise customer-facing estimate/proposal scope for commercial door work. Use the selected scope intent as the estimator instruction for what is being proposed. Recommendations and technician notes are source facts, not permission to invent additional work."
+        task = "Prepare a short, actionable estimate ONLY for outstanding recommended repairs."
+        rules = [
+            "You write professional commercial door repair proposals for Priority Door Systems.", task,
+            "Output exactly this structure with no extra headings or commentary:",
+            "Proposal Includes - <door location and type>",
+            "", "Description", "<one or more short proposed-work sentences or paragraphs>", "",
+            "Please allow 1-3 weeks for material delivery and scheduling.", "",
+            "*EXCLUDES: HIDDEN CONDITIONS OR SPECIAL SCHEDULING ARRANGEMENTS*",
+            "Use Additional Recommendations as the primary scope source. Use technician notes only to clarify a recommended repair.",
+            "Do not include work already performed, past maintenance, site-visit narratives, parts already used or unrelated findings.",
+            "If there are no explicit recommendations or selected proposed parts, do not infer a repair; say that the proposed work requires review.",
+            "Use exact stated quantities and parts only; do not invent parts, quantities, specifications, or outcomes.",
+            "Never add prices or unrelated terms. Keep the description brief and directly actionable.",
+        ]
 
-    rules = [
-        "You write estimate and invoice descriptions for Priority Door Systems.", task,
-        "Use only facts present in the supplied source data. Never invent parts, quantities, dimensions, finishes, labor hours, door conditions, diagnoses, or completed work.",
-        "Do not use office notes or job notes as scope unless they are explicitly included in the supplied selected forms or parts.",
-        "Preserve useful exact part names, handing, finishes, locations, door IDs, and quantities when provided.",
-        "Remove technician shorthand and rewrite it professionally for a customer.",
-        "Do not add pricing, tax, terms, scheduling promises, material lead times, exclusions, warranties, or hidden-condition language.",
-        "Do not add greetings, explanations, markdown headings, or commentary outside the description.",
-        "For an estimate, clearly describe proposed work, not work already completed.",
-        "For an invoice, clearly describe completed work and do not claim recommended future repairs were completed.",
-        "Keep it concise but specific.",
-    ]
     system = "\n".join(rules)
     user = "Source data:\n" + json.dumps(source, ensure_ascii=False, default=str, indent=2)
     return call_openai_text(system, user).strip()

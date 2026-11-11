@@ -844,7 +844,7 @@
   async function renderSdcAccountingOverview(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting Overview & Reports');
-    workspaceBody.innerHTML=`<div class="card" style="max-width:1300px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Overview & Reports</h2><p class="hint">Saved orders, payments, taxes and expenses.</p></div><button class="btn" id="sdcReportBack">← Accounting Hub</button></div><div style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:18px 0"><label>Month <input class="input" id="sdcReportMonth" type="month"></label><label>From <input class="input" id="sdcReportFrom" type="date"></label><label>Through <input class="input" id="sdcReportTo" type="date"></label><button class="btn" id="sdcReportAll">All dates</button><button class="btn btn-orange" id="sdcReportExport">Export transaction details CSV</button><button class="btn" id="sdcReportSummaryExport">Export summary CSV</button></div><p id="sdcReportStatus" class="hint" role="status">Loading saved records…</p><div id="sdcReportCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"></div><h3>Historical accounting details</h3><p class="hint">Completed historical orders are marked paid as reported. Missing tax and cost documentation is listed below.</p><div id="sdcReportReview"></div><button class="btn" id="sdcReportReviewExport" type="button">Export missing-details checklist CSV</button><h3>Expense categories</h3><div id="sdcReportCategories"></div><p class="hint">“—” means no amount was recorded. Paid-order figures are owner-reported, not bank-reconciled. Review tax and shipping classifications before filing.</p></div>`;
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1300px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Overview & Reports</h2><p class="hint">Saved orders, payments, taxes and expenses.</p></div><button class="btn" id="sdcReportBack">← Accounting Hub</button></div><div style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:18px 0"><label>Month <span style="display:flex;gap:5px;align-items:center"><button type="button" class="btn" id="sdcMonthPrev" aria-label="Previous month">←</button><input class="input" id="sdcReportMonth" type="month"><button type="button" class="btn" id="sdcMonthNext" aria-label="Next month">→</button></span></label><label>From <input class="input" id="sdcReportFrom" type="date"></label><label>Through <input class="input" id="sdcReportTo" type="date"></label><button class="btn" id="sdcReportAll">All dates</button><button class="btn btn-orange" id="sdcReportExport">Export transaction details CSV</button><button class="btn" id="sdcReportSummaryExport">Export summary CSV</button></div><p id="sdcReportStatus" class="hint" role="status">Loading saved records…</p><div id="sdcReportCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"></div><h3>Historical accounting details</h3><p class="hint">Completed historical orders are marked paid as reported. Missing tax and cost documentation is listed below.</p><div id="sdcReportReview"></div><button class="btn" id="sdcReportReviewExport" type="button">Export missing-details checklist CSV</button><h3>Expense categories</h3><div id="sdcReportCategories"></div><p class="hint">“—” means no amount was recorded. Paid-order figures are owner-reported, not bank-reconciled. Review tax and shipping classifications before filing.</p></div>`;
     const q=id=>document.getElementById(id),money=v=>Number(v||0).toLocaleString('en-US',{style:'currency',currency:'USD'});
     q('sdcReportBack').onclick=renderSdcAccounting;
     let orders=[],expenses=[];
@@ -895,7 +895,10 @@
       const review=q('sdcReportReview');review.replaceChildren();const missing=o.map(row=>({row,missing:missingFields(row)})).filter(x=>x.missing.length);const summary=document.createElement('p');summary.className='hint';summary.textContent=`${o.filter(historicalPaid).length} historical orders reported paid by owner. ${missing.length} orders have missing tax or cost evidence; this is not an unpaid-order list.`;review.append(summary);const list=document.createElement('div');list.style.cssText='max-height:320px;overflow:auto;border:1px solid #dce3e8;border-radius:12px';for(const {row,missing:fields} of missing){const entry=document.createElement('div');entry.style.cssText='padding:10px 14px;border-bottom:1px solid #e5e9ed';const title=document.createElement('strong');title.textContent=String(row.customer||row.ref||row.id||'Unidentified order');const detail=document.createElement('div');detail.className='hint';detail.textContent='Order '+String(row.ref||row.id||'—')+' · Missing: '+fields.join(', ');entry.append(title,detail);list.append(entry);}review.append(list);
       const groups=new Map();for(const row of e){const key=String(row.category||'Uncategorized').trim()||'Uncategorized';const entry=groups.get(key)||{count:0,total:0};entry.count++;entry.total+=num(row,'amount')||0;groups.set(key,entry);}const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse';for(const [name,entry] of [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){const tr=document.createElement('tr');for(const v of [name,String(entry.count),money(entry.total)]){const td=document.createElement('td');td.textContent=v;td.style.cssText='padding:10px;border-bottom:1px solid #dce3e8';tr.append(td);}table.append(tr);}q('sdcReportCategories').replaceChildren(table);q('sdcReportStatus').textContent=`${o.length} orders · ${e.length} expenses`;};
     q('sdcReportMonth').onchange=()=>{const m=q('sdcReportMonth').value;if(!m)return;const [y,n]=m.split('-').map(Number);q('sdcReportFrom').value=m+'-01';q('sdcReportTo').value=new Date(Date.UTC(y,n,0)).toISOString().slice(0,10);draw();};
-    q('sdcReportFrom').onchange=draw;q('sdcReportTo').onchange=draw;
+    const shiftMonth=delta=>{const current=q('sdcReportMonth').value||new Date().toISOString().slice(0,7);const [year,month]=current.split('-').map(Number);const next=new Date(Date.UTC(year,month-1+delta,1));q('sdcReportMonth').value=next.toISOString().slice(0,7);q('sdcReportMonth').onchange();};
+    q('sdcMonthPrev').onclick=()=>shiftMonth(-1);
+    q('sdcMonthNext').onclick=()=>shiftMonth(1);
+    q('sdcReportFrom').onchange=()=>{q('sdcReportMonth').value='';draw();};q('sdcReportTo').onchange=()=>{q('sdcReportMonth').value='';draw();};
     q('sdcReportAll').onclick=()=>{q('sdcReportMonth').value='';q('sdcReportFrom').value='';q('sdcReportTo').value='';draw();};
     q('sdcReportReviewExport').onclick=()=>{if(!validPeriod())return;const {o}=filtered();exportRows('SDC_missing_financial_details_'+(q('sdcReportFrom').value||'all')+'.csv',[['order_reference','customer','order_date','missing_fields','review_status'],...o.map(row=>[row.ref||row.id||'',row.customer||'',dateOf(row,true),missingFields(row).join('; '),missingFields(row).length?'Needs verification':'Fields completed'])]);};
     q('sdcReportExport').onclick=()=>{
@@ -2287,7 +2290,6 @@
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
-      addSdc('sdcOfficeNav','Import Historical SDC Records',()=>renderSdcLegacyNotice());
       addSdc('sdcDevelopmentNav','Atlas Software Sales',()=>renderAtlasSales('overview'));
       addSdc('sdcDevelopmentNav','Open Atlas Storefront',()=>{window.open('/software','_blank','noopener');});
     }
@@ -10640,19 +10642,7 @@ function serializeDocItems(items, laborOnly) {
           <div class="label">Description Source</div>
           <select class="input" id="doc_source_form"></select>
           <div class="hint" style="margin-top:6px;">Choose which saved Completion/Recommendation Form should drive Auto Fill Description.</div>
-          <div id="doc_scope_wrap" style="margin-top:10px;">
-            <div class="label">Proposed Scope</div>
-            <select class="input" id="doc_scope_intent">
-              <option value="">-- Select proposed work --</option>
-              <option value="Furnish and install">Furnish &amp; Install</option>
-              <option value="Repair">Repair</option>
-              <option value="Adjust">Adjust</option>
-              <option value="Replace">Replace</option>
-              <option value="New installation">New Installation</option>
-              <option value="Other">Other</option>
-            </select>
-            <div class="hint" style="margin-top:6px;">Tells Auto Fill what you are proposing. The generated description remains editable.</div>
-          </div>
+
         </div>
         <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
           <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
@@ -10698,7 +10688,7 @@ function serializeDocItems(items, laborOnly) {
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
-      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms"), sourceWrap:card.querySelector("#doc_source_wrap"), sourceForm:card.querySelector("#doc_source_form"), scopeWrap:card.querySelector("#doc_scope_wrap"), scopeIntent:card.querySelector("#doc_scope_intent") };
+      const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms"), sourceWrap:card.querySelector("#doc_source_wrap"), sourceForm:card.querySelector("#doc_source_form"), scopeWrap:null, scopeIntent:null };
       SALES_TAX_OPTIONS.forEach(opt => { const o=document.createElement("option"); o.value=String(opt.rate); o.textContent=`${opt.city} — ${Number(opt.rate).toFixed(2)}%`; o.dataset.city=opt.city; dom.taxRateSelect.appendChild(o); });
       const jobFormsForDescriptions = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
       function isRecommendationLikeForm(f) {
@@ -10835,9 +10825,6 @@ function serializeDocItems(items, laborOnly) {
       });
       card.querySelector("#doc_auto_fill").addEventListener("click", async ()=> {
         try {
-          if (dom.type.value === "estimate" && !String(dom.scopeIntent?.value || "").trim()) {
-            return alert("Select the Proposed Scope before using Auto Fill Description.");
-          }
           const completionForms = selectedDescriptionForms();
           const crew = completionForms.length > 1 || /crew/i.test(JSON.stringify(completionForms || []));
           const resp = await apiAutoFillDescription({
