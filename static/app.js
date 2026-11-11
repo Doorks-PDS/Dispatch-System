@@ -844,31 +844,88 @@
   async function renderSdcAccountingOverview(){
     if(activePlatform!=='sdc')return;
     clearWorkspaceActions();setWorkspace('SDC — Accounting Overview & Reports');
-    workspaceBody.innerHTML=`<div class="card" style="max-width:1300px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Overview & Reports</h2><p class="hint">Saved SDC records · cash receipts and costs are shown separately; totals are not bank-reconciled or tax advice.</p></div><button class="btn" id="sdcReportBack">← Accounting Hub</button></div><div style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:18px 0"><label>Month <input class="input" id="sdcReportMonth" type="month"></label><label>From <input class="input" id="sdcReportFrom" type="date"></label><label>Through <input class="input" id="sdcReportTo" type="date"></label><button class="btn" id="sdcReportAll">All dates</button><button class="btn btn-orange" id="sdcReportExport">Export detailed CSV</button></div><p id="sdcReportStatus" class="hint" role="status">Loading saved records…</p><div id="sdcReportCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"></div><h3>Historical order review</h3><p class="hint">This checklist flags missing tax-season evidence; it does not infer deposits or tax remittances from legacy totals.</p><div id="sdcReportReview"></div><button class="btn" id="sdcReportReviewExport" type="button">Export missing-details checklist CSV</button><h3>Expense categories</h3><div id="sdcReportCategories"></div><p class="hint">Blank payment, shipping, or tax breakdowns are reported as missing—not assumed to be zero. Order totals are not added to gross collected or shipping charged, to avoid double counting. Export includes source fields for tax review.</p></div>`;
+    workspaceBody.innerHTML=`<div class="card" style="max-width:1300px;margin:auto"><div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap"><div><h2>Overview & Reports</h2><p class="hint">Saved SDC records · cash receipts and costs are shown separately; totals are not bank-reconciled or tax advice.</p></div><button class="btn" id="sdcReportBack">← Accounting Hub</button></div><div style="display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:18px 0"><label>Month <input class="input" id="sdcReportMonth" type="month"></label><label>From <input class="input" id="sdcReportFrom" type="date"></label><label>Through <input class="input" id="sdcReportTo" type="date"></label><button class="btn" id="sdcReportAll">All dates</button><button class="btn btn-orange" id="sdcReportExport">Export transaction details CSV</button><button class="btn" id="sdcReportSummaryExport">Export summary CSV</button></div><p id="sdcReportStatus" class="hint" role="status">Loading saved records…</p><div id="sdcReportCards" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"></div><h3>Historical order review</h3><p class="hint">This checklist flags missing tax-season evidence; it does not infer deposits or tax remittances from legacy totals.</p><div id="sdcReportReview"></div><button class="btn" id="sdcReportReviewExport" type="button">Export missing-details checklist CSV</button><h3>Expense categories</h3><div id="sdcReportCategories"></div><p class="hint">Historical sales tax and shipping are included in their respective totals as fallback values, not added twice. Sales recorded is not proof of payment; review deposits, tax remittances, shipping classification, and expense overlaps before filing.</p></div>`;
     const q=id=>document.getElementById(id),money=v=>Number(v||0).toLocaleString('en-US',{style:'currency',currency:'USD'});
     q('sdcReportBack').onclick=renderSdcAccounting;
     let orders=[],expenses=[];
     try{const results=await Promise.all([fetchJSON('/workspaces/sdc/orders'),fetchJSON('/workspaces/sdc/expenses')]);orders=results[0].items||[];expenses=results[1].items||[];}catch(err){q('sdcReportStatus').textContent='Unable to load SDC financial records: '+err.message;return;}
     const dateOf=(row,isOrder)=>String((isOrder?(row.order_date||row.date):(row.date||row.order_date))||'').slice(0,10);
     const num=(row,key)=>{const v=row[key];return v===undefined||v===null||String(v).trim()===''?null:Number.isFinite(Number(v))?Number(v):null;};
-    const csvCell=value=>'"'+String(value??'').replace(/"/g,'""')+'"';
+    const csvCell=value=>{const raw=String(value??'');const safe=/^[\s]*[=+@]/.test(raw)?"'"+raw:raw;return '"'+safe.replace(/"/g,'""')+'"';};
     const inRange=(row,isOrder)=>{const d=dateOf(row,isOrder),a=q('sdcReportFrom').value,b=q('sdcReportTo').value;return (!a&&!b)||!!d&&(!a||d>=a)&&(!b||d<=b);};
     const filtered=()=>({o:orders.filter(r=>inRange(r,true)),e:expenses.filter(r=>inRange(r,false))});
-    const reviewFields=[['payment_received','Payment received'],['payment_date','Payment date'],['sales_tax_collected','Sales tax collected'],['sales_tax_remitted','Sales tax remitted'],['shipping_charged','Shipping charged'],['shipping_cost','Shipping cost'],['marketplace_fees','Marketplace fees'],['cost_of_goods','Cost of goods']];
-    const missingFields=row=>reviewFields.filter(([key])=>row[key]===undefined||row[key]===null||String(row[key]).trim()==='').map(([,label])=>label);
+    const validPeriod=()=>!q('sdcReportFrom').value||!q('sdcReportTo').value||q('sdcReportFrom').value<=q('sdcReportTo').value;
+    // Legacy fields are fallback values, not additional transactions. Prefer the newer
+    // field on each order to avoid double-counting after a historical record is edited.
+    const firstRecorded=(row,...keys)=>{for(const key of keys){const v=num(row,key);if(v!==null)return v;}return null;};
+    const sumRecorded=(rows,...keys)=>rows.reduce((v,row)=>v+(firstRecorded(row,...keys)||0),0);
+    const knownRecorded=(rows,...keys)=>rows.filter(row=>firstRecorded(row,...keys)!==null).length;
+    const reviewFields=[['payment_received','Verified payment received'],['payment_date','Payment date'],['sales_tax_remitted','Sales tax remitted'],['shipping_cost','Shipping cost'],['cost_of_goods','Cost of goods']];
+    const missingFields=row=>{
+      const missing=reviewFields.filter(([key])=>row[key]===undefined||row[key]===null||String(row[key]).trim()==='').map(([,label])=>label);
+      if(firstRecorded(row,'sales_tax_collected','tax')===null)missing.push('Sales tax');
+      if(firstRecorded(row,'shipping_charged','shipping')===null)missing.push('Shipping');
+      if(firstRecorded(row,'marketplace_fees','channel_fee')===null)missing.push('Marketplace fees');
+      return missing;
+    };
     const exportRows=(filename,rows)=>{const content='\ufeff'+rows.map(row=>row.map(csvCell).join(',')).join('\r\n');const url=URL.createObjectURL(new Blob([content],{type:'text/csv;charset=utf-8'}));const a=document.createElement('a');a.href=url;a.download=filename;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);};
 
-    const draw=()=>{const {o,e}=filtered(),cards=q('sdcReportCards');cards.replaceChildren();
+    const draw=()=>{if(!validPeriod()){q('sdcReportStatus').textContent='Start date must be on or before end date.';q('sdcReportCards').replaceChildren();q('sdcReportReview').replaceChildren();q('sdcReportCategories').replaceChildren();return;}const {o,e}=filtered(),cards=q('sdcReportCards');cards.replaceChildren();
       const sum=(rows,key)=>rows.reduce((v,r)=>v+(num(r,key)||0),0),known=(rows,key)=>rows.filter(r=>num(r,key)!==null).length;
-      const metrics=[['Orders',o.length,'records'],['Order totals',money(sum(o,'total')),known(o,'total')+' of '+o.length+' recorded'],['Payments received',money(sum(o,'payment_received')),known(o,'payment_received')+' of '+o.length+' orders have values'],['Gross collected',money(sum(o,'gross_collected')),known(o,'gross_collected')+' of '+o.length+' orders have values'],['Sales tax (legacy)',money(sum(o,'tax')),known(o,'tax')+' records'],['Sales tax collected',money(sum(o,'sales_tax_collected')),known(o,'sales_tax_collected')+' records'],['Sales tax remitted',money(sum(o,'sales_tax_remitted')),known(o,'sales_tax_remitted')+' records'],['Shipping (legacy)',money(sum(o,'shipping')),known(o,'shipping')+' records'],['Shipping charged',money(sum(o,'shipping_charged')),known(o,'shipping_charged')+' records'],['Shipping cost',money(sum(o,'shipping_cost')),known(o,'shipping_cost')+' records'],['Marketplace fees',money(sum(o,'marketplace_fees')+sum(o,'channel_fee')), 'Combined recorded fee fields; review for duplicates'],['Cost of goods',money(sum(o,'cost_of_goods')),known(o,'cost_of_goods')+' records'],['Expense records',e.length,'saved records'],['Recorded expenses',money(sum(e,'amount')),'Separate from order cost of goods']];
+      const metrics=[
+        ['Orders',o.length,'saved order records'],
+        ['Sales recorded',money(sumRecorded(o,'gross_collected','total')),'Uses recorded gross or legacy order total once per order; not verified deposits'],
+        ['Payments verified',money(sum(o,'payment_received')),known(o,'payment_received')+' orders with entered payment amounts'],
+        ['Sales tax recorded',money(sumRecorded(o,'sales_tax_collected','tax')),'Current tax or legacy tax per order; remittance tracked separately'],
+        ['Sales tax remitted',money(sum(o,'sales_tax_remitted')),'Entered remittances only'],
+        ['Shipping recorded',money(sumRecorded(o,'shipping_charged','shipping')),'Current shipping charged or legacy shipping per order; verify classification'],
+        ['Shipping costs',money(sum(o,'shipping_cost')),'Entered shipping costs only'],
+        ['Marketplace fees',money(sumRecorded(o,'marketplace_fees','channel_fee')),'Current or legacy fees per order; no duplicate addition'],
+        ['Cost of goods',money(sum(o,'cost_of_goods')),'Entered order costs only'],
+        ['Business expenses',money(sum(e,'amount')),e.length+' saved expense records; review overlap with order costs']
+      ];
       for(const [name,value,sub] of metrics){const card=document.createElement('div');card.className='card';card.style.padding='16px';const title=document.createElement('div');title.className='hint';title.textContent=name;const number=document.createElement('h2');number.style.margin='8px 0';number.textContent=String(value);const detail=document.createElement('div');detail.className='hint';detail.textContent=sub;card.append(title,number,detail);cards.append(card);}
       const review=q('sdcReportReview');review.replaceChildren();const missing=o.map(row=>({row,missing:missingFields(row)})).filter(x=>x.missing.length);const summary=document.createElement('p');summary.className='hint';summary.textContent=`${missing.length} of ${o.length} orders have at least one missing financial field. Blank fields mean unverified, not zero.`;review.append(summary);const list=document.createElement('div');list.style.cssText='max-height:320px;overflow:auto;border:1px solid #dce3e8;border-radius:12px';for(const {row,missing:fields} of missing){const entry=document.createElement('div');entry.style.cssText='padding:10px 14px;border-bottom:1px solid #e5e9ed';const title=document.createElement('strong');title.textContent=String(row.customer||row.ref||row.id||'Unidentified order');const detail=document.createElement('div');detail.className='hint';detail.textContent='Order '+String(row.ref||row.id||'—')+' · Missing: '+fields.join(', ');entry.append(title,detail);list.append(entry);}review.append(list);
       const groups=new Map();for(const row of e){const key=String(row.category||'Uncategorized').trim()||'Uncategorized';const entry=groups.get(key)||{count:0,total:0};entry.count++;entry.total+=num(row,'amount')||0;groups.set(key,entry);}const table=document.createElement('table');table.style.cssText='width:100%;border-collapse:collapse';for(const [name,entry] of [...groups.entries()].sort((a,b)=>a[0].localeCompare(b[0]))){const tr=document.createElement('tr');for(const v of [name,String(entry.count),money(entry.total)]){const td=document.createElement('td');td.textContent=v;td.style.cssText='padding:10px;border-bottom:1px solid #dce3e8';tr.append(td);}table.append(tr);}q('sdcReportCategories').replaceChildren(table);q('sdcReportStatus').textContent=`${o.length} orders and ${e.length} expenses in selected period. Missing financial details are not estimated.`;};
     q('sdcReportMonth').onchange=()=>{const m=q('sdcReportMonth').value;if(!m)return;const [y,n]=m.split('-').map(Number);q('sdcReportFrom').value=m+'-01';q('sdcReportTo').value=new Date(Date.UTC(y,n,0)).toISOString().slice(0,10);draw();};
     q('sdcReportFrom').onchange=draw;q('sdcReportTo').onchange=draw;
     q('sdcReportAll').onclick=()=>{q('sdcReportMonth').value='';q('sdcReportFrom').value='';q('sdcReportTo').value='';draw();};
-    q('sdcReportReviewExport').onclick=()=>{const {o}=filtered();exportRows('SDC_missing_financial_details_'+(q('sdcReportFrom').value||'all')+'.csv',[['order_reference','customer','order_date','missing_fields','review_status'],...o.map(row=>[row.ref||row.id||'',row.customer||'',dateOf(row,true),missingFields(row).join('; '),missingFields(row).length?'Needs verification':'Fields completed'])]);};
-    q('sdcReportExport').onclick=()=>{const {o,e}=filtered();const keys=[...new Set([...o,...e].flatMap(r=>Object.keys(r)))].sort();const lines=[['record_type',...keys].map(csvCell).join(',')];for(const [type,rows] of [['order',o],['expense',e]])for(const row of rows)lines.push([type,...keys.map(k=>row[k]??'')].map(csvCell).join(','));const blob=new Blob(['\ufeff'+lines.join('\r\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='SDC_financial_records_'+(q('sdcReportFrom').value||'all')+'_'+(q('sdcReportTo').value||'all')+'.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),3000);};
+    q('sdcReportReviewExport').onclick=()=>{if(!validPeriod())return;const {o}=filtered();exportRows('SDC_missing_financial_details_'+(q('sdcReportFrom').value||'all')+'.csv',[['order_reference','customer','order_date','missing_fields','review_status'],...o.map(row=>[row.ref||row.id||'',row.customer||'',dateOf(row,true),missingFields(row).join('; '),missingFields(row).length?'Needs verification':'Fields completed'])]);};
+    q('sdcReportExport').onclick=()=>{
+      if(!validPeriod())return;const {o,e}=filtered();
+      // Human-readable, curated accounting export. No internal migration keys,
+      // opaque IDs, duplicate source fields, or metadata columns.
+      const rows=[['Record type','Date','Reference','Customer / Vendor','Category / Channel','Description / Item','Sales recorded','Payment verified','Sales tax recorded','Tax remitted','Shipping recorded','Shipping cost','Marketplace fees','Cost of goods','Expense amount','Payment method','Status','Notes','Review flags']];
+      for(const row of o)rows.push(['Order',dateOf(row,true),row.ref||row.order_number||'',row.customer||row.customer_name||'',row.channel||'',row.item||row.description||'',firstRecorded(row,'gross_collected','total')??'',firstRecorded(row,'payment_received')??'',firstRecorded(row,'sales_tax_collected','tax')??'',firstRecorded(row,'sales_tax_remitted')??'',firstRecorded(row,'shipping_charged','shipping')??'',firstRecorded(row,'shipping_cost')??'',firstRecorded(row,'marketplace_fees','channel_fee')??'',firstRecorded(row,'cost_of_goods')??'','',row.payment_method||'',row.payment_status||row.status||'',row.notes||'',missingFields(row).join('; ')]);
+      for(const row of e)rows.push(['Expense',dateOf(row,false),row.ref||row.reference||'',row.vendor||'',row.category||'Uncategorized',row.description||row.item||'','','','','','','','','',firstRecorded(row,'amount')??'','',row.status||'',row.notes||'','']);
+      exportRows('SDC_financial_summary_'+(q('sdcReportFrom').value||'all')+'_'+(q('sdcReportTo').value||'all')+'.csv',rows);
+    };
+    // A separate compact summary for bookkeepers and tax preparers. Transaction
+    // details remain available in the adjacent export for source-level review.
+    q('sdcReportSummaryExport').onclick=()=>{
+      if(!validPeriod())return;
+      const {o,e}=filtered();
+      const sum=(rows,key)=>rows.reduce((total,row)=>total+(num(row,key)||0),0);
+      const metrics=[
+        ['Orders',o.length,'Count'],
+        ['Sales recorded',sumRecorded(o,'gross_collected','total'),'Recorded sales; not proof of payment'],
+        ['Payments verified',sum(o,'payment_received'),'Only entered payments'],
+        ['Sales tax recorded',sumRecorded(o,'sales_tax_collected','tax'),'Current or historical tax; one per order'],
+        ['Sales tax remitted',sum(o,'sales_tax_remitted'),'Only entered remittances'],
+        ['Shipping recorded',sumRecorded(o,'shipping_charged','shipping'),'Historical shipping classification requires review'],
+        ['Shipping costs',sum(o,'shipping_cost'),'Only entered shipping costs'],
+        ['Marketplace fees',sumRecorded(o,'marketplace_fees','channel_fee'),'Current or historical fee; one per order'],
+        ['Cost of goods',sum(o,'cost_of_goods'),'Only entered costs; review expense overlap'],
+        ['Business expenses',sum(e,'amount'),'Separate expense ledger; review overlap'],
+        ['Expenses',e.length,'Count']
+      ];
+      const rows=[['SDC Financial Summary','From','Through','Value','Notes'],...metrics.map(([name,value,note])=>[name,q('sdcReportFrom').value||'All',q('sdcReportTo').value||'All',value,note])];
+      rows.push([],['Expense category','Count','Recorded amount']);
+      const categories=new Map();
+      for(const row of e){const key=String(row.category||'Uncategorized').trim()||'Uncategorized';const current=categories.get(key)||{count:0,amount:0};current.count++;current.amount+=num(row,'amount')||0;categories.set(key,current);}
+      for(const [name,v] of [...categories].sort((a,b)=>a[0].localeCompare(b[0])))rows.push([name,v.count,v.amount]);
+      exportRows('SDC_financial_summary_'+(q('sdcReportFrom').value||'all')+'_'+(q('sdcReportTo').value||'all')+'.csv',rows);
+    };
     draw();
   }
   async function renderBusinessAiIntake(platform,backAction=null){
