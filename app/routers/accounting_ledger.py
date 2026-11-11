@@ -22,10 +22,13 @@ def guard(request: Request, platform: str):
     if not getattr(request.state, 'auth_user', None): raise HTTPException(401, 'Login required')
     if getattr(request.state, 'auth_role', None) != 'office_admin': raise HTTPException(403, 'Office Admin required')
     if request.session.get('active_platform', 'pds') != platform: raise HTTPException(403, 'Switch workspace first')
-    # PDS also requires its existing accounting unlock before any ledger access.
+    # Reuse the existing PDS Accounting Hub PIN session; never create a second PIN.
+    # Locking accounting in /accounting/lock immediately revokes access here too.
     if platform == 'pds':
-        # Do not expose new PDS ledger routes without integrating the original PIN state.
-        raise HTTPException(403, 'PDS ledger awaiting existing accounting PIN integration')
+        user = getattr(request.state, 'auth_user', None) or {}
+        uid = str(user.get('id') or '') if isinstance(user, dict) else ''
+        if not uid or request.session.get('accounting_pin_user') != uid:
+            raise HTTPException(403, 'PDS accounting PIN required')
 
 def path(request, platform, kind):
     base = Path(request.app.state.data_dir) / 'accounting_ledger' / platform
@@ -67,6 +70,51 @@ def normalize(kind,data):
         data['verification']='Manual entry — unverified'
     return data
 
+def bill_balances(bills, payments):
+    """Read-only reconciliation of manual supplier bills by supplier + bill number.
+
+    Legacy/unmatched payment references remain untouched and unallocated.
+    """
+    result = []
+    for bill in bills:
+        supplier = str(bill.get('supplier') or '').strip().casefold()
+        number = str(bill.get('bill_number') or '').strip().casefold()
+        paid = sum((Decimal(str(payment.get('amount', 0))) for payment in payments
+                    if payment.get('direction') == 'sent'
+                    and str(payment.get('reference_id') or '').strip().casefold() == number
+                    and str(payment.get('party') or '').strip().casefold() == supplier), Decimal('0'))
+        amount = Decimal(str(bill.get('amount', 0)))
+        result.append({**bill, 'paid_amount': str(paid),
+                       'balance': str(amount - paid),
+                       'payment_status': 'Voided' if bill.get('status') == 'Voided' else
+                       ('Paid' if paid >= amount else 'Partially paid' if paid else 'Unpaid')})
+    return result
+
+
+def validate_supplier_allocation(record, bills, payments):
+    """Prevent overpayment when a manual supplier payment identifies a known bill.
+
+    References to other/legacy bills are allowed but are not automatically allocated.
+    """
+    if record.get('direction') != 'sent':
+        return
+    number = str(record.get('reference_id') or '').strip().casefold()
+    supplier = str(record.get('party') or '').strip().casefold()
+    matches = [bill for bill in bills if str(bill.get('bill_number') or '').strip().casefold() == number
+               and str(bill.get('supplier') or '').strip().casefold() == supplier]
+    if not matches:
+        return
+    bill = matches[0]
+    if bill.get('status') == 'Voided':
+        raise HTTPException(409, 'Cannot allocate a payment to a voided supplier bill')
+    existing = sum((Decimal(str(payment.get('amount', 0))) for payment in payments
+                    if payment.get('direction') == 'sent'
+                    and str(payment.get('reference_id') or '').strip().casefold() == number
+                    and str(payment.get('party') or '').strip().casefold() == supplier), Decimal('0'))
+    if existing + Decimal(str(record['amount'])) > Decimal(str(bill['amount'])):
+        raise HTTPException(409, 'Payment exceeds remaining balance for this supplier bill')
+
+
 @router.get('/{platform}/summary')
 def summary(platform:str,request:Request):
     guard(request,platform)
@@ -77,6 +125,9 @@ def summary(platform:str,request:Request):
     for item in payments:
         key='paid_to_suppliers' if item['direction']=='sent' else 'received_from_customers'
         totals[key]=round(totals[key]+float(item['amount']),2)
+    reconciled = bill_balances(bills, payments)
+    totals['manual_supplier_balance'] = round(sum(float(b['balance']) for b in reconciled if b.get('status') != 'Voided'), 2)
+    totals['unpaid_supplier_bills'] = sum(b['payment_status'] in ('Unpaid', 'Partially paid') for b in reconciled)
     return totals
 
 
@@ -84,7 +135,11 @@ def summary(platform:str,request:Request):
 def listing(platform:str,kind:str,request:Request):
     guard(request,platform)
     if kind not in KINDS:raise HTTPException(404,'Unknown collection')
-    with LOCK:return {'items':load(path(request,platform,kind))}
+    with LOCK:
+        items = load(path(request, platform, kind))
+        if kind == 'bills':
+            items = bill_balances(items, load(path(request, platform, 'payments')))
+        return {'items': items}
 
 @router.post('/{platform}/{kind}')
 def create(platform:str,kind:str,request:Request,payload:Payload):
@@ -93,6 +148,8 @@ def create(platform:str,kind:str,request:Request,payload:Payload):
     record=normalize(kind,payload.data)
     with LOCK:
         p=path(request,platform,kind);items=load(p)
+        if kind == 'payments':
+            validate_supplier_allocation(record, load(path(request, platform, 'bills')), items)
         if kind=='bills' and any(x.get('bill_number','').casefold()==str(record['bill_number']).casefold() and x.get('supplier','').casefold()==str(record['supplier']).casefold() for x in items):raise HTTPException(409,'Duplicate supplier bill number')
         record.update(id=uuid.uuid4().hex,created_at=datetime.now(timezone.utc).isoformat(),created_by=str(request.state.auth_user))
         items.append(record);write(p,items)
