@@ -12,6 +12,7 @@ def test_compliance_expiration_report_is_admin_scoped():
 
 def test_vendor_print_preview_is_not_posted_invoice():
     source=Path('static/doorks_home.html').read_text()
-    assert 'Preview / Print branded document' in source
-    assert 'Not a posted customer invoice or approved estimate.' in source
+    assert "printButton.textContent='Print / Save preview as" in source
+    assert 'DoorksSharedTicket.renderDocument(preview,editor.draft(),{vendor:true})' in source
+    assert 'win.print()' in source
     assert 'Moses — Read attached document' in source

@@ -70,13 +70,78 @@
     if(document.getElementById('workspaceMosesBubble'))return;
     const launch=document.createElement('button');launch.id='workspaceMosesBubble';launch.type='button';launch.textContent='✨ Moses';launch.setAttribute('aria-label','Open Moses assistant');launch.style.cssText='position:fixed;right:24px;bottom:22px;z-index:11000;background:#395c3e;color:white;border:0;border-radius:28px;padding:14px 18px;box-shadow:0 5px 24px #0004;font-weight:800;cursor:pointer';
     const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.hidden=true;panel.style.cssText='position:fixed;right:22px;bottom:88px;z-index:11001;width:min(440px,calc(100vw - 35px));background:white;border:1px solid #d9dee7;border-radius:18px;padding:18px;box-shadow:0 12px 40px #0003;max-height:75vh;overflow:auto';
-    const header=document.createElement('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='✨ Moses Assistant';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.onclick=()=>{panel.hidden=true};header.append(title,close);
+    const header=document.createElement('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='✨ Moses Assistant';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true};header.append(title,close);
     const help=document.createElement('p');help.className='hint';help.textContent='Ask Moses about your workspace. Record results follow your signed-in permissions.';
     const history=document.createElement('div');history.style.cssText='min-height:100px;max-height:270px;overflow:auto;display:grid;gap:9px;margin:10px 0';
     const input=document.createElement('textarea');input.className='input';input.rows=2;input.placeholder='Ask Moses a question…';input.style.width='100%';
     const send=document.createElement('button');send.className='btn';send.textContent='Send to Moses';send.style.margin='8px 0';
+    // Moses Voice (opt-in). Browser-local speech synthesis and recognition.
+    // Browser speech recognition may use the browser vendor's cloud service.
+    // Only recognized text is sent to Moses when the user presses Send.
+    const voiceControls=document.createElement('div');
+    voiceControls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0';
+    const speakToggle=document.createElement('button');
+    speakToggle.type='button';speakToggle.className='btn';speakToggle.textContent='🔈 Voice replies: Off';
+    speakToggle.setAttribute('aria-pressed','false');
+    const micButton=document.createElement('button');
+    micButton.type='button';micButton.className='btn';micButton.textContent='🎙 Talk to Moses';
+    const stopVoice=document.createElement('button');
+    stopVoice.type='button';stopVoice.className='btn';stopVoice.textContent='■ Stop voice';
+    const voiceStatus=document.createElement('small');voiceStatus.setAttribute('role','status');
+    voiceStatus.style.cssText='display:block;width:100%;color:#56636f';
+    const synth=('speechSynthesis' in window)?window.speechSynthesis:null;
+    const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
+    let voiceReplies=false,recognizer=null,listening=false;
+    const stopSpeaking=()=>{try{synth?.cancel()}catch(_e){}};
+    const stopListening=()=>{if(recognizer){try{recognizer.stop()}catch(_e){}recognizer=null}listening=false;micButton.textContent='🎙 Talk to Moses'};
+    const say=(message)=>{
+      if(!voiceReplies||!synth||!message||panel.hidden)return;
+      stopSpeaking();
+      const utterance=new SpeechSynthesisUtterance(String(message).slice(0,3500));
+      utterance.lang='en-US';utterance.rate=0.96;utterance.pitch=0.9;
+      // Prefer an installed natural-sounding English voice, but always fall back
+      // to the device's default. Voice availability varies by browser and OS.
+      const voices=synth.getVoices();
+      const english=voices.filter(v=>/^en[-_]/i.test(v.lang));
+      utterance.voice=english.find(v=>v.localService&&/premium|enhanced|natural/i.test(v.name))
+        ||english.find(v=>v.localService)||english[0]||null;
+      utterance.onerror=()=>{voiceStatus.textContent='Voice playback unavailable on this device.'};
+      synth.speak(utterance);
+    };
+    speakToggle.onclick=()=>{
+      if(!synth){voiceStatus.textContent='This browser does not support spoken replies.';return}
+      voiceReplies=!voiceReplies;
+      speakToggle.textContent='🔈 Voice replies: '+(voiceReplies?'On':'Off');
+      speakToggle.setAttribute('aria-pressed',String(voiceReplies));
+      voiceStatus.textContent=voiceReplies?'Moses will read new answers aloud.':'Voice replies off.';
+      if(!voiceReplies)stopSpeaking();
+    };
+    if(!Recognition){micButton.disabled=true;micButton.title='Speech recognition is not available in this browser';}
+    micButton.onclick=()=>{
+      if(listening){stopListening();return}
+      if(!Recognition)return;
+      stopSpeaking();
+      try{
+        const r=new Recognition();recognizer=r;r.lang='en-US';r.interimResults=false;r.continuous=false;
+        r.onresult=(event)=>{
+          const transcript=Array.from(event.results).map(result=>result[0]?.transcript||'').join(' ').trim();
+          if(transcript){input.value=[input.value.trim(),transcript].filter(Boolean).join(' ');input.focus();voiceStatus.textContent='Dictation ready. Review and press Send to Moses.'}
+        };
+        r.onerror=(event)=>{voiceStatus.textContent='Microphone unavailable: '+(event.error||'recognition error');stopListening()};
+        r.onend=()=>{listening=false;recognizer=null;micButton.textContent='🎙 Talk to Moses'};
+        r.start();listening=true;micButton.textContent='■ Stop listening';
+        voiceStatus.textContent='Listening… speech is transcribed into the message box.';
+      }catch(e){voiceStatus.textContent='Unable to start microphone: '+e.message;stopListening()}
+    };
+    stopVoice.onclick=()=>{stopSpeaking();stopListening();voiceStatus.textContent='Voice stopped.'};
+    // Never keep the microphone active when the user leaves the page.
+    document.addEventListener('visibilitychange',()=>{
+      if(document.hidden){stopSpeaking();stopListening();}
+    });
+    voiceControls.append(speakToggle,micButton,stopVoice,voiceStatus);
+
     const add=(who,content)=>{const line=document.createElement('div');line.style.cssText='padding:10px;border-radius:10px;background:'+(who==='You'?'#eef3eb':'#f2f4f7');line.textContent=who+': '+content;history.append(line);history.scrollTop=history.scrollHeight};
-    send.onclick=async()=>{const question=input.value.trim();if(!question)return;input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question})});add('Moses',r.answer||'No response');for(const m of r.matches||[]){
+    send.onclick=async()=>{const question=input.value.trim();if(!question)return;input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question})});add('Moses',r.answer||'No response');say(r.answer||'No response');for(const m of r.matches||[]){
       const item=document.createElement('div');item.style.cssText='padding:10px;border:1px solid #d9dee7;border-radius:10px;display:grid;gap:6px';
       const label=document.createElement('strong');label.textContent=[m.name,m.job_number,m.date,m.status].filter(Boolean).join(' · ');item.append(label);
       if(m.address){const address=document.createElement('small');address.textContent=m.address;item.append(address)}
@@ -85,8 +150,56 @@
       }history.append(item)
     }
     for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
+    // SDC command center: persistent approval queue. No automatic task execution.
+    const commandBtn=document.createElement('button');commandBtn.type='button';commandBtn.className='btn';commandBtn.textContent='Command Center';
+    header.insertBefore(commandBtn,close);
+    const command=document.createElement('section');command.hidden=true;command.style.cssText='display:grid;gap:10px;margin-top:12px;border-top:1px solid #e1e5e9;padding-top:12px';
+    const commandTitle=document.createElement('strong');commandTitle.textContent='SDC · Moses Command Center';command.append(commandTitle);
+    const commandHint=document.createElement('p');commandHint.className='hint';commandHint.textContent='Moses can use read-only SDC record summaries to prepare drafts. Approval records your decision; automatic execution is not enabled.';command.append(commandHint);
+    const capability=document.createElement('select');capability.className='input';['Marketing','Sales','Operations','Accounting','Business Intelligence','Automation'].forEach(name=>{const option=document.createElement('option');option.value=name;option.textContent=name;capability.append(option)});command.append(capability);
+    const taskTitle=document.createElement('input');taskTitle.className='input';taskTitle.placeholder='Task title';taskTitle.maxLength=160;command.append(taskTitle);
+    const instructions=document.createElement('textarea');instructions.className='input';instructions.rows=3;instructions.maxLength=8000;instructions.placeholder='What should Moses prepare?';command.append(instructions);
+    const dueAt=document.createElement('input');dueAt.type='datetime-local';dueAt.className='input';dueAt.title='Optional target date and time (no automatic execution)';command.append(dueAt);const dueHint=document.createElement('small');dueHint.textContent='Optional target date — for planning only; Moses will not execute automatically.';command.append(dueHint);
+    // Starter workflows only prefill a task; they never run AI or save records.
+    const starter=document.createElement('select');starter.className='input';starter.setAttribute('aria-label','Moses starter workflow');
+    const starterOptions=[
+      ['', 'Start from scratch', '', ''],
+      ['Marketing','Prepare Atlas social campaign','Draft three Facebook/Instagram posts for Atlas aimed at service businesses. Include captions, suggested visuals, and a clear demo inquiry call to action. Do not claim anything has been published.'],
+      ['Sales','Review Atlas lead follow-ups','Using available SDC lead samples, prepare follow-up drafts for leads needing a response. Clearly identify any missing lead information. Do not send messages.'],
+      ['Operations','Prepare SDC order follow-up list','Review available SDC order samples and prepare an action checklist. Clearly distinguish sampled records from a complete order review.'],
+      ['Accounting','Review SDC financial data gaps','Review available SDC expense and receivable samples. Identify missing tax, shipping, and direct-cost classifications without inventing totals or posting entries.'],
+      ['Business Intelligence','Prepare SDC business briefing','Prepare a concise business briefing using available SDC record samples, with explicit limitations and recommended next steps.'],
+      ['Automation','Plan weekly SDC review','Draft a proposed weekly review checklist for SDC leads, orders, marketing, and receivables. Planning only; do not claim any automation is active.']
+    ];
+    for(const [kind,title] of starterOptions){const option=document.createElement('option');option.value=String(starter.options.length);option.textContent=title||'Choose a starter workflow';starter.append(option)}
+    starter.onchange=()=>{const selected=starterOptions[Number(starter.value)];if(!selected||!selected[0])return;capability.value=selected[0];taskTitle.value=selected[1];instructions.value=selected[2];};
+    command.insertBefore(starter,capability);
+    const pulse=document.createElement('div');pulse.className='hint';pulse.setAttribute('role','status');pulse.textContent='Loading task summary…';command.append(pulse);
+    const refreshPulse=async()=>{try{const result=await fetchJSON('/moses-command/overview');const counts=result.statuses||{};pulse.textContent='Tasks: '+result.total_tasks+' · Awaiting review: '+(counts.ready_for_review||0)+' · Approved for internal filing: '+(counts.approved_pending_execution||0)+' · Filed: '+result.filed_deliverables+' · External execution disabled';}catch(e){pulse.textContent='Task summary unavailable: '+e.message}};
+    const createTask=document.createElement('button');createTask.className='btn';createTask.textContent='Add to approval queue';command.append(createTask);
+    const taskStatus=document.createElement('p');taskStatus.className='hint';taskStatus.setAttribute('role','status');command.append(taskStatus);
+    const briefingBtn=document.createElement('button');briefingBtn.type='button';briefingBtn.className='btn';briefingBtn.textContent='SDC daily briefing';command.append(briefingBtn);
+    const briefingSummary=document.createElement('div');briefingSummary.className='hint';briefingSummary.style.whiteSpace='pre-wrap';command.append(briefingSummary);
+    briefingBtn.onclick=async()=>{briefingBtn.disabled=true;try{const data=await fetchJSON('/moses-command/briefing');const t=data.tasks||{};const records=data.records||{};briefingSummary.textContent='SDC briefing · '+new Date(data.as_of).toLocaleString()+'\n'+
+      'Awaiting review: '+(t.awaiting_review||0)+' · Approved, not filed: '+(t.approved_not_filed||0)+'\n'+
+      'Overdue: '+(t.overdue||0)+' · Upcoming: '+(t.upcoming||0)+' · Filed: '+(t.filed_deliverables||0)+'\n'+
+      'SDC record counts: '+Object.entries(records).map(([k,v])=>k.replaceAll('_',' ')+': '+v).join(' · ')+'\n'+
+      (data.overdue_preview||[]).map(x=>'OVERDUE: '+x.title+' ('+new Date(x.due_at).toLocaleString()+')').join('\n')+'\n'+
+      'Read-only briefing. Counts are not reconciled financial totals. No actions executed.';}catch(e){briefingSummary.textContent='Briefing unavailable: '+e.message}finally{briefingBtn.disabled=false}};
+    const contextBtn=document.createElement('button');contextBtn.type='button';contextBtn.className='btn';contextBtn.textContent='View SDC data summary';command.append(contextBtn);
+    const contextSummary=document.createElement('div');contextSummary.className='hint';contextSummary.style.whiteSpace='pre-wrap';command.append(contextSummary);
+    contextBtn.onclick=async()=>{contextBtn.disabled=true;try{const result=await fetchJSON('/moses-command/context');const collections=result.context?.collections||{};contextSummary.textContent='Read-only SDC snapshot (sampled records):\n'+Object.entries(collections).map(([name,item])=>name.replaceAll('_',' ')+': '+item.count+' records').join('\n')+'\nNo records modified.'}catch(e){contextSummary.textContent='Unable to read SDC context: '+e.message}finally{contextBtn.disabled=false}};
+    const deliverablesBtn=document.createElement('button');deliverablesBtn.className='btn';deliverablesBtn.textContent='View approved deliverables';command.append(deliverablesBtn);const deliverablesSummary=document.createElement('div');deliverablesSummary.style.whiteSpace='pre-wrap';command.append(deliverablesSummary);deliverablesBtn.onclick=async()=>{try{const result=await fetchJSON('/moses-command/deliverables');deliverablesSummary.textContent=(result.deliverables||[]).map(d=>d.title+' ('+d.capability+') — internal only').join('\n')||'No approved deliverables filed yet.'}catch(e){deliverablesSummary.textContent=e.message}};
+    const agendaBtn=document.createElement('button');agendaBtn.type='button';agendaBtn.className='btn';agendaBtn.textContent='View upcoming & overdue tasks';command.append(agendaBtn);
+    const agendaSummary=document.createElement('div');agendaSummary.className='hint';agendaSummary.style.whiteSpace='pre-wrap';command.append(agendaSummary);
+    agendaBtn.onclick=async()=>{agendaBtn.disabled=true;try{const result=await fetchJSON('/moses-command/agenda');agendaSummary.textContent=(result.scheduled_count+' tasks with target dates · '+result.overdue_count+' overdue\n'+(result.agenda||[]).map(t=>(t.overdue?'OVERDUE · ':'')+new Date(t.due_at).toLocaleString()+' · '+t.title+' ('+t.status.replaceAll('_',' ')+')').join('\n'))+'\nPlanning only — nothing runs automatically.'}catch(e){agendaSummary.textContent='Unable to load agenda: '+e.message}finally{agendaBtn.disabled=false}};
+    const taskList=document.createElement('div');taskList.style.cssText='display:grid;gap:9px';command.append(taskList);
+    const refreshTasks=async()=>{await refreshPulse();taskList.replaceChildren();try{const data=await fetchJSON('/moses-command/tasks');for(const task of data.tasks||[]){const card=document.createElement('div');card.style.cssText='border:1px solid #dce1e6;border-radius:10px;padding:10px;display:grid;gap:7px';const name=document.createElement('strong');name.textContent=task.title;card.append(name);const info=document.createElement('small');info.textContent=task.capability+' · '+task.status.replaceAll('_',' ')+(task.due_at?' · Target: '+new Date(task.due_at).toLocaleString():'');card.append(info);if(task.status!=='rejected'&&task.status!=='filed_internal'){const scheduling=document.createElement('div');scheduling.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center';const target=document.createElement('input');target.type='datetime-local';target.className='input';target.title='Target date (planning only)';if(task.due_at){const dt=new Date(task.due_at);const local=new Date(dt.getTime()-dt.getTimezoneOffset()*60000);target.value=local.toISOString().slice(0,16)}const update=document.createElement('button');update.type='button';update.className='btn';update.textContent='Update target';update.onclick=async()=>{update.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/reschedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({due_at:target.value?new Date(target.value).toISOString():null})});taskStatus.textContent='Target date updated. No automatic action scheduled.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;update.disabled=false}};scheduling.append(target,update);card.append(scheduling)}if(task.instructions){const details=document.createElement('p');details.style.whiteSpace='pre-wrap';details.textContent=task.instructions;card.append(details)}if(task.status==='draft'||task.status==='ready_for_review'){const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';const prepare=document.createElement('button');prepare.className='btn';prepare.textContent=task.draft_output?'Regenerate draft':'Prepare with Moses';prepare.onclick=async()=>{prepare.disabled=true;taskStatus.textContent='Preparing draft…';try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/prepare',{method:'POST'});taskStatus.textContent='Draft prepared for review. No external action taken.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;prepare.disabled=false}};buttons.append(prepare);if(task.draft_output){const draft=document.createElement('textarea');draft.className='input';draft.rows=8;draft.style.width='100%';draft.value=task.draft_output;card.append(draft);const saveDraft=document.createElement('button');saveDraft.className='btn';saveDraft.textContent='Save edited draft';saveDraft.onclick=async()=>{saveDraft.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft:draft.value,expected_draft_version:task.draft_version??0})});taskStatus.textContent='Edited draft saved. Review before approval.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;saveDraft.disabled=false}};buttons.append(saveDraft);for(const [label,decision] of [['Approve draft','approve'],['Reject','reject']]){const button=document.createElement('button');button.type='button';button.className='btn';button.textContent=label;button.onclick=async()=>{if(draft.value!==task.draft_output){taskStatus.textContent='Save your edited draft before deciding.';return}button.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,expected_draft_version:task.draft_version??0})});taskStatus.textContent=decision==='approve'?'Draft approved. No action was executed.':'Draft rejected.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;button.disabled=false}};buttons.append(button)}}card.append(buttons)}else if(task.status==='approved_pending_execution'){const file=document.createElement('button');file.className='btn';file.textContent='File approved draft internally';file.onclick=async()=>{file.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/file-deliverable',{method:'POST'});taskStatus.textContent='Approved draft filed in SDC internal deliverables. Nothing was sent or published.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;file.disabled=false}};card.append(file)}if(task.status!=='draft'&&task.status!=='ready_for_review'&&task.draft_output){const draft=document.createElement('p');draft.style.whiteSpace='pre-wrap';draft.textContent=task.draft_output;card.append(draft)}taskList.append(card)}if(!(data.tasks||[]).length)taskList.textContent='No tasks yet.'}catch(e){taskStatus.textContent='Unable to load tasks: '+e.message}};
+    createTask.onclick=async()=>{if(taskTitle.value.trim().length<3){taskStatus.textContent='Enter a task title (at least 3 characters).';return}createTask.disabled=true;try{await fetchJSON('/moses-command/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capability:capability.value,title:taskTitle.value,instructions:instructions.value,due_at:dueAt.value?new Date(dueAt.value).toISOString():null})});taskTitle.value='';instructions.value='';dueAt.value='';taskStatus.textContent='Task saved as draft. No action has been executed.';await refreshTasks()}catch(e){taskStatus.textContent='Could not save task: '+e.message}finally{createTask.disabled=false}};
+    commandBtn.onclick=()=>{if(document.body.dataset.platform!=='sdc'){command.hidden=true;taskStatus.textContent='Switch to SDC to use the Command Center.';return}command.hidden=!command.hidden;if(!command.hidden)refreshTasks()};
+    panel.append(command);
     input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send.click()}});
-    launch.onclick=()=>{panel.hidden=!panel.hidden;if(!panel.hidden)input.focus()};panel.append(header,help,history,input,send);document.body.append(launch,panel);
+    launch.onclick=()=>{panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else input.focus()};panel.append(header,help,history,input,voiceControls,send);document.body.append(launch,panel);
 
   }
   document.addEventListener('DOMContentLoaded',installWorkspaceMoses,{once:true});
@@ -13795,7 +13908,7 @@ async function openDoorksVendorCommercialReview(){
  const edit=document.createElement('details');edit.style.margin='16px 0';const label=document.createElement('summary');label.textContent='Edit vendor proposal before review';edit.append(label);
  const rows=document.createElement('div');edit.append(rows);const items=(doc.line_items||[]).map(x=>({...x}));const redraw=()=>{rows.replaceChildren();items.forEach((item,i)=>{const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:minmax(0,3fr) 75px 100px 40px;gap:6px;margin:8px 0';for(const [key,type] of [['description','text'],['quantity','number'],['rate','number']]){const input=document.createElement('input');input.className='input';input.type=type;input.value=item[key]??'';input.style.minWidth='0';input.oninput=()=>item[key]=input.value;row.append(input)}const del=document.createElement('button');del.className='btn';del.textContent='×';del.onclick=()=>{items.splice(i,1);redraw()};row.append(del);rows.append(row)})};redraw();
  const add=document.createElement('button');add.className='btn';add.textContent='+ Add line';add.onclick=()=>{items.push({description:'',quantity:1,rate:0});redraw()};const note=document.createElement('textarea');note.className='input';note.placeholder='Internal edit note';note.style.cssText='display:block;width:100%;margin:12px 0';const save=document.createElement('button');save.className='btn btn-orange';save.textContent='Save vendor proposal edits';save.onclick=async()=>{if(!items.length||items.some(x=>!String(x.description||'').trim()||Number(x.quantity)<=0||Number(x.rate)<0)){alert('Complete all line items first.');return}save.disabled=true;try{await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({line_items:items.map(x=>({description:x.description,quantity:Number(x.quantity),rate:Number(x.rate)})),reference:doc.reference||'',note:note.value})});await load()}catch(e){alert(e.message)}finally{save.disabled=false}};edit.append(add,note,save);summary.append(edit);
- for(const [decision,label] of [['approved','Approve vendor proposal'],['rejected','Reject vendor proposal']]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.style.margin='8px 8px 8px 0';btn.onclick=async()=>{if(!confirm(label+'? This does not issue a customer estimate or invoice.'))return;btn.disabled=true;try{await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});await load()}catch(e){alert(e.message)}finally{btn.disabled=false}};summary.append(btn)}
+ for(const [decision,label] of [['approved','Approve vendor proposal'],['rejected','Reject vendor proposal']]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.style.margin='8px 8px 8px 0';btn.onclick=async()=>{if(!confirm(label+'? This does not issue a customer estimate or invoice.'))return;btn.disabled=true;try{await call('/doorks-portals/admin/vendor-commercial-documents/'+encodeURIComponent(doc.id)+'/review',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,expected_draft_version:task.draft_version??0})});await load()}catch(e){alert(e.message)}finally{btn.disabled=false}};summary.append(btn)}
  }
  const thread=document.createElement('details');thread.style.marginTop='18px';const threadLabel=document.createElement('summary');threadLabel.textContent='Office ↔ Vendor Messages';thread.append(threadLabel);const messages=document.createElement('div');thread.append(messages);thread.ontoggle=async()=>{if(!thread.open)return;try{const data=await call('/doorks-portals/admin/vendor-assignments/'+encodeURIComponent(doc.assignment_id)+'/messages');messages.replaceChildren();for(const m of data.messages||[]){const p=document.createElement('p');p.textContent=m.sender+' · '+m.message;messages.append(p)}}catch(e){messages.textContent=e.message}};
  const reply=document.createElement('textarea');reply.className='input';reply.placeholder='Reply to vendor';reply.style.cssText='width:100%;margin:12px 0';const send=document.createElement('button');send.className='btn';send.textContent='Send reply';send.onclick=async()=>{if(!reply.value.trim())return;send.disabled=true;try{await call('/doorks-portals/admin/vendor-assignments/'+encodeURIComponent(doc.assignment_id)+'/messages',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({assignment_id:doc.assignment_id,message:reply.value})});reply.value='';thread.open=false;thread.open=true}catch(e){alert(e.message)}finally{send.disabled=false}};thread.append(reply,send);summary.append(thread);card.append(summary);host.append(card)}if(!host.childNodes.length)host.textContent='No matching vendor documents.'};search.oninput=draw;await load();

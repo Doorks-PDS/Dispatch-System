@@ -71,6 +71,7 @@ from app.services.pricing_store import PricingStore
 from app.routers.pricing import router as pricing_router
 from app.routers.receipts import router as receipts_router
 from app.routers.moses import router as moses_router
+from app.routers.moses_command import router as moses_command_router
 from app.services.door_logs_store import DoorLogsStore
 from app.routers.door_logs import router as door_logs_router
 
@@ -233,6 +234,7 @@ app.include_router(receipts_router)
 from app.routers.dispatch_ai import router as dispatch_ai_router
 app.include_router(dispatch_ai_router)
 app.include_router(moses_router)
+app.include_router(moses_command_router)
 from app.routers.accounting import router as accounting_router
 app.include_router(accounting_router)
 from app.routers.platforms import router as platforms_router
