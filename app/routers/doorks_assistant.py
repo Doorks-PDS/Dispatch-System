@@ -735,6 +735,22 @@ def chat(payload:Message,request:Request):
     stop={'find','show','me','the','all','for','about','please','jobs','job','work','orders','order','ticket','tickets','open','pull','up','scheduled','what','which','are','is','do','we','have','customer','customers','on','in','at','to','my','get','records','record','of','a','an','and'}
     tokens=[word for word in re.findall(r"[a-z0-9#-]+",query) if word not in stop]
     if can_search and platform=='pds':
+        # A conversational quote request must never be matched by requiring
+        # every filler word to occur in the job record. Confirm the relevant
+        # saved job first, then open the editor for a human-priced draft.
+        quote_request = ('estimate' in query or 'quote' in query) and any(
+            word in query for word in ('create', 'draft', 'prepare', 'make'))
+        customer_terms = []
+        if quote_request:
+            named = re.search(r'\b(?:for|recent|latest)\s+(?:the\s+)?([a-z][a-z\s&.-]{2,55}?)\s+(?:job|work order|ticket)\b', query)
+            if named:
+                customer_terms = [x for x in re.findall(r'[a-z0-9]+', named.group(1))
+                                  if x not in ('most','recent','latest','the','last')]
+            if not customer_terms:
+                customer_terms = [x for x in tokens if x not in (
+                    'can','you','create','draft','prepare','make','estimate','quote',
+                    'from','most','recent','latest','that','needs','need','quoting',
+                    'company','please','for','job','work','order','the')]
         # PDS dispatch uses CalendarStore on the existing Render persistent disk,
         # not the separate business_workspaces JSON directory.
         try:
@@ -742,7 +758,10 @@ def chat(payload:Message,request:Request):
             for item in jobs:
                 if not isinstance(item,dict):continue
                 searchable=' '.join(str(item.get(k) or '') for k in ('customer','customer_name','contact','address','job_number','date','status','job_notes','description','estimate_number','invoice_number','po_number')).lower()
-                if tokens and all(t in searchable for t in tokens):
+                customer_text=' '.join(str(item.get(k) or '') for k in ('customer','customer_name')).lower()
+                search_ok=(all(t in customer_text for t in customer_terms) if quote_request and customer_terms else
+                           (bool(tokens) and all(t in searchable for t in tokens)))
+                if search_ok:
                     matches.append({'type':'jobs','id':str(item.get('id') or ''),
                         'name':str(item.get('customer') or item.get('customer_name') or item.get('job_number') or '')[:140],
                         'status':str(item.get('status') or '')[:60],
@@ -752,6 +771,25 @@ def chat(payload:Message,request:Request):
                         'navigate':'all_jobs'})
                 if len(matches)>=15:break
         except (AttributeError, OSError, ValueError, TypeError):pass
+        if quote_request:
+            quoted=[m for m in matches if 'quot' in m.get('status','').lower()]
+            chosen=quoted or matches
+            chosen=sorted(chosen,key=lambda m:(m.get('date',''),m.get('job_number','')),reverse=True)
+            if chosen:
+                candidate=chosen[0]
+                description='; '.join(' '.join(str(candidate.get(k,'')).split()) for k in
+                                      ('name','job_number','status','date') if candidate.get(k))
+                answer=('I found a saved PDS job to review: '+description+'. '
+                        'I have not created an estimate or changed any records. '
+                        'Open the job in All Jobs to review the technician notes, pricing and customer information, '
+                        'then prepare the estimate draft in the existing editor.')
+                return {'answer':answer,'matches':chosen[:8],
+                        'navigation':[{'label':'Open All Jobs','target':'all_jobs'}],
+                        'workspace':platform}
+            return {'answer':('I could not verify a matching PDS job from the saved job records. '
+                              'Try the customer name or job number; I have not created an estimate.'),
+                    'matches':[],'navigation':[{'label':'Open All Jobs','target':'all_jobs'}],
+                    'workspace':platform}
     elif can_search:
         collections={'doorks':['work_orders','customers','vendors','customer_inquiries','vendor_assignments','estimates','invoices','purchase_orders'],
                      'sdc':['orders','customers','vendors','expenses','purchases']}[platform]

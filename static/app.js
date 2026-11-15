@@ -69,10 +69,27 @@
   function installWorkspaceMoses(){
     if(document.getElementById('workspaceMosesBubble'))return;
     const launch=document.createElement('button');launch.id='workspaceMosesBubble';launch.type='button';launch.textContent='✨ Moses';launch.setAttribute('aria-label','Open Moses assistant');launch.style.cssText='position:fixed;right:24px;bottom:22px;z-index:11000;background:#395c3e;color:white;border:0;border-radius:28px;padding:14px 18px;box-shadow:0 5px 24px #0004;font-weight:800;cursor:pointer';
-    const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.hidden=true;panel.style.cssText='position:fixed;right:22px;bottom:88px;z-index:11001;width:min(440px,calc(100vw - 35px));background:white;border:1px solid #d9dee7;border-radius:18px;padding:18px;box-shadow:0 12px 40px #0003;max-height:75vh;overflow:auto';
+    const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.hidden=true;panel.style.cssText='position:fixed;right:22px;bottom:88px;z-index:11001;width:min(440px,calc(100vw - 35px));background:white;border:1px solid #d9dee7;border-radius:18px;padding:18px;box-shadow:0 12px 40px #0003;max-height:min(70vh,620px);overflow-y:auto';
     const header=document.createElement('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='✨ Moses Assistant';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true};header.append(title,close);
     const help=document.createElement('p');help.className='hint';help.textContent='Ask Moses about your workspace. Record results follow your signed-in permissions.';
-    const history=document.createElement('div');history.style.cssText='min-height:100px;max-height:270px;overflow:auto;display:grid;gap:9px;margin:10px 0';
+    const agentStatus=document.createElement('small');
+    agentStatus.setAttribute('role','status');
+    agentStatus.style.cssText='display:block;color:#5a6873;font-size:12px;margin:4px 0 10px';
+    agentStatus.textContent='Checking enhanced Moses availability…';
+    const checkAgentReadiness=async()=>{
+      const workspace=document.body.dataset.platform||'pds';
+      try {
+        const r=await fetchJSON('/doorks-assistant/agent-readiness');
+        // Guard against showing a stale result after switching workspaces.
+        if(document.body.dataset.platform!==workspace)return;
+        agentStatus.textContent=r.agent_enabled ?
+          (r.ready_for_live_check ? 'Enhanced Moses enabled · Live AI validation still required.' : 'Enhanced Moses enabled, but configuration is incomplete.') :
+          'Enhanced Moses is OFF for '+workspace.toUpperCase()+'. Basic record lookup only; no AI business tools.';
+      } catch(e) {
+        agentStatus.textContent='Enhanced Moses status unavailable for this account.';
+      }
+    };
+    const history=document.createElement('div');history.style.cssText='min-height:95px;max-height:230px;overflow:auto;display:grid;gap:9px;margin:10px 0';
     const input=document.createElement('textarea');input.className='input';input.rows=2;input.placeholder='Ask Moses a question…';input.style.width='100%';
     const send=document.createElement('button');send.className='btn';send.textContent='Send to Moses';send.style.margin='8px 0';
     // Moses Voice (opt-in). Browser-local speech synthesis and recognition.
@@ -199,7 +216,7 @@
     // SDC command center: persistent approval queue. No automatic task execution.
     const commandBtn=document.createElement('button');commandBtn.type='button';commandBtn.className='btn';commandBtn.textContent='Command Center';
     header.insertBefore(commandBtn,close);
-    const command=document.createElement('section');command.hidden=true;command.style.cssText='display:grid;gap:10px;margin-top:12px;border-top:1px solid #e1e5e9;padding-top:12px';
+    const command=document.createElement('section');command.hidden=true;command.style.cssText='display:none;gap:10px;margin-top:12px;border-top:1px solid #e1e5e9;padding-top:12px';
     const commandTitle=document.createElement('strong');commandTitle.textContent='SDC · Moses Command Center';command.append(commandTitle);
     const commandHint=document.createElement('p');commandHint.className='hint';commandHint.textContent='Moses can use read-only SDC record summaries to prepare drafts. Approval records your decision; automatic execution is not enabled.';command.append(commandHint);
     const capability=document.createElement('select');capability.className='input';['Marketing','Sales','Operations','Accounting','Business Intelligence','Automation'].forEach(name=>{const option=document.createElement('option');option.value=name;option.textContent=name;capability.append(option)});command.append(capability);
@@ -242,10 +259,28 @@
     const taskList=document.createElement('div');taskList.style.cssText='display:grid;gap:9px';command.append(taskList);
     const refreshTasks=async()=>{await refreshPulse();taskList.replaceChildren();try{const data=await fetchJSON('/moses-command/tasks');for(const task of data.tasks||[]){const card=document.createElement('div');card.style.cssText='border:1px solid #dce1e6;border-radius:10px;padding:10px;display:grid;gap:7px';const name=document.createElement('strong');name.textContent=task.title;card.append(name);const info=document.createElement('small');info.textContent=task.capability+' · '+task.status.replaceAll('_',' ')+(task.due_at?' · Target: '+new Date(task.due_at).toLocaleString():'');card.append(info);if(task.status!=='rejected'&&task.status!=='filed_internal'){const scheduling=document.createElement('div');scheduling.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center';const target=document.createElement('input');target.type='datetime-local';target.className='input';target.title='Target date (planning only)';if(task.due_at){const dt=new Date(task.due_at);const local=new Date(dt.getTime()-dt.getTimezoneOffset()*60000);target.value=local.toISOString().slice(0,16)}const update=document.createElement('button');update.type='button';update.className='btn';update.textContent='Update target';update.onclick=async()=>{update.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/reschedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({due_at:target.value?new Date(target.value).toISOString():null})});taskStatus.textContent='Target date updated. No automatic action scheduled.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;update.disabled=false}};scheduling.append(target,update);card.append(scheduling)}if(task.instructions){const details=document.createElement('p');details.style.whiteSpace='pre-wrap';details.textContent=task.instructions;card.append(details)}if(task.status==='draft'||task.status==='ready_for_review'){const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';const prepare=document.createElement('button');prepare.className='btn';prepare.textContent=task.draft_output?'Regenerate draft':'Prepare with Moses';prepare.onclick=async()=>{prepare.disabled=true;taskStatus.textContent='Preparing draft…';try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/prepare',{method:'POST'});taskStatus.textContent='Draft prepared for review. No external action taken.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;prepare.disabled=false}};buttons.append(prepare);if(task.draft_output){const draft=document.createElement('textarea');draft.className='input';draft.rows=8;draft.style.width='100%';draft.value=task.draft_output;card.append(draft);const saveDraft=document.createElement('button');saveDraft.className='btn';saveDraft.textContent='Save edited draft';saveDraft.onclick=async()=>{saveDraft.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft:draft.value,expected_draft_version:task.draft_version??0})});taskStatus.textContent='Edited draft saved. Review before approval.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;saveDraft.disabled=false}};buttons.append(saveDraft);for(const [label,decision] of [['Approve draft','approve'],['Reject','reject']]){const button=document.createElement('button');button.type='button';button.className='btn';button.textContent=label;button.onclick=async()=>{if(draft.value!==task.draft_output){taskStatus.textContent='Save your edited draft before deciding.';return}button.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,expected_draft_version:task.draft_version??0})});taskStatus.textContent=decision==='approve'?'Draft approved. No action was executed.':'Draft rejected.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;button.disabled=false}};buttons.append(button)}}card.append(buttons)}else if(task.status==='approved_pending_execution'){const file=document.createElement('button');file.className='btn';file.textContent='File approved draft internally';file.onclick=async()=>{file.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/file-deliverable',{method:'POST'});taskStatus.textContent='Approved draft filed in SDC internal deliverables. Nothing was sent or published.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;file.disabled=false}};card.append(file)}if(task.status!=='draft'&&task.status!=='ready_for_review'&&task.draft_output){const draft=document.createElement('p');draft.style.whiteSpace='pre-wrap';draft.textContent=task.draft_output;card.append(draft)}taskList.append(card)}if(!(data.tasks||[]).length)taskList.textContent='No tasks yet.'}catch(e){taskStatus.textContent='Unable to load tasks: '+e.message}};
     createTask.onclick=async()=>{if(taskTitle.value.trim().length<3){taskStatus.textContent='Enter a task title (at least 3 characters).';return}createTask.disabled=true;try{await fetchJSON('/moses-command/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capability:capability.value,title:taskTitle.value,instructions:instructions.value,due_at:dueAt.value?new Date(dueAt.value).toISOString():null})});taskTitle.value='';instructions.value='';dueAt.value='';taskStatus.textContent='Task saved as draft. No action has been executed.';await refreshTasks()}catch(e){taskStatus.textContent='Could not save task: '+e.message}finally{createTask.disabled=false}};
-    commandBtn.onclick=()=>{if(document.body.dataset.platform!=='sdc'){command.hidden=true;taskStatus.textContent='Switch to SDC to use the Command Center.';return}command.hidden=!command.hidden;if(!command.hidden)refreshTasks()};
-    panel.append(command);
+    const syncMosesWorkspace=()=>{
+      const isSDC=document.body.dataset.platform==='sdc';
+      commandBtn.style.display=isSDC?'':'none';
+      if(!isSDC){command.hidden=true;command.style.display='none';}
+    };
+    commandBtn.onclick=()=>{
+      syncMosesWorkspace();
+      if(document.body.dataset.platform!=='sdc')return;
+      const opening=command.style.display==='none';
+      command.hidden=!opening;
+      command.style.display=opening?'grid':'none';
+      if(opening)refreshTasks();
+    };
     input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send.click()}});
-    launch.onclick=()=>{panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else input.focus()};panel.append(header,help,history,input,voiceControls,send);document.body.append(launch,panel);
+    const voiceDetails=document.createElement('details');
+    const voiceSummary=document.createElement('summary');voiceSummary.textContent='Voice controls (optional)';
+    voiceSummary.style.cssText='font-size:12px;font-weight:700;color:#53665a;cursor:pointer';
+    voiceDetails.append(voiceSummary,voiceControls);
+    panel.append(header,help,history,input,send,voiceDetails,command);
+    panel.insertBefore(agentStatus,history);
+    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{checkAgentReadiness();input.focus()}};
+    syncMosesWorkspace();document.body.append(launch,panel);
 
   }
   document.addEventListener('DOMContentLoaded',installWorkspaceMoses,{once:true});
@@ -5340,6 +5375,62 @@ function renderAttachmentSection(titleText, items, options = {}) {
  
     header.appendChild(left);
     header.appendChild(right);
+    card.appendChild(header);
+
+    // Match Doorks' quick status workflow: change PDS ticket status without
+    // entering Edit. Uses the existing CalendarStore update endpoint.
+    if (job.id && !String(job.source || '').toUpperCase().startsWith('LEGACY')) {
+      const statusRow = document.createElement('div');
+      statusRow.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:12px 0;padding:11px 12px;border:1px solid #d9dee7;border-radius:12px';
+      const statusLabel = document.createElement('label');
+      statusLabel.textContent = 'Job status';
+      statusLabel.style.cssText = 'font-weight:700;font-size:13px';
+      const statusSelect = document.createElement('select');
+      statusSelect.className = 'input';
+      statusSelect.style.cssText = 'width:auto;min-width:170px;max-width:100%';
+      statusSelect.setAttribute('aria-label', 'Update PDS job status');
+      const available = job.kind === 'sales_lead' ? ['Sales Lead', ...STATUSES.filter(v => v !== 'Sales Lead')] : STATUSES.filter(v => v !== 'Sales Lead');
+      const currentStatus = String(job.status || 'Dispatch');
+      if (!available.includes(currentStatus)) available.unshift(currentStatus);
+      for (const name of available) {
+        const option = document.createElement('option');
+        option.value = name;
+        option.textContent = name;
+        statusSelect.append(option);
+      }
+      statusSelect.value = currentStatus;
+      const statusNote = document.createElement('small');
+      statusNote.setAttribute('role', 'status');
+      statusNote.style.cssText = 'font-size:12px;color:#64748b';
+      statusSelect.addEventListener('change', async () => {
+        const previous = String(job.status || 'Dispatch');
+        const next = statusSelect.value;
+        if (next === previous) return;
+        statusSelect.disabled = true;
+        statusNote.textContent = 'Saving status…';
+        try {
+          // PATCH-like payload: no other job fields or documents are overwritten.
+          const updated = await apiUpdateJob(job.id, { status: next });
+          if (!updated || String(updated.status) !== next) throw new Error('Saved status was not confirmed');
+          job = updated;
+          statusNote.textContent = 'Status saved';
+          renderJobDetails(container, updated, ctx);
+          // Refresh failures must not imply the confirmed status save was rolled back.
+          if (ctx?.afterSave) {
+            try { await ctx.afterSave(); }
+            catch (refreshError) { console.warn('Job status saved; list refresh failed', refreshError); }
+          }
+          refreshBadges();
+        } catch (error) {
+          statusSelect.value = previous;
+          statusNote.textContent = 'Status was not changed: ' + (error.message || error);
+          statusSelect.disabled = false;
+        }
+      });
+      statusRow.append(statusLabel, statusSelect, statusNote);
+      // Display this directly beneath the ticket heading.
+      card.appendChild(statusRow);
+    }
  
     const fields = document.createElement("div");
     fields.className = "grid2";
@@ -5581,7 +5672,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     actions.appendChild(primaryActions);
     if (secondaryActions.childNodes.length) actions.appendChild(secondaryActions);
  
-    card.appendChild(header);
+    
     card.appendChild(fields);
     card.appendChild(officeNotes);
     if (job.parts_order && Object.values(job.parts_order).some(v => String(v || "").trim())) {
