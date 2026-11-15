@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>Estimate acceptance</title>
+  <link rel="stylesheet" href="/static/estimate_acceptance.css">
+  <script defer src="/static/estimate_acceptance.js"></script>
+</head>
+<body>
+  <main class="panel">
+    <header>
+      <p class="eyebrow">Secure proposal response</p>
+      <h1>Estimate acceptance</h1>
+      <p id="business" class="muted"></p>
+    </header>
+    <section aria-label="Estimate details">
+      <div class="detail"><span>Estimate</span><strong id="number">—</strong></div>
+      <div class="detail"><span>Total</span><strong id="amount">—</strong></div>
+      <div class="detail"><span>Link expires</span><strong id="expiry">—</strong></div>
+    </section>
+    <button id="download-pdf" type="button" hidden>Download full estimate (PDF)</button>
+    <p id="status" role="status" aria-live="polite">Checking your acceptance link…</p>
+    <form id="accept-form" hidden>
+      <label for="signer">Your name</label>
+      <input id="signer" name="signer" autocomplete="name" minlength="2" maxlength="120" required>
+      <label class="consent"><input type="checkbox" id="consent" required> I have reviewed the final estimate provided to me and accept the proposal identified above.</label>
+      <button id="accept-button" type="submit">Accept estimate</button>
+    </form>
+    <p class="fineprint">Acceptance records the name you provide and your response time. This link does not independently verify your identity. Contact the company directly if you need to change the proposal.</p>
+  </main>
+</body>
+</html>

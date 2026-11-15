@@ -256,6 +256,23 @@ class PartPayload(BaseModel):
     part_number: str = ""
     description: str = ""
     price: float | str = ""
+    supplier: str = ""
+    image_url: str = ""
+    product_url: str = ""
+
+
+def _part_https_url(value: str) -> str:
+    from urllib.parse import urlsplit
+    url = _norm(value)
+    if not url:
+        return ""
+    try:
+        parsed = urlsplit(url)
+        if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or len(url) > 1500:
+            raise ValueError()
+    except ValueError:
+        raise HTTPException(400, "Part URLs must be public HTTPS links")
+    return url
 
 
 @router.get("/parts")
@@ -278,6 +295,8 @@ def list_parts(
             "manufacturer": _norm(item.get("manufacturer")),
             "part_number": _norm(item.get("part_number")),
             "supplier": _norm(item.get("supplier")),
+            "image_url": _norm(item.get("image_url")),
+            "product_url": _norm(item.get("product_url")),
             "description": _norm(item.get("description")),
             "price": item.get("price", ""),
             # compatibility with existing estimate lookup
@@ -308,6 +327,8 @@ def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str]
         "supplier": _norm(payload.supplier),
         "description": _norm(payload.description),
         "price": payload.price,
+        "image_url": _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url,
+        "product_url": _part_https_url(payload.product_url),
     }
     items.append(item)
     data = {"items": items}
@@ -328,6 +349,8 @@ def update_part(request: Request, part_id: str, payload: PartPayload, x_api_key:
             item["supplier"] = _norm(payload.supplier)
             item["description"] = _norm(payload.description)
             item["price"] = payload.price
+            item["image_url"] = _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url
+            item["product_url"] = _part_https_url(payload.product_url)
             items[i] = item
             _write_json_file(path, {"items": items})
             return {"ok": True, "item": item}

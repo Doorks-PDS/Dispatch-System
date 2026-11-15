@@ -185,8 +185,8 @@ async def part_from_url(request: Request, payload: dict):
     import socket, ipaddress, httpx, os, re, json
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Login required')
-    if request.session.get('active_platform') != 'doorks':
-        raise HTTPException(403, 'Switch to Doorks first')
+    if request.session.get('active_platform') not in ('doorks','pds','sdc'):
+        raise HTTPException(403, 'Switch to the requested workspace first')
     url = str(payload.get('url') or '').strip()
     parsed = urlsplit(url)
     # Marketing query parameters are not needed for product metadata.
@@ -394,5 +394,37 @@ def get_part_image(name:str,request:Request):
     if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Login required')
     if not re.fullmatch(r'[0-9a-f]{32}\.(?:jpg|jpeg|png|webp)',name):raise HTTPException(404,'Image not found')
     path=Path(request.app.state.data_dir)/'business_workspaces'/'doorks'/'part_images'/name
+    if not path.is_file():raise HTTPException(404,'Image not found')
+    return FileResponse(path)
+
+
+# PDS-only parts photos: never resolve names in another business workspace.
+@router.post('/part-image/pds')
+async def upload_pds_part_image(request: Request, file: UploadFile=File(...)):
+    from pathlib import Path
+    import uuid
+    if not getattr(request.state, 'auth_user', None): raise HTTPException(401, 'Login required')
+    if request.session.get('active_platform') != 'pds': raise HTTPException(403, 'Switch to PDS first')
+    if getattr(request.state, 'auth_role', None) != 'office_admin': raise HTTPException(403, 'Office Admin required')
+    ext=Path(file.filename or '').suffix.lower()
+    if ext not in ('.jpg','.jpeg','.png','.webp'): raise HTTPException(400, 'Upload JPG, PNG or WEBP')
+    blob=await file.read(5*1024*1024+1)
+    if not blob or len(blob)>5*1024*1024:raise HTTPException(413,'Image must be 5 MB or smaller')
+    signatures={'.jpg':blob.startswith(b'\xff\xd8\xff'),'.jpeg':blob.startswith(b'\xff\xd8\xff'),'.png':blob.startswith(b'\x89PNG\r\n\x1a\n'),'.webp':blob.startswith(b'RIFF') and blob[8:12]==b'WEBP'}
+    if not signatures[ext]:raise HTTPException(400,'Image content does not match extension')
+    folder=Path(request.app.state.data_dir)/'business_workspaces'/'pds'/'part_images'
+    folder.mkdir(parents=True,exist_ok=True)
+    name=uuid.uuid4().hex+ext
+    (folder/name).write_bytes(blob)
+    return {'url':'/moses/part-image/pds/'+name}
+
+@router.get('/part-image/pds/{name}')
+def get_pds_part_image(name:str,request:Request):
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Login required')
+    if request.session.get('active_platform')!='pds':raise HTTPException(403,'Switch to PDS first')
+    if not re.fullmatch(r'[0-9a-f]{32}\.(?:jpg|jpeg|png|webp)',name):raise HTTPException(404,'Image not found')
+    path=Path(request.app.state.data_dir)/'business_workspaces'/'pds'/'part_images'/name
     if not path.is_file():raise HTTPException(404,'Image not found')
     return FileResponse(path)

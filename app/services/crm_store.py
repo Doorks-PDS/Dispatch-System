@@ -139,6 +139,7 @@ class CRMStore:
             "zip_code": str(payload.get("zip_code") or "").strip(),
             "phone_number": str(payload.get("phone_number") or "").strip(),
             "email": str(payload.get("email") or "").strip(),
+            "invoice_email": str(payload.get("invoice_email") or "").strip(),
             "notes": str(payload.get("notes") or "").strip(),
         }
         items.append(item)
@@ -150,7 +151,7 @@ class CRMStore:
         items = self._load_items(self.customers_path)
         for item in items:
             if str(item.get("id")) == str(item_id):
-                for key in ["company_name", "address", "city", "state", "zip_code", "phone_number", "email", "notes"]:
+                for key in ["company_name", "address", "city", "state", "zip_code", "phone_number", "email", "invoice_email", "notes"]:
                     if key in payload:
                         item[key] = str(payload.get(key) or "").strip()
                 self._save_items(self.customers_path, items)

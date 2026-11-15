@@ -22,9 +22,10 @@ def guard(request,kind):
     if getattr(request.state,"auth_role",None)!="office_admin":raise HTTPException(403,"Office Admin only during setup")
     if request.session.get("active_platform")!="doorks":raise HTTPException(403,"Switch to Doorks first")
 
-def base(request):
+def base(request, *, create=True):
     p=Path(request.app.state.data_dir)/"business_workspaces"/"doorks"/"accounting"
-    p.mkdir(parents=True,exist_ok=True)
+    if create:
+        p.mkdir(parents=True,exist_ok=True)
     return p
 
 def read(path):

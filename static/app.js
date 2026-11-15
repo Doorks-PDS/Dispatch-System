@@ -141,7 +141,53 @@
     voiceControls.append(speakToggle,micButton,stopVoice,voiceStatus);
 
     const add=(who,content)=>{const line=document.createElement('div');line.style.cssText='padding:10px;border-radius:10px;background:'+(who==='You'?'#eef3eb':'#f2f4f7');line.textContent=who+': '+content;history.append(line);history.scrollTop=history.scrollHeight};
-    send.onclick=async()=>{const question=input.value.trim();if(!question)return;input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question})});add('Moses',r.answer||'No response');say(r.answer||'No response');for(const m of r.matches||[]){
+
+    // Workspace-scoped action approvals; backend verifies role, workspace, record version and flag.
+    const actionPanel=document.createElement('section');actionPanel.style.cssText='display:grid;gap:8px;margin:10px 0';
+    const pendingButton=document.createElement('button');pendingButton.className='btn';pendingButton.type='button';pendingButton.textContent='Review pending Moses actions';
+    const actionNote=document.createElement('small');actionNote.textContent='Only explicitly approved actions change records.';
+    actionPanel.append(pendingButton,actionNote);
+    const showAction=(proposal,container=actionPanel)=>{
+      if(!proposal || !/^[a-f0-9]{32}$/.test(String(proposal.id||'')))return;
+      const card=document.createElement('div');card.style.cssText='border:1px solid #d4dae2;border-radius:10px;padding:10px;display:grid;gap:7px';
+      const isInvoice=proposal.kind==='estimate_to_draft_invoice';
+      const isPO=proposal.kind==='draft_purchase_order';
+      const isSchedule=proposal.kind==='doorks_work_order_schedule';
+      const isPds=proposal.kind==='pds_job_status';
+      const isWorkOrder=isSchedule||proposal.kind==='doorks_work_order_status';
+      const invoiceWorkspace=document.body.dataset.platform||'';
+      const actionBase=(isInvoice||isPO)?('/doorks-assistant/'+invoiceWorkspace+'/actions/'):(isPds?'/doorks-assistant/pds/actions/':(isWorkOrder?'/doorks-assistant/doorks/actions/':'/doorks-assistant/sdc/actions/'));
+      const summary=document.createElement('div');summary.textContent=isPO?('Create UNSENT draft PO for '+String(proposal.details?.vendor||'')+': '+String(proposal.details?.description||'')+' · '+String(proposal.details?.quantity||'')+' × '+String(proposal.details?.unit_cost||'')+' = '+String(proposal.details?.amount||'')):isInvoice?('Convert approved estimate '+String(proposal.estimate_number||proposal.record_id||'')+' to a DRAFT invoice (not sent)'):isSchedule?('Doorks work order '+String(proposal.record_id||'')+': '+[proposal.old_schedule?.scheduled_date||'Unscheduled',proposal.old_schedule?.scheduled_time||''].join(' ')+' → '+[proposal.new_schedule?.scheduled_date||'',proposal.new_schedule?.scheduled_time||''].join(' ')):((isPds?'PDS job ':(isWorkOrder?'Doorks work order ':'SDC order '))+String(proposal.record_id||'')+': '+String(proposal.old_status||'')+' → '+String(proposal.new_status||''));card.append(summary);
+      const status=document.createElement('small');status.setAttribute('role','status');status.textContent=proposal.state==='needs_review'?'Conflict: manual review required.':'Pending your approval — no order changed.';card.append(status);
+      if(proposal.state==='pending'){
+        const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px';
+        for(const [approve,label] of [[true,'Approve change'],[false,'Reject']]){
+          const btn=document.createElement('button');btn.className='btn';btn.type='button';btn.textContent=label;
+          btn.onclick=async()=>{
+            if(approve&&!window.confirm(isPO?'Create an UNSENT draft purchase order? Nothing will be purchased.':isInvoice?'Create a draft invoice from this approved estimate? No invoice will be sent.':isPds?'Apply this PDS job status change?':(isWorkOrder?(isSchedule?'Reschedule this Doorks work order?':'Apply this Doorks work-order status change?'):'Apply this SDC order status change?')))return;
+            for(const b of buttons.querySelectorAll('button'))b.disabled=true;
+            try{const result=await fetchJSON(actionBase+encodeURIComponent(proposal.id)+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve})});
+              status.textContent=result.executed?(isPO?'Confirmed draft PO: '+result.po_number:isInvoice?'Confirmed draft invoice: '+result.invoice_number:isSchedule?'Confirmed saved schedule: '+[result.confirmed_schedule?.scheduled_date,result.confirmed_schedule?.scheduled_time].filter(Boolean).join(' '):'Confirmed saved status: '+result.confirmed_status):'Rejected — no change made.';
+              add('Moses',result.executed?(isPO?'Draft PO '+result.po_number+' created and verified. It has NOT been sent to a supplier.':isInvoice?'Draft invoice '+result.invoice_number+' created and verified. It has NOT been sent.':isSchedule?'Work order '+result.record_id+' confirmed rescheduled to '+[result.confirmed_schedule?.scheduled_date,result.confirmed_schedule?.scheduled_time].filter(Boolean).join(' ')+'.':'Order '+result.record_id+' confirmed as '+result.confirmed_status+'.'):'Action rejected. No order was changed.');
+            }catch(e){status.textContent='Not completed: '+e.message+'. Refresh pending actions before retrying.';for(const b of buttons.querySelectorAll('button'))b.disabled=false}
+          };buttons.append(btn)
+        }card.append(buttons)
+      }
+      container.append(card)
+    };
+    const refreshPending=async()=>{
+      actionPanel.querySelectorAll('div').forEach(el=>el.remove());
+      const workspace=document.body.dataset.platform||'';
+      if(!['sdc','doorks','pds'].includes(workspace)){actionNote.textContent='Approvals unavailable in this workspace.';return}
+      try{const queue=await fetchJSON('/doorks-assistant/'+workspace+'/actions/pending');
+        actionNote.textContent=queue.count?'Pending Moses actions (latest '+queue.proposals.length+'):':'No pending Moses actions.';
+        for(const p of queue.proposals||[])showAction(p)
+      }catch(e){actionNote.textContent='Approval queue unavailable: '+e.message}
+    };
+    pendingButton.onclick=refreshPending;
+    history.after(actionPanel);
+    let mosesTurns=[],mosesWorkspace=document.body.dataset.platform||'';
+    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10)})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[])showAction(proposal);for(const m of r.matches||[]){
       const item=document.createElement('div');item.style.cssText='padding:10px;border:1px solid #d9dee7;border-radius:10px;display:grid;gap:6px';
       const label=document.createElement('strong');label.textContent=[m.name,m.job_number,m.date,m.status].filter(Boolean).join(' · ');item.append(label);
       if(m.address){const address=document.createElement('small');address.textContent=m.address;item.append(address)}
@@ -469,7 +515,7 @@
     sdc: {customers:"Customers",vendors:"Suppliers",purchase_orders:"Purchase Orders",orders:"Orders & Production",software_leads:"Atlas Software Sales",products:"Products",expenses:"Expenses",receivables:"Accounts Receivable",inventory:"Inventory"}
   };
   const workspaceFields = {
-    customers:["name","contact","email","phone","cell_phone","address","customer_type","preferred_visit_type","notes"], vendors:["name","contact","email","phone","address","service_area","trade","vendor_type","onboarding_status","license_number","license_expiration","insurance_expiration","payment_terms","tax_form_status","notes"],
+    customers:["name","contact","email","invoice_email","phone","cell_phone","address","customer_type","preferred_visit_type","notes"], vendors:["name","contact","email","phone","address","service_area","trade","vendor_type","onboarding_status","license_number","license_expiration","insurance_expiration","payment_terms","tax_form_status","notes"],
     customer_inquiries:["customer","contact","email","phone","address","service_type","preferred_date","preferred_time","visit_type","description","status","work_order_number","notes"],
     vendor_assignments:["vendor_id","vendor","vendor_email","work_order_number","customer","address","scheduled_date","scheduled_time","status","scope","nte","completion_notes","notes"],
     estimates_invoices:["customer","work_order_number","document_type","document_number","date","amount","status","description","notes"],
@@ -1245,7 +1291,7 @@
         <div style="display:flex;justify-content:flex-end;gap:15px"><strong id="wedTotal">Total: $0.00</strong><button class="btn btn-orange" type="submit">Save Document</button></div>
         <p id="wedMessage" role="status"></p>
       </form></section>
-      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" id="wedCreateFulfillment" hidden>Create Job / Product Order</button><button class="btn" id="wedFulfillment" hidden>Job / Product Fulfillment</button><button class="btn" id="wedConvert" hidden>Create Draft Invoice</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
+      <section class="card" id="wedDetails" hidden><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><h3 id="wedDetailTitle"></h3><div style="display:flex;gap:8px"><button class="btn" id="wedPrint">Print / Save PDF</button><button class="btn" type="button" id="wedEmailEstimate" hidden>Review &amp; Email Estimate</button><button class="btn" type="button" id="wedStripeInvoice" hidden>Stripe Test Checkout</button><button class="btn" type="button" id="wedEmailInvoice" hidden>Review &amp; Email Invoice</button><button class="btn" id="wedCreateFulfillment" hidden>Create Job / Product Order</button><button class="btn" id="wedFulfillment" hidden>Job / Product Fulfillment</button><button class="btn" id="wedConvert" hidden>Create Draft Invoice</button><button class="btn" id="wedEdit">Edit</button><button class="btn" id="wedDetailClose">Close</button></div></div><div id="wedPreview"></div></section>
       </div>`;
     if(!filterType){const po=document.createElement('button');po.className='btn';po.textContent='+ New Purchase Order';po.onclick=()=>renderBusinessCollection(platform,'purchase_orders',true,()=>renderBusinessHub(platform));el('wedNewInvoice').after(po);}
     // Phase 2R-K: scoped document workspace styling; PDS views are untouched.
@@ -1401,7 +1447,7 @@
       const subtotal=lines.reduce((a,l)=>a+(Number(l.quantity)||0)*(Number(l.rate)||0),0),tax=Number(item.tax_amount)||0;
       return `<article style="font-family:Arial,sans-serif;color:#151b29;padding:34px;background:white;line-height:1.5"><header style="display:flex;justify-content:space-between;gap:16px"><div><h2 style="margin:0">${escapeHtml(platform==='doorks'?(doorksBusinessDefaults.business_name||company):company)}</h2><p style="white-space:pre-line">${escapeHtml(platform==='doorks'?(doorksBusinessDefaults.business_address||''): '41080 Saddleback Dr\nAguanga, CA 92536')}</p>${platform==='doorks'?`<p>${escapeHtml([doorksBusinessDefaults.business_phone,doorksBusinessDefaults.business_email,doorksBusinessDefaults.website].filter(Boolean).join(' · '))}</p>`:''}</div><div style="text-align:right"><h1>${escapeHtml(item.document_type||'Estimate')}</h1><p><b>#</b> ${escapeHtml(item.document_number)}<br><b>Date:</b> ${escapeHtml(item.date)}<br><b>Terms:</b> ${escapeHtml(item.terms)}<br><b>Status:</b> ${escapeHtml(item.status)}</p></div></header><hr><div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:20px 0"><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Customer / Bill To</b><p>${escapeHtml(item.customer)}<br>${escapeHtml(item.address).replace(/\n/g,'<br>')}</p></div><div style="border:1px solid #cbd5e1;padding:14px;border-radius:8px"><b>Ship To / Service Location</b><p style="white-space:pre-line">${escapeHtml(item.ship_to||item.address)}</p></div></div><p><b>Job #:</b> ${escapeHtml(item.work_order_number)} &nbsp; <b>PO #:</b> ${escapeHtml(item.po_number)}</p><table style="width:100%;border-collapse:collapse;margin-top:20px"><thead><tr style="background:#eaf0f6;color:#17263a"><th style="text-align:left;padding:9px">Item</th><th style="text-align:left">Description</th><th>Qty</th><th>Rate</th><th>Tax</th><th>Amount</th></tr></thead><tbody>${lines.map(l=>`<tr><td style="padding:8px;border-bottom:1px solid #ddd">${escapeHtml(l.item)}</td><td style="border-bottom:1px solid #ddd">${escapeHtml(l.description)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${escapeHtml(l.quantity)}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt(l.rate)}</td><td style="text-align:center;border-bottom:1px solid #ddd">${l.taxable===false?'No':'Yes'}</td><td style="text-align:right;border-bottom:1px solid #ddd">${fmt((Number(l.quantity)||0)*(Number(l.rate)||0))}</td></tr>`).join('')}</tbody></table><div style="text-align:right;margin-top:20px"><p>Subtotal: ${fmt(subtotal)}</p><p>Sales Tax (${escapeHtml(item.tax_rate||0)}% on taxable lines): ${fmt(tax)}</p><h2 style="border-top:2px solid #263a50;padding-top:12px">Total: ${fmt(item.amount)}</h2>${item.document_type==='Invoice'?`<p>Paid: ${fmt(item.paid)}</p><p><b>Balance Due: ${fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0)))}</b></p>`:''}</div><p style="white-space:pre-wrap;margin-top:25px">${escapeHtml(item.notes)}</p></article>`;
     }
-    function view(item){q('wedCreateFulfillment').hidden=item.document_type!=='Estimate';q('wedFulfillment').hidden=item.document_type!=='Estimate';q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
+    function view(item){q('wedStripeInvoice').hidden=item.document_type!=='Invoice';q('wedEmailInvoice').hidden=item.document_type!=='Invoice';q('wedEmailEstimate').hidden=item.document_type!=='Estimate';q('wedCreateFulfillment').hidden=item.document_type!=='Estimate';q('wedFulfillment').hidden=item.document_type!=='Estimate';q('wedConvert').hidden=item.document_type!=='Estimate';viewing=item;q('wedEditor').hidden=true;q('wedDetails').hidden=false;q('wedDetailTitle').textContent=(item.document_type||'Document')+' '+(item.document_number||'');q('wedPreview').innerHTML=previewHtml(item);q('wedDetails').scrollIntoView({block:'start',behavior:'smooth'});}
     q('wedCreateFulfillment').onclick=async()=>{
       if(!viewing||viewing.document_type!=='Estimate')return;
       if(String(viewing.status||'').toLowerCase()!=='approved'){alert('Approve the estimate before creating a job or product order.');return;}
@@ -1446,6 +1492,115 @@
       finally{button.disabled=false;}
     };
     q('wedEdit').onclick=()=>viewing&&open(viewing);
+    // Rev79: use the guarded Rev78 estimate delivery proposal, never a mailto shortcut.
+    // Delivery remains disabled until the office configures SMTP and the public portal.
+    q('wedEmailEstimate').onclick=async()=>{
+      if(!viewing||viewing.document_type!=='Estimate')return;
+      const record=viewing,button=q('wedEmailEstimate');button.disabled=true;
+      try{
+        const base='/doorks-assistant/'+platform+'/estimates/';
+        const result=await fetchJSON(base+encodeURIComponent(record.id)+'/email-proposal',{method:'POST'});
+        const proposal=result.proposal;
+        if(!proposal||!proposal.id)throw Error('No email proposal returned');
+        const wrapper=document.createElement('div');wrapper.style.cssText='position:fixed;inset:0;z-index:12050;background:#17213388;display:flex;justify-content:center;align-items:center;padding:15px';
+        const panel=document.createElement('section');panel.className='card';panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Review estimate email');panel.style.cssText='background:white;max-width:540px;width:100%;max-height:85vh;overflow:auto;display:grid;gap:10px;padding:22px;border-radius:14px';
+        const heading=document.createElement('h3');heading.textContent='Review customer estimate email';panel.append(heading);
+        for(const [label,value] of [['Document',proposal.document_number],['Recipient',proposal.to],['From',proposal.from],['Reply-To',proposal.reply_to],['CC',proposal.cc||'—'],['Subject',proposal.subject],['PDF attachment',proposal.attachment_filename],['Total',String(proposal.total)]]){
+          const line=document.createElement('div');const strong=document.createElement('strong');strong.textContent=label+': ';line.append(strong,document.createTextNode(String(value||'')));panel.append(line);
+        }
+        const info=document.createElement('p');info.className='hint';info.textContent='The email includes a PDF and a new expiring acceptance link. The exact link is created only after approval. SMTP delivery may remain uncertain; do not retry without review.';panel.append(info);
+        const status=document.createElement('p');status.setAttribute('role','status');panel.append(status);
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+        const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Close';cancel.onclick=()=>wrapper.remove();
+        const reject=document.createElement('button');reject.type='button';reject.className='btn';reject.textContent='Reject proposal';
+        const approve=document.createElement('button');approve.type='button';approve.className='btn btn-orange';approve.textContent='Approve & Send';
+        const decide=async approved=>{
+          if(approved&&!confirm('Email the verified estimate PDF and acceptance link to '+proposal.to+'?'))return;
+          approve.disabled=true;reject.disabled=true;status.textContent=approved?'Submitting approved email…':'Rejecting…';
+          try{
+            const response=await fetchJSON(base+'email-proposal/'+encodeURIComponent(proposal.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:approved})});
+            status.textContent=response.state==='sent'?'SMTP accepted the estimate email. Check delivery history for the saved result.':response.state==='uncertain'?'Delivery confirmation uncertain. Do not resend until reviewed.':response.state==='rejected'?'Proposal rejected. No email sent.':'Result: '+String(response.state);
+            approve.remove();reject.remove();
+          }catch(error){status.textContent='Not sent/confirmed: '+(error.message||error)+'. Review delivery history before retrying.';reject.disabled=false;}
+        };
+        reject.onclick=()=>decide(false);approve.onclick=()=>decide(true);actions.append(cancel,reject,approve);panel.append(actions);wrapper.append(panel);document.body.append(wrapper);
+      }catch(error){alert('Unable to prepare estimate email: '+(error.message||error));}
+      finally{button.disabled=false;}
+    };
+    // Rev81: test-only Checkout is reviewed in the invoice editor. Never mark Paid on redirect.
+    q('wedStripeInvoice').onclick=async()=>{
+      if(!viewing||viewing.document_type!=='Invoice')return;
+      const record=viewing,button=q('wedStripeInvoice');button.disabled=true;
+      const base='/doorks-assistant/'+platform+'/invoices/';
+      try{
+        const status=await fetchJSON(base+encodeURIComponent(record.id)+'/stripe/payment-status');
+        if(status.stripe_payment_confirmed){alert('Stripe payment confirmed. Invoice accounting has NOT been automatically reconciled; review payment records before making adjustments.');return;}
+        if(status.stripe_payment_requires_review){alert('Stripe checkout needs manual review. Do not create another payment link.');return;}
+        const result=await fetchJSON(base+encodeURIComponent(record.id)+'/stripe/propose',{method:'POST'});
+        const proposal=result.proposal;
+        if(!proposal||!proposal.id)throw Error('No checkout proposal returned');
+        const wrapper=document.createElement('div');wrapper.style.cssText='position:fixed;inset:0;z-index:12050;background:#17213388;display:flex;justify-content:center;align-items:center;padding:15px';
+        const panel=document.createElement('section');panel.className='card';panel.style.cssText='background:white;max-width:520px;width:100%;padding:22px;border-radius:14px;display:grid;gap:12px';panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Review Stripe test checkout');
+        const heading=document.createElement('h3');heading.textContent='Review Stripe TEST Checkout';panel.append(heading);
+        for(const [label,value] of [['Invoice',proposal.number],['AP recipient',proposal.recipient],['Amount',new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(proposal.amount_cents/100)],['State',proposal.state]]){const line=document.createElement('p');const b=document.createElement('strong');b.textContent=label+': ';line.append(b,document.createTextNode(String(value||'')));panel.append(line);}
+        const info=document.createElement('p');info.className='hint';info.textContent='Creates a Stripe TEST Checkout link only. It will not email the customer, charge a real card, or mark your invoice Paid. Payment reconciliation is separate.';panel.append(info);
+        const feedback=document.createElement('p');feedback.setAttribute('role','status');panel.append(feedback);
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:10px;flex-wrap:wrap';
+        const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=()=>wrapper.remove();actions.append(close);
+        if(proposal.state==='pending'){
+          const reject=document.createElement('button');reject.className='btn';reject.textContent='Reject';
+          const approve=document.createElement('button');approve.className='btn btn-orange';approve.textContent='Create TEST Checkout';
+          const decide=async yes=>{
+            if(yes&&!confirm('Create a TEST-mode Stripe checkout for '+proposal.number+'?'))return;
+            approve.disabled=true;reject.disabled=true;
+            try{
+              const response=await fetchJSON('/doorks-assistant/'+platform+'/invoices/stripe/'+encodeURIComponent(proposal.id)+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:yes})});
+              feedback.textContent=response.state==='checkout_ready'?'TEST Checkout created; no email has been sent.':response.state==='uncertain'?'Stripe response uncertain. Reconcile in Stripe dashboard; do not retry.':'Result: '+response.state;
+              if(response.state==='checkout_ready'&&response.checkout_url){const link=document.createElement('a');link.href=response.checkout_url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Open TEST Checkout';panel.append(link);}
+              approve.remove();reject.remove();
+            }catch(e){feedback.textContent='Unable to confirm: '+(e.message||e);approve.disabled=false;reject.disabled=false;}
+          };reject.onclick=()=>decide(false);approve.onclick=()=>decide(true);actions.append(reject,approve);
+        }
+        panel.append(actions);wrapper.append(panel);document.body.append(wrapper);
+      }catch(e){alert('Stripe test checkout unavailable: '+(e.message||e));}
+      finally{button.disabled=false;}
+    };
+    // Rev83: reviewed Stripe TEST invoice delivery. This never auto-sends or marks Paid.
+    q('wedEmailInvoice').onclick=async()=>{
+      if(!viewing||viewing.document_type!=='Invoice')return;
+      const record=viewing,button=q('wedEmailInvoice');button.disabled=true;
+      const base='/doorks-assistant/'+platform+'/invoices/';
+      try{
+        const result=await fetchJSON(base+encodeURIComponent(record.id)+'/email-proposal',{method:'POST'});
+        const proposal=result.proposal;
+        if(!proposal||!proposal.id)throw Error('No invoice email proposal returned');
+        const wrapper=document.createElement('div');wrapper.style.cssText='position:fixed;inset:0;z-index:12060;background:#17213388;display:flex;justify-content:center;align-items:center;padding:15px';
+        const panel=document.createElement('section');panel.className='card';panel.style.cssText='background:white;max-width:540px;width:100%;padding:22px;border-radius:14px;display:grid;gap:12px';panel.setAttribute('role','dialog');panel.setAttribute('aria-label','Review invoice payment email');
+        const heading=document.createElement('h3');heading.textContent='Review Invoice Email · Stripe TEST';panel.append(heading);
+        for(const [label,value] of [['Invoice',proposal.number],['Recipient',proposal.to],['Recipient source',proposal.recipient_source],['Sender',proposal.from],['Reply-To',proposal.reply_to],['CC',proposal.cc||'(none)'],['Amount',proposal.total],['PDF attachment',proposal.attachment_filename],['State',proposal.state]]){
+          const line=document.createElement('p');const b=document.createElement('strong');b.textContent=label+': ';line.append(b,document.createTextNode(String(value||'')));panel.append(line);
+        }
+        const info=document.createElement('p');info.className='hint';info.textContent='This sends a TEST checkout link and invoice PDF to the displayed recipient only after explicit approval. No accounting Paid status is changed. Check SMTP and payment delivery history if confirmation is uncertain.';panel.append(info);
+        const feedback=document.createElement('p');feedback.setAttribute('role','status');panel.append(feedback);
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:10px;flex-wrap:wrap';
+        const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=()=>wrapper.remove();actions.append(close);
+        if(proposal.state==='pending'){
+          const reject=document.createElement('button');reject.className='btn';reject.textContent='Reject';
+          const approve=document.createElement('button');approve.className='btn btn-orange';approve.textContent='Approve & Send TEST Email';
+          const decide=async yes=>{
+            if(yes&&!confirm('Send invoice '+proposal.number+' and TEST payment link to '+proposal.to+'?'))return;
+            approve.disabled=true;reject.disabled=true;
+            try{
+              const response=await fetchJSON(base+'email-proposal/'+encodeURIComponent(proposal.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:yes})});
+              feedback.textContent=response.state==='sent'?'SMTP accepted the email. Check delivery history for confirmation.':response.state==='uncertain'?'Delivery uncertain. Inspect records before any retry.':response.state==='rejected'?'Rejected. No email sent.':'Result: '+String(response.state);
+              approve.remove();reject.remove();
+            }catch(error){feedback.textContent='Not confirmed: '+(error.message||error);approve.disabled=false;reject.disabled=false;}
+          };reject.onclick=()=>decide(false);approve.onclick=()=>decide(true);actions.append(reject,approve);
+        }
+        panel.append(actions);wrapper.append(panel);document.body.append(wrapper);
+      }catch(error){alert('Unable to prepare invoice email: '+(error.message||error));}
+      finally{button.disabled=false;}
+    };
     q('wedDetailClose').onclick=()=>{q('wedDetails').hidden=true;viewing=null;};
     q('wedPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print.');return;}w.document.write('<!doctype html><html><head><title>'+escapeHtml(viewing.document_number)+'</title><style>@page{size:letter;margin:.5in}body{margin:0}tr{break-inside:avoid}</style></head><body>'+previewHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
     function draw(){const search=q('wedSearch').value.toLowerCase(),filter=q('wedFilter').value;const host=q('wedList');host.replaceChildren();const matching=records.filter(r=>{const date=String(r.date||r.created_at||'').slice(0,10);return (!filter||String(r.document_type||'').toLowerCase()===filter.toLowerCase())&&(!search||[r.customer,r.document_number,r.work_order_number,r.po_number,r.address,r.status].some(v=>String(v||'').toLowerCase().includes(search)));}).sort((a,b)=>String(b.created_at||b.date||'').localeCompare(String(a.created_at||a.date||''))||String(b.document_number||'').localeCompare(String(a.document_number||''),undefined,{numeric:true}));const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${matching.length} ${filter?filter.toLowerCase()+'s':'documents'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:15px;margin-top:10px';const heading=document.createElement('strong');heading.textContent=`${item.document_type||'Document'} ${item.document_number||''} · ${item.customer||''}`;const meta=document.createElement('p');meta.className='hint';meta.textContent=`${item.date||''} · ${fmt(item.amount)} · ${item.status||''}${item.document_type==='Invoice'?' · Balance '+fmt(Math.max(0,(Number(item.amount)||0)-(Number(item.paid)||0))):''}`;const button=document.createElement('button');button.className='btn';button.textContent='View Document';button.onclick=()=>view(item);const edit=document.createElement('button');edit.className='btn';edit.style.marginLeft='8px';edit.textContent='Edit';edit.onclick=()=>open(item);card.append(heading,meta,button,edit);if(item.document_type==='Estimate'){const select=document.createElement('select');select.className='input';select.style.cssText='max-width:170px;display:inline-block;margin-left:8px';for(const status of ['Draft','Sent','Approved','Not Approved']){const opt=document.createElement('option');opt.value=status;opt.textContent=status;select.append(opt);}select.value=item.status||'Draft';select.onchange=async()=>{select.disabled=true;try{await fetchJSON(endpoint+'/'+encodeURIComponent(item.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:select.value}})});await refresh();}catch(e){alert('Status update failed: '+(e.message||e));select.value=item.status||'Draft';}finally{select.disabled=false;}};card.append(select);}host.append(card);}}
@@ -1528,6 +1683,46 @@
             const extra=fields.filter(k=>!['status','source_estimate_id','source_inquiry_id','created_at','updated_at','created_by','last_modified_by','amount'].includes(k)&&!seen.has(k)&&!k.startsWith('completion_')&&item[k]!==undefined&&item[k]!==null&&item[k]!=='');if(extra.length){const section=document.createElement('section');section.style.cssText='border:1px solid #d9dee7;border-radius:14px;padding:16px;margin:14px 0';const h=document.createElement('h3');h.textContent='Additional Information';section.append(h);for(const key of extra){const line=document.createElement('p');line.style.overflowWrap='anywhere';const strong=document.createElement('strong');strong.textContent=key.replaceAll('_',' ')+': ';line.append(strong,document.createTextNode(String(item[key])));section.append(line);}panel.append(section);}
             const actions=document.createElement('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin:18px 0';const editPanel=document.createElement('button');editPanel.className='btn';editPanel.textContent='Edit Work Order';editPanel.onclick=()=>{if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();open(item);};const estimateShortcut=document.createElement('button');estimateShortcut.className='btn';estimateShortcut.textContent='Estimate';estimateShortcut.onclick=()=>{overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderWorkspaceEstimateInvoice('doorks',true,null,'Estimate'));};actions.append(estimateShortcut);
             const invoiceShortcut=document.createElement('button');invoiceShortcut.type='button';invoiceShortcut.className='btn';invoiceShortcut.textContent='Invoice';invoiceShortcut.onclick=async()=>{if(item.source_estimate_id){if(!confirm('Open or create the invoice linked to this approved estimate?'))return;invoiceShortcut.disabled=true;try{await fetchJSON('/workspaces/doorks/estimates/'+encodeURIComponent(item.source_estimate_id)+'/convert-to-invoice',{method:'POST'});overlay.remove();renderWorkspaceEstimateInvoice('doorks',false,backAction,'Invoice');}catch(err){alert('Linked invoice could not be opened: '+(err.message||err));}finally{invoiceShortcut.disabled=false;}return;}if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderWorkspaceEstimateInvoice('doorks',true,null,'Invoice'));};actions.append(invoiceShortcut);
+            // Review-only dispatch email. Actual sending must use the future
+            // audited company-mail transport; this does not contact customers.
+            const etaShortcut=document.createElement('button');etaShortcut.type='button';etaShortcut.className='btn';etaShortcut.textContent='Customer ETA / Update';
+            etaShortcut.onclick=()=>{
+              const host=document.createElement('section');host.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:14px;margin:10px 0;display:grid;gap:9px';
+              const heading=document.createElement('strong');heading.textContent='Customer ETA / Update — Review Before Sending';host.append(heading);
+              const mode=document.createElement('select');mode.className='input';for(const [value,label] of [['scheduled','Scheduled visit reminder'],['en_route','Technician en route'],['delay','Updated ETA / Delay'],['general','General customer update']])mode.add(new Option(label,value));host.append(mode);
+              const eta=document.createElement('input');eta.type='time';eta.className='input';eta.title='Confirmed ETA (not calculated automatically)';host.append(eta);
+              const note=document.createElement('textarea');note.className='input';note.rows=3;note.placeholder='Additional customer update (optional)';host.append(note);
+              const previewBtn=document.createElement('button');previewBtn.type='button';previewBtn.className='btn btn-orange';previewBtn.textContent='Preview email (no send)';host.append(previewBtn);
+              const sendBtn=document.createElement('button');sendBtn.type='button';sendBtn.className='btn';sendBtn.textContent='Prepare approved send';sendBtn.disabled=true;sendBtn.title='Disabled until the email has been previewed';host.append(sendBtn);
+              const output=document.createElement('pre');output.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:13px/1.5 inherit';output.setAttribute('role','status');host.append(output);
+              let previewed=null;
+              const invalidate=()=>{previewed=null;sendBtn.disabled=true;};
+              mode.addEventListener('change',invalidate);eta.addEventListener('input',invalidate);note.addEventListener('input',invalidate);
+              sendBtn.onclick=async()=>{
+                if(!previewed)return;
+                sendBtn.disabled=true;
+                try{
+                  const endpoint='/doorks-assistant/doorks/dispatch/'+encodeURIComponent(item.id)+'/eta/send-proposal';
+                  const prepared=await fetchJSON(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(previewed)});
+                  const proposal=prepared.proposal;
+                  if(!proposal||!proposal.id)throw new Error('No saved approval proposal returned');
+                  if(!confirm('SEND CUSTOMER EMAIL?\n\nTo: '+proposal.to+'\nSubject: '+proposal.subject+'\n\n'+proposal.text+'\n\nThis sends real email through the company sender.')){
+                    await fetchJSON('/doorks-assistant/doorks/dispatch/eta/send-proposal/'+encodeURIComponent(proposal.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:false})});
+                    output.textContent='Email proposal rejected. No email sent.';return;
+                  }
+                  const result=await fetchJSON('/doorks-assistant/doorks/dispatch/eta/send-proposal/'+encodeURIComponent(proposal.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:true})});
+                  output.textContent=result.sent?'SMTP accepted the message for '+result.recipient+'. Recorded in delivery history.':'Delivery status: '+result.state+'. '+(result.message||'Check provider before retrying.');
+                }catch(err){output.textContent='Email not confirmed: '+(err.message||err)+' — check delivery history before retrying.';}
+                finally{invalidate();}
+              };
+              mode.onchange=()=>{eta.hidden=!['en_route','delay'].includes(mode.value);};mode.onchange();
+              previewBtn.onclick=async()=>{invalidate();previewBtn.disabled=true;try{
+                const result=await fetchJSON('/doorks-assistant/doorks/dispatch/'+encodeURIComponent(item.id)+'/eta/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:mode.value,eta_time:eta.value,note:note.value})});
+                output.textContent='From: '+(result.from||'(not configured)')+'\nTo: '+(result.to||'(missing customer email)')+'\nReply-To: '+(result.reply_to||'(not configured)')+'\nSubject: '+result.subject+'\n\n'+result.text+'\n\nNOT SENT. '+result.issues.join('; ');
+                previewed={mode:mode.value,eta_time:eta.value,note:note.value};sendBtn.disabled=!!result.issues.filter(x=>x!=='Approved outbound email transport not enabled').length;
+              }catch(err){output.textContent='Unable to preview: '+(err.message||err);}finally{previewBtn.disabled=false;}};
+              actions.after(host);etaShortcut.disabled=true;
+            };actions.append(etaShortcut);
             const poShortcut=document.createElement('button');poShortcut.type='button';poShortcut.className='btn';poShortcut.textContent='Purchase Order';poShortcut.onclick=()=>{if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderUnifiedPurchaseOrders('doorks',true));};actions.append(poShortcut,editPanel); 
             for(const button of [estimateShortcut,invoiceShortcut,poShortcut]){
               button.style.cssText='border:2px solid #4d7041;background:#fff;color:#315d35;font-weight:800;border-radius:10px;padding:10px 16px';
@@ -1725,7 +1920,7 @@
       };
     }
     const endpoint=`/workspaces/${platform}/${kind}`;
-    const types={email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',channel_fee:'number',gross_collected:'number',shipping_charged:'number',sales_tax_collected:'number',sales_tax_remitted:'number',shipping_cost:'number',marketplace_fees:'number',payment_received:'number',cost_of_goods:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',payment_date:'date',scheduled_date:'date',scheduled_time:'time',expected_date:'date',preferred_date:'date',preferred_time:'time'};
+    const types={email:'email',invoice_email:'email',phone:'tel',amount:'number',paid:'number',total:'number',tax:'number',shipping:'number',channel_fee:'number',gross_collected:'number',shipping_charged:'number',sales_tax_collected:'number',sales_tax_remitted:'number',shipping_cost:'number',marketplace_fees:'number',payment_received:'number',cost_of_goods:'number',price:'number',unit_cost:'number',quantity:'number',date:'date',order_date:'date',payment_date:'date',scheduled_date:'date',scheduled_time:'time',expected_date:'date',preferred_date:'date',preferred_time:'time'};
     const statuses=kind==='vendors'?['Prospect','Invited','Documents Pending','Under Review','Approved','Suspended']:kind==='purchase_orders'?['Draft','Submitted','Partially Received','Received','Billed','Paid','Cancelled']:kind==='orders'?['Open','In Production','Shipped','Delivered']:kind==='work_orders'?['Dispatch','Scheduled','In Progress','To Be Quoted','Quote Sent','Approved','Parts on Order','To Be Invoiced','Invoiced','Complete','Cancelled']:kind==='customer_inquiries'?['New','Contacted','Visit Requested','Scheduled','Converted','Closed']:kind==='vendor_assignments'?['Pending','Offered','Accepted','Declined','Scheduled','In Progress','Completed','Cancelled']:null;
     let records=[],editingId=null;
     for(const field of fields){
@@ -3202,6 +3397,8 @@
       description: payload.description || payload.Description || "",
       price: payload.price ?? payload.Price ?? "",
       supplier: payload.supplier || payload.Supplier || "",
+      image_url: payload.image_url || "",
+      product_url: payload.product_url || "",
     };
     const url = body.id ? `/data/parts/${encodeURIComponent(body.id)}` : "/data/parts";
     const method = body.id ? "PUT" : "POST";
@@ -7365,7 +7562,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 style="margin:0">Parts List</h3><div class="hint">Manage manufacturer, part #, description, supplier, and price.</div></div><button class="btn" type="button" id="parts_back_hub">← Business Hub</button></div>`;
+    card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 style="margin:0">Parts List</h3><div class="hint">Manage manufacturer, part #, description, supplier, pricing, product links, and photos.</div></div><button class="btn" type="button" id="parts_back_hub">← Business Hub</button></div>`;
     card.querySelector("#parts_back_hub").onclick = () => renderEstimatePage();
 
     const controls = document.createElement("div");
@@ -7392,7 +7589,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div style="margin-top:10px;"><div class="label">Description</div><textarea id="part_desc">${escapeHtml(part.Description || part.description || "")}</textarea></div>
           <div style="margin-top:10px;"><div class="label">Supplier</div><input class="input" id="part_supplier" placeholder="Preferred supplier" value="${escapeHtml(part.supplier || part.Supplier || "")}" /></div>
           <div style="margin-top:10px;"><div class="label">Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Product Website URL</div><input class="input" id="part_product_url" type="url" placeholder="https://supplier.com/product" value="${escapeHtml(part.product_url || "")}" /></div>
+          <div style="margin-top:10px;"><div class="label">Photo URL</div><input class="input" id="part_image_url" placeholder="https://... or uploaded photo" value="${escapeHtml(part.image_url || "")}" /></div>
+          <img id="part_photo_preview" alt="Part image preview" style="max-width:200px;max-height:140px;object-fit:contain;display:none" />
         `;
+        const preview=wrap.querySelector('#part_photo_preview');
+        const showPhoto=()=>{const url=wrap.querySelector('#part_image_url').value.trim();const valid=/^https:\/\//i.test(url)||url.startsWith('/moses/part-image/pds/');preview.style.display=valid?'block':'none';if(valid)preview.src=url;};
+        wrap.querySelector('#part_image_url').addEventListener('input',showPhoto);showPhoto();
+        const website=document.createElement('div');website.style.cssText='display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap';
+        website.innerHTML='<button type="button" class="btn" id="part_url_read">✨ Moses — Read Product URL</button><span class="hint" id="part_url_status"></span>';
+        wrap.appendChild(website);
+        website.querySelector('#part_url_read').onclick=async()=>{const url=wrap.querySelector('#part_product_url').value.trim(),status=website.querySelector('#part_url_status');if(!url){status.textContent='Enter an HTTPS product URL first';return;}status.textContent='Reading public product page…';try{const r=await fetchJSON('/moses/part-from-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=r.fields||{};for(const [key,id] of [['manufacturer','#part_mfg'],['part_number','#part_item'],['description','#part_desc'],['supplier','#part_supplier'],['image_url','#part_image_url']])if(d[key])wrap.querySelector(id).value=d[key];showPhoto();status.textContent='Suggestions loaded — verify before saving';}catch(e){status.textContent='Could not read product page: '+e.message;}};
+        const upload=document.createElement('label');upload.style.cssText='display:grid;gap:5px;margin-top:10px';upload.textContent='Upload Part Photo (JPG, PNG, WEBP; max 5 MB)';const input=document.createElement('input');input.type='file';input.accept='.jpg,.jpeg,.png,.webp';upload.append(input);wrap.append(upload);input.onchange=async()=>{const file=input.files?.[0];if(!file)return;const status=website.querySelector('#part_url_status');if(file.size>5*1024*1024){status.textContent='Photo is larger than 5 MB';return;}try{const fd=new FormData();fd.append('file',file);const r=await fetch('/moses/part-image/pds',{method:'POST',body:fd,credentials:'same-origin'});const d=await r.json();if(!r.ok)throw Error(d.detail||'Upload failed');wrap.querySelector('#part_image_url').value=d.url;showPhoto();status.textContent='Photo uploaded. Save the part to link it.';}catch(e){status.textContent='Photo upload failed: '+e.message;}};
         const assist=document.createElement('details');
         assist.style.cssText='margin-top:12px;border:1px solid #d9e1ea;border-radius:10px;padding:12px';
         assist.innerHTML='<summary style="cursor:pointer;font-weight:700">Part Data Assistant — Paste & Autofill</summary><p class="hint">Paste supplier catalog text. Fields are suggestions; verify before saving. AI document extraction is not connected yet.</p><textarea class="input" id="part_assist_text" rows="4" style="width:100%;box-sizing:border-box" placeholder="Manufacturer: ...\\nPart #: ...\\nDescription: ...\\nSupplier: ...\\nPrice: ..."></textarea><button type="button" class="btn" id="part_assist_apply">Autofill labeled fields</button>';
@@ -7419,6 +7627,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             description: wrap.querySelector("#part_desc").value.trim(),
             price: Number(wrap.querySelector("#part_price").value || 0),
             supplier: wrap.querySelector("#part_supplier").value.trim(),
+            product_url: wrap.querySelector("#part_product_url").value.trim(),
+            image_url: wrap.querySelector("#part_image_url").value.trim(),
           });
           overlay.remove();
           refresh();
@@ -7436,6 +7646,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row.className = "jobrow";
         row.style.cursor = "pointer";
         row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}</div><div class="hint">$${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}</div>`;
+        if(p.image_url&&(/^https:\/\//i.test(p.image_url)||p.image_url.startsWith('/moses/part-image/pds/'))){const img=document.createElement('img');img.src=p.image_url;img.alt='Part photo';img.style.cssText='width:64px;height:64px;object-fit:contain;border-radius:8px;float:left;margin-right:12px';img.onerror=()=>img.remove();row.prepend(img);}
+        if(p.product_url&&/^https:\/\//i.test(p.product_url)){const link=document.createElement('a');link.href=p.product_url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Product Website';link.onclick=e=>e.stopPropagation();row.append(link);}
         row.addEventListener("click", ()=> openPartEditor(p));
         list.appendChild(row);
       });
@@ -9953,6 +10165,7 @@ function renderCustomersView() {
       const address = (prompt("Street Address:", item.address || "") || "").trim();
       const phone_number = (prompt("Phone:", item.phone_number || "") || "").trim();
       const email = (prompt("Email:", item.email || "") || "").trim();
+      const invoice_email = (prompt("Invoice Email (AP / Accounting, optional):", item.invoice_email || "") || "").trim();
       const notes = (prompt("Notes:", item.notes || "") || "").trim();
       await apiUpdateCustomer(item.id, {
         company_name,
@@ -9962,6 +10175,7 @@ function renderCustomersView() {
         zip_code: item.zip_code || "",
         phone_number,
         email,
+        invoice_email,
         notes,
       });
       await renderCustomersTab();
@@ -10025,7 +10239,7 @@ function renderCustomersView() {
 
       function renderList() {
         const q = search.value.trim();
-        const filtered = items.filter(c => itemMatches(c, q, ["company_name", "address", "phone_number", "email", "notes"]));
+        const filtered = items.filter(c => itemMatches(c, q, ["company_name", "address", "phone_number", "email", "invoice_email", "notes"]));
         list.innerHTML = "";
         if (!filtered.length) { list.innerHTML = `<div class="hint">No customers found.</div>`; return; }
         filtered.forEach(c => {
@@ -10042,7 +10256,7 @@ function renderCustomersView() {
             </div>
           `;
           const details=document.createElement('div');details.className='hint';details.style.cssText='display:none;margin:12px 0;white-space:pre-wrap;line-height:1.6';
-          details.textContent=[['Customer',c.company_name],['Street Address',c.address],['City',c.city],['State',c.state],['ZIP',c.zip_code],['Phone',c.phone_number],['Email',c.email],['Notes',c.notes]].filter(([,v])=>v).map(([k,v])=>k+': '+v).join('\n');
+          details.textContent=[['Customer',c.company_name],['Street Address',c.address],['City',c.city],['State',c.state],['ZIP',c.zip_code],['Phone',c.phone_number],['Email',c.email],['Invoice Email (AP)',c.invoice_email],['Notes',c.notes]].filter(([,v])=>v).map(([k,v])=>k+': '+v).join('\n');
           const actions=row.querySelector('.jobrow-top');
           const view=document.createElement('button');view.className='btn';view.type='button';view.textContent='View Details';
           view.onclick=()=>{details.style.display=details.style.display==='none'?'block':'none';view.textContent=details.style.display==='none'?'View Details':'Hide Details';};
@@ -10058,7 +10272,8 @@ function renderCustomersView() {
         const address = (prompt("Street address (optional):") || "").trim();
         const phone = (prompt("Phone (optional):") || "").trim();
         const email = (prompt("Email (optional):") || "").trim();
-        const created = await apiCreateCustomer({ company_name: name, address, phone_number: phone, email });
+        const invoice_email = (prompt("Invoice Email — AP / Accounting (optional):") || "").trim();
+        await apiCreateCustomer({ company_name: name, address, phone_number: phone, email, invoice_email });
         await renderCustomersTab();
       });
 
@@ -11918,6 +12133,26 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     };
     q('upoDelete').onclick=()=>{if(viewing)deletePO(viewing);};
     q('upoEdit').onclick=()=>{if(viewing)edit(viewing);};
+    // Rev74: a separate reviewed PO email action; never auto-send from PO save.
+    const poEmailButton=document.createElement('button');poEmailButton.type='button';poEmailButton.className='btn';poEmailButton.textContent='Email PO to Vendor';
+    q('upoPrint').before(poEmailButton);
+    poEmailButton.onclick=async()=>{
+      if(!viewing?.id)return;
+      poEmailButton.disabled=true;
+      const base='/doorks-assistant/'+encodeURIComponent(platform)+'/purchase-orders';
+      try{
+        const prepared=await fetchJSON(base+'/'+encodeURIComponent(viewing.id)+'/email-proposal',{method:'POST'});
+        const proposal=prepared.proposal;
+        if(!proposal?.id)throw Error('Could not save approval request');
+        const message='SEND PURCHASE ORDER EMAIL?\n\nVendor: '+(viewing.vendor||'')+'\nTo: '+proposal.to+'\nReply-To: '+proposal.reply_to+(proposal.cc?'\nCC: '+proposal.cc:'')+'\nSubject: '+proposal.subject+'\nAttachment: '+proposal.attachment_filename+'\nPO Total: '+proposal.total+'\nLine items: '+proposal.line_count+'\n\nThis sends a real vendor email.';
+        const approved=confirm(message);
+        const result=await fetchJSON(base+'/email-proposal/'+encodeURIComponent(proposal.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:approved})});
+        if(!approved)alert('PO email proposal rejected; no email sent.');
+        else if(result.sent)alert('SMTP accepted the purchase order email for '+result.recipient+'. The delivery attempt is recorded.');
+        else alert('Email status: '+result.state+'. Check the SMTP provider and delivery history before retrying.');
+      }catch(err){alert('PO email not confirmed: '+(err.message||err)+'. Check delivery history before retrying.');}
+      finally{poEmailButton.disabled=false;}
+    };
     q('upoPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print the PO.');return;}w.document.open();w.document.write('<!doctype html><html><head><title>'+esc(viewing.po_number||'Purchase Order')+'</title><style>@page{size:letter;margin:0.45in}body{margin:0}td{border:1px solid #aaa;padding:6px;vertical-align:top}table{page-break-inside:auto}tr{break-inside:avoid}</style></head><body>'+docHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
     const draw=()=>{const qtext=q('upoSearch').value.trim().toLowerCase(),list=q('upoList');list.replaceChildren();const shown=orders.filter(x=>!qtext||[x.po_number,x.vendor,x.customer,x.work_order_number,x.work_order,x.description,x.line_items,x.status].some(v=>String(v||'').toLowerCase().includes(qtext)));
       const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${shown.length} of ${orders.length} purchase orders`;list.append(count);

@@ -83,8 +83,14 @@ def customer_payment(id: str, data: Money, request: Request):
 def receive(id: str, data: Receiving, request: Request):
     guard(request); quantity = amt(data.quantity)
     if quantity <= 0: raise HTTPException(400, 'Quantity must be positive')
-    with lock:
+    from app.services.doorks_po_lock import po_write_lock
+    with po_write_lock(request, 'doorks'), lock:
         path = ws.location(request,'doorks','purchase_orders'); rows = ws.load(path); row = get(rows,id)
+        # Rev95: The older PO field and newer append-only journal are separate
+        # representations. Never let this legacy endpoint ignore journal receipts.
+        from app.routers import pds_purchase_orders as po_store
+        if any(str(e.get('po_id')) == id for e in po_store._receive_events(request, 'doorks')):
+            raise HTTPException(409, 'This PO has journal receipts; use journal receiving and review the legacy balance')
         ordered = amt(row.get('quantity',0)); received = amt(row.get('received_quantity',0))
         if ordered <= 0 or received + quantity > ordered: raise HTTPException(409, 'Quantity exceeds remaining order')
         record = event(request,'purchase_order',id,'goods_received',quantity,data.reference)
@@ -99,7 +105,8 @@ def bills(request: Request):
 def bill(id: str, data: SupplierBill, request: Request):
     guard(request); amount = amt(data.amount)
     if not data.bill_number.strip(): raise HTTPException(400,'Bill number required')
-    with lock:
+    from app.services.doorks_supplier_bill_lock import supplier_bill_lock
+    with supplier_bill_lock(request):
         po = get(ws.load(ws.location(request,'doorks','purchase_orders')),id)
         path = ac.base(request)/'supplier_bills.json'; rows = ac.read(path)
         existing = next((r for r in rows if r.get('source_po_id') == id and r.get('bill_number') == data.bill_number.strip()),None)
@@ -108,16 +115,92 @@ def bill(id: str, data: SupplierBill, request: Request):
         rows.append(record); ac.write(path,rows); event(request,'purchase_order',id,'supplier_bill_created',amount,data.bill_number)
         return dict(item=record,already_exists=False)
 
+def _supplier_payment_events(events, bill_id):
+    return [e for e in events if e.get('kind') == 'supplier_bill' and
+            str(e.get('source_id', '')) == str(bill_id) and e.get('action') == 'payment_sent']
+
+
+def _append_payment_mirror(request, entry, events, history_path):
+    """Mirror an already-committed bill entry; never re-post its balance."""
+    if any(str(e.get('id', '')) == entry['id'] for e in events):
+        return next(e for e in events if str(e.get('id', '')) == entry['id'])
+    mirror = dict(id=entry['id'], kind='supplier_bill', source_id=entry['bill_id'],
+                  action='payment_sent', amount=entry['amount'], reference=entry['reference'],
+                  actor=entry['actor'], created_at=entry['created_at'])
+    events.append(mirror)
+    ac.write(history_path, events)
+    return mirror
+
+
 @router.post('/supplier-bills/{id}/payments')
 def supplier_payment(id: str, data: Money, request: Request):
-    guard(request); amount = amt(data.amount)
-    if amount <= 0: raise HTTPException(400,'Payment must be positive')
-    with lock:
-        path = ac.base(request)/'supplier_bills.json'; rows = ac.read(path); row = get(rows,id)
-        if amount > round(amt(row.get('amount',0))-amt(row.get('paid',0)),2): raise HTTPException(409,'Payment exceeds balance')
-        record = event(request,'supplier_bill',id,'payment_sent',amount,data.reference)
-        row['paid'] = round(amt(row.get('paid',0))+amount,2); row['status'] = 'Paid' if row['paid'] >= amt(row.get('amount',0)) else 'Partially Paid'; row['updated_at'] = stamp()
-        ac.write(path,rows); return dict(item=row,event=record)
+    """Record a *manual* payment with an in-bill durable receipt and recoverable event.
+
+    This never sends funds. Reference is the idempotency key within one bill.
+    An inconsistent historical ledger blocks new payments until reviewed.
+    """
+    guard(request)
+    amount = amt(data.amount)
+    reference = data.reference.strip()
+    if amount <= 0: raise HTTPException(400, 'Payment must be positive')
+    if not reference or len(reference) > 120:
+        raise HTTPException(400, 'Unique payment reference is required')
+    from app.services.doorks_supplier_bill_lock import supplier_bill_lock
+    with supplier_bill_lock(request):
+        folder = ac.base(request)
+        path = folder / 'supplier_bills.json'
+        history_path = folder / 'workflow_events.json'
+        rows = ac.read(path)
+        row = get(rows, id)
+        events = ac.read(history_path)
+        matching = _supplier_payment_events(events, id)
+        entries = row.get('moses_payment_entries', [])
+        if not isinstance(entries, list):
+            raise HTTPException(409, 'Invalid payment journal; review required')
+        # Existing, committed entries are authoritative if their balance is intact.
+        embedded_sum = Decimal('0')
+        for item in entries:
+            if not isinstance(item, dict):
+                raise HTTPException(409, 'Invalid payment journal; review required')
+            embedded_sum += Decimal(str(amt(item.get('amount', -1))))
+        event_sum = sum((Decimal(str(amt(e.get('amount', -1)))) for e in matching), Decimal('0'))
+        paid = Decimal(str(amt(row.get('paid', 0))))
+        if paid != event_sum + sum((Decimal(str(amt(e.get('amount', 0)))) for e in entries
+                                     if not any(str(x.get('id', '')) == str(e.get('id', '')) for x in matching)), Decimal('0')):
+            raise HTTPException(409, 'Supplier payment history does not match bill balance; manual review required')
+        refs = [str(e.get('reference', '')).strip().casefold() for e in matching]
+        refs.extend(str(e.get('reference', '')).strip().casefold() for e in entries
+                    if not any(str(x.get('id', '')) == str(e.get('id', '')) for x in matching))
+        if any(not r for r in refs) or len(refs) != len(set(refs)):
+            raise HTTPException(409, 'Ambiguous existing payment references; manual review required')
+        key = reference.casefold()
+        previous = next((e for e in entries if str(e.get('reference', '')).strip().casefold() == key), None)
+        if previous:
+            if amt(previous['amount']) != amount:
+                raise HTTPException(409, 'Reference already used for a different amount')
+            # A crash after the bill's atomic write can be healed without a second payment.
+            mirror = _append_payment_mirror(request, previous, events, history_path)
+            return dict(item=row, event=mirror, already_exists=True)
+        if key in refs:
+            raise HTTPException(409, 'Payment reference already recorded; no duplicate posting')
+        if any(not any(str(x.get('id', '')) == str(e.get('id', '')) for x in matching) for e in entries):
+            raise HTTPException(409, 'Unmirrored payment exists; retry its reference or review before posting a new payment')
+        total = Decimal(str(amt(row.get('amount', 0))))
+        if paid + Decimal(str(amount)) > total:
+            raise HTTPException(409, 'Payment exceeds balance')
+        user = getattr(request.state, 'auth_user', None)
+        actor = str(user.get('name') or user.get('username') or 'Admin') if isinstance(user, dict) else 'Admin'
+        entry = dict(id=uuid.uuid4().hex, bill_id=id, amount=amount, reference=reference,
+                     actor=actor, created_at=stamp())
+        row['moses_payment_entries'] = [*entries, entry]
+        row['paid'] = float(paid + Decimal(str(amount)))
+        row['status'] = 'Paid' if Decimal(str(row['paid'])) >= total else 'Partially Paid'
+        row['updated_at'] = stamp()
+        # This is the authoritative commit: bill balance and payment ID together.
+        ac.write(path, rows)
+        # The secondary event can be safely rebuilt on an identical retry.
+        mirror = _append_payment_mirror(request, entry, events, history_path)
+        return dict(item=row, event=mirror, already_exists=False)
 
 @router.get('/reconciliation')
 def reconciliation(request: Request):

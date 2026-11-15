@@ -24,6 +24,7 @@ class CustomerCreate(BaseModel):
     zip_code: str = ""
     phone_number: str = ""
     email: str = ""
+    invoice_email: str = ""
     notes: str = ""
 
 

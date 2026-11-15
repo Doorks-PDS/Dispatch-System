@@ -51,13 +51,15 @@ def test_shared_module_does_not_issue_documents_for_portals():
     assert 'issueDocument' not in body
 
 def test_moses_voice_requires_explicit_microphone_action_and_manual_send():
-    """Static UI contract; actual microphone support still needs browser testing."""
-    assert "micButton.onclick=()=>{" in APP
-    assert "r.start();listening=true" in APP
-    assert "Review and press Send to Moses." in APP
-    assert "stopSpeaking();stopListening();panel.hidden=true" in APP
+    """Current working voice UI is preserved while the chat gains history."""
+    assert "micButton.onclick=()=>" in APP
+    assert "r.start();listening=true;micButton.textContent='■ Stop listening'" in APP
+    assert 'Review and press Send to Moses.' in APP
+    assert "send.onclick=async()=>" in APP
+    assert "close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true}" in APP
     assert "document.addEventListener('visibilitychange'" in APP
-    assert "say(r.answer||'No response')" in APP
+    assert 'say(r.answer' in APP
+
 
 
 def test_moses_router_is_registered_once_in_application():

@@ -21,9 +21,10 @@ def _guard(request: Request):
     if request.session.get('active_platform', 'pds') not in ('pds', None):
         raise HTTPException(403, 'Switch to PDS workspace')
 
-def _paths(request: Request):
+def _paths(request: Request, *, create=True):
     folder = Path(request.app.state.data_dir) / 'pds_purchase_orders'
-    folder.mkdir(parents=True, exist_ok=True)
+    if create:
+        folder.mkdir(parents=True, exist_ok=True)
     return folder / 'records.json', folder / 'sequence.json'
 
 def _read(path: Path, default):
@@ -61,7 +62,8 @@ def list_orders(request: Request):
 @router.post('')
 def create_order(payload: POInput, request: Request):
     _guard(request)
-    with _lock:
+    from app.services.doorks_po_lock import po_write_lock
+    with po_write_lock(request, 'pds'), _lock:
         records, sequence = _paths(request)
         items = _read(records, [])
         sid=str(payload.data.get("supplier_id") or "").strip()
@@ -83,7 +85,8 @@ def create_order(payload: POInput, request: Request):
 @router.patch('/{record_id}')
 def update_order(record_id: str, payload: POInput, request: Request):
     _guard(request)
-    with _lock:
+    from app.services.doorks_po_lock import po_write_lock
+    with po_write_lock(request, 'pds'), _lock:
         records, _ = _paths(request)
         items = _read(records, [])
         sid=str(payload.data.get("supplier_id") or "").strip()
@@ -195,7 +198,7 @@ class ReceiveInput(BaseModel):
 def _receive_context(request, platform):
     if platform == "pds":
         _guard(request)
-        orders_path, _ = _paths(request)
+        orders_path, _ = _paths(request, create=False)
         return orders_path
     if platform not in ("doorks", "sdc"):
         raise HTTPException(404, "Unknown workspace")
@@ -207,9 +210,10 @@ def _receive_context(request, platform):
         raise HTTPException(403, "Switch workspace first")
     return Path(request.app.state.data_dir)/"business_workspaces"/platform/"purchase_orders.json"
 
-def _receive_journal(request, platform):
+def _receive_journal(request, platform, *, create=False):
     path = Path(request.app.state.data_dir)/"po_receiving"/platform
-    path.mkdir(parents=True, exist_ok=True)
+    if create:
+        path.mkdir(parents=True, exist_ok=True)
     return path/"events.json"
 
 def _receive_events(request, platform):
@@ -263,7 +267,8 @@ def receive_po(platform:str,po_id:str,payload:ReceiveInput,request:Request):
         if len(value)>500:raise HTTPException(400,"Field too long")
     if not payload.request_id.strip():
         raise HTTPException(400,"Request ID required to prevent duplicate receipts")
-    with _lock:
+    from app.services.doorks_po_lock import po_write_lock
+    with po_write_lock(request, platform), _lock:
         orders=_read(orders_path,[])
         po=next((x for x in orders if str(x.get("id"))==po_id),None)
         if not po:raise HTTPException(404,"Purchase order not found")
@@ -271,10 +276,23 @@ def receive_po(platform:str,po_id:str,payload:ReceiveInput,request:Request):
             raise HTTPException(409,"Cannot receive cancelled PO")
         ordered=_receive_qty(po)
         events=_receive_events(request,platform)
+        # Rev95: Doorks' legacy receiving endpoint writes received_quantity
+        # instead of journal events. Do not silently ignore those receipts.
+        # Existing request-ID retries are resolved first, but no fresh receipt
+        # can be posted until any legacy balance is manually reconciled.
         existing=next((x for x in events if x.get("request_id")==payload.request_id),None)
         if existing:
             if existing["po_id"]!=po_id:raise HTTPException(409,"Request ID already used")
             return {"event":existing,"duplicate":True}
+        if platform == 'doorks':
+            try:
+                legacy = float(po.get('received_quantity') or 0)
+            except (TypeError, ValueError):
+                raise HTTPException(409, 'Legacy PO received quantity invalid; review required')
+            if not isfinite(legacy) or legacy < 0:
+                raise HTTPException(409, 'Legacy PO received quantity invalid; review required')
+            if legacy > 0:
+                raise HTTPException(409, 'Legacy PO receipts exist; reconcile before journal receiving')
         received=sum(float(x["quantity"]) for x in events if x["po_id"]==po_id)
         if received+payload.quantity>ordered+0.000001:
             raise HTTPException(409,f"Receipt exceeds outstanding quantity ({max(0,ordered-received):g})")
@@ -287,7 +305,7 @@ def receive_po(platform:str,po_id:str,payload:ReceiveInput,request:Request):
                "created_at":datetime.now(timezone.utc).isoformat(),
                "created_by":str(getattr(request.state,"auth_user",""))[:200]}
         events.append(event)
-        _write(_receive_journal(request,platform),events)
+        _write(_receive_journal(request,platform,create=True),events)
         return {"event":event,"received":round(received+payload.quantity,4),
                 "outstanding":max(0,round(ordered-received-payload.quantity,4))}
 

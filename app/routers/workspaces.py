@@ -59,7 +59,10 @@ def listing(platform:str,kind:str,request:Request):
 def create(platform:str,kind:str,payload:Record,request:Request):
     guard(request,platform,kind)
     if platform=='doorks' and kind=='payroll':raise HTTPException(409,'Use calculated Doorks timecard endpoint')
-    with _lock:
+    from app.services.doorks_po_lock import po_write_lock
+    from contextlib import nullcontext
+    po_guard = po_write_lock(request, platform) if kind == 'purchase_orders' else nullcontext()
+    with po_guard, _lock:
         path=location(request,platform,kind);items=load(path)
         data=clean(payload.data)
         for k in ("authorization_status","authorized_by","authorized_at","unauthorized_by","unauthorized_at"):data.pop(k,None)
@@ -197,6 +200,8 @@ def convert_estimate_to_invoice(platform:str,record_id:str,request:Request):
             raise HTTPException(404,"Estimate not found")
         if str(source.get("status","")).casefold()!="approved":
             raise HTTPException(409,"Approve the estimate before converting it")
+        if source.get("source_moses_proposal_id") and (source.get("requires_number_assignment") or source.get("pricing_required") or not re.fullmatch(r"RE\d{5,}", str(source.get("document_number") or ""))):
+            raise HTTPException(409,"AI-prepared estimate requires verified pricing and an official estimate number")
         existing=next((x for x in items if x.get("document_type","").casefold()=="invoice" and x.get("source_estimate_id")==record_id),None)
         if existing:return {"item":existing,"already_exists":True}
         # Use existing invoice numbers when deriving next sequence; never reuse a deleted
@@ -220,11 +225,65 @@ def convert_estimate_to_invoice(platform:str,record_id:str,request:Request):
         save(path,items)
     return {"item":invoice,"already_exists":False}
 
+
+@router.post("/doorks/estimates/{record_id}/finalize-draft")
+def finalize_ai_estimate(record_id:str,payload:dict,request:Request):
+    """Number a reviewed Moses draft; never approve, issue, or send it.
+
+    Numbering is reserved in a separate monotonic file using existing RE numbers
+    as the floor. No external delivery or invoice creation occurs here.
+    """
+    guard(request,"doorks","estimates_invoices")
+    if payload.get("confirm_pricing") is not True:
+        raise HTTPException(422,"Confirm reviewed estimate pricing before finalizing")
+    with _lock:
+        path=location(request,"doorks","estimates_invoices")
+        items=load(path)
+        item=next((x for x in items if x.get("id")==record_id),None)
+        if item is None or str(item.get("document_type","")).casefold()!="estimate" or not item.get("source_moses_proposal_id"):
+            raise HTTPException(404,"Moses estimate draft not found")
+        if not item.get("requires_number_assignment") and re.fullmatch(r"RE\d{5,}",str(item.get("document_number") or "")):
+            return {"item":item,"already_numbered":True}
+        if str(item.get("status","")).casefold()!="draft":
+            raise HTTPException(409,"Only draft estimates can be finalized")
+        if not str(item.get("description") or "").strip():
+            raise HTTPException(409,"Review the estimate scope first")
+        from decimal import Decimal, InvalidOperation
+        amount=item.get("total",item.get("amount",None))
+        try:
+            value=Decimal(str(amount))
+            if not value.is_finite() or value<=0:raise ValueError()
+        except (InvalidOperation,ValueError,TypeError):
+            raise HTTPException(409,"Enter a valid positive estimate total before finalization")
+        seq=path.parent/"estimate_sequence.json"
+        try:
+            last=int(json.loads(seq.read_text(encoding="utf-8")).get("last",0)) if seq.exists() else 0
+        except (ValueError,TypeError,KeyError,json.JSONDecodeError):
+            raise HTTPException(500,"Invalid estimate sequence file; review before proceeding")
+        last=max(last,75)  # Known legacy Doorks estimate range RE00001 through RE00075.
+        for row in items:
+            match=re.fullmatch(r"RE(\d{5,})",str(row.get("document_number") or ""))
+            if match:last=max(last,int(match.group(1)))
+        number=f"RE{last+1:05d}"
+        temp=seq.with_suffix(".tmp")
+        with temp.open("w",encoding="utf-8") as f:
+            json.dump({"last":last+1},f);f.flush();os.fsync(f.fileno())
+        os.replace(temp,seq)
+        item.update(document_number=number,status="Ready",pricing_required=False,
+                    requires_number_assignment=False,pricing_reviewed_at=datetime.now(timezone.utc).isoformat(),
+                    pricing_reviewed_by=str(getattr(request.state,"auth_user",{}).get("id") or "office_admin"),
+                    updated_at=datetime.now(timezone.utc).isoformat())
+        save(path,items)
+        return {"item":item,"already_numbered":False,"sent":False,"approved":False}
+
 @router.patch("/{platform}/{kind}/{record_id}")
 def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
     guard(request,platform,kind)
     if platform=='doorks' and kind=='payroll':raise HTTPException(409,'Calculated timecards are immutable; approval has a separate endpoint')
-    with _lock:
+    from app.services.doorks_po_lock import po_write_lock
+    from contextlib import nullcontext
+    po_guard = po_write_lock(request, platform) if kind == 'purchase_orders' else nullcontext()
+    with po_guard, _lock:
         path=location(request,platform,kind);items=load(path)
         for item in items:
             if item.get("id")==record_id:
@@ -262,6 +321,16 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
                         try:request.app.state.users_store.set_active(linked,False)
                         except ValueError as exc:raise HTTPException(409,str(exc))
                         item['access_active']=False
+                if platform=="doorks" and kind=="estimates_invoices" and item.get("source_moses_proposal_id") and str(item.get("document_type", "")).casefold()=="estimate":
+                    # AI-prepared quotes cannot self-issue, self-number, or erase the review flags
+                    # through the generic editor's PATCH endpoint.
+                    for protected in ("document_number", "requires_number_assignment", "pricing_required", "source_moses_proposal_id", "source_work_order_id", "document_type", "source_estimate_id"):
+                        data.pop(protected, None)
+                    next_status=str(data.get("status", item.get("status", "Draft"))).casefold()
+                    if next_status not in ("draft", "ready"):
+                        raise HTTPException(409,"Use the reviewed estimate workflow before approval or issuance")
+                    if next_status=="ready" and (item.get("requires_number_assignment") or item.get("pricing_required")):
+                        raise HTTPException(409,"Finalize pricing and assign the estimate number first")
                 if kind=="purchase_orders":data.pop("po_number",None)
                 if kind in ("work_orders","orders"):
                     data.pop("source_estimate_id",None)
@@ -320,7 +389,10 @@ def delete(platform:str,kind:str,record_id:str,request:Request):
     guard(request,platform,kind)
     if platform=='doorks' and kind in ('payroll','employees'):
         raise HTTPException(409,'Retain employee and payroll history; deactivate employee access instead')
-    with _lock:
+    from app.services.doorks_po_lock import po_write_lock
+    from contextlib import nullcontext
+    po_guard = po_write_lock(request, platform) if kind == 'purchase_orders' else nullcontext()
+    with po_guard, _lock:
         path=location(request,platform,kind);items=load(path)
         if kind in ("customers","vendors"):
             target=next((x for x in items if x.get("id")==record_id),None)
