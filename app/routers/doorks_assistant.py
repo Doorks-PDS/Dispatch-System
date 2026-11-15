@@ -739,18 +739,26 @@ def chat(payload:Message,request:Request):
         # every filler word to occur in the job record. Confirm the relevant
         # saved job first, then open the editor for a human-priced draft.
         quote_request = ('estimate' in query or 'quote' in query) and any(
-            word in query for word in ('create', 'draft', 'prepare', 'make'))
+            word in query for word in ('create', 'draft', 'prepare', 'make', 'provide', 'generate', 'write', 'need', 'needs', 'needed', 'help'))
         customer_terms = []
         if quote_request:
-            named = re.search(r'\b(?:for|recent|latest)\s+(?:the\s+)?([a-z][a-z\s&.-]{2,55}?)\s+(?:job|work order|ticket)\b', query)
+            named = re.search(r'\b(?:for|previous|recent|latest)\s+(?:the\s+)?(?:previous\s+|most recent\s+|latest\s+|last\s+)?([a-z][a-z\s&.-]{2,55}?)\s+(?:job|work order|ticket)\b', query)
             if named:
                 customer_terms = [x for x in re.findall(r'[a-z0-9]+', named.group(1))
-                                  if x not in ('most','recent','latest','the','last')]
+                                  if x not in ('most','recent','latest','the','last','previous','prior')]
             if not customer_terms:
                 customer_terms = [x for x in tokens if x not in (
-                    'can','you','create','draft','prepare','make','estimate','quote',
-                    'from','most','recent','latest','that','needs','need','quoting',
-                    'company','please','for','job','work','order','the')]
+                    'can','you','create','draft','prepare','make','provide','generate','write',
+                    'estimate','quote','help','with','an','a','from','previous','prior',
+                    'most','recent','latest','last','that','needs','need','needed',
+                    'quoted','quoting','company','please','for','job','work','order',
+                    'the','to','be','of','me','on','and')]
+        if quote_request and not customer_terms:
+            return {'answer': ('I can help prepare an estimate from an existing PDS job. '
+                              'Tell me the customer or job number so I can locate the correct record. '
+                              'No estimate has been created.'),
+                    'matches': [], 'navigation': [{'label': 'Open Estimates',
+                    'target': 'estimates'}], 'workspace': platform}
         # PDS dispatch uses CalendarStore on the existing Render persistent disk,
         # not the separate business_workspaces JSON directory.
         try:
