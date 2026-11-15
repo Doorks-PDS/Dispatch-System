@@ -19,6 +19,13 @@ def allowed(request):
     if platform not in ('doorks','pds','sdc'):raise HTTPException(403,'Select a workspace')
     return platform
 
+@router.get('/briefing')
+def moses_business_briefing(request: Request):
+    """Current business priorities from verified records, without AI inference."""
+    from app.services.moses_briefing import brief
+    return brief(request)
+
+
 @router.get('/agent-readiness')
 def agent_readiness(request: Request):
     """Read-only active-workspace readiness; never return credentials or customer data."""
@@ -27,6 +34,60 @@ def agent_readiness(request: Request):
         raise HTTPException(403, 'Workspace office-admin access required')
     from app.services.moses_agent import readiness
     return readiness(request.session['active_platform'])
+
+@router.get('/agent-live-check')
+def agent_live_check(request: Request):
+    """Explicit authenticated no-record OpenAI connectivity check. No data mutation."""
+    platform = allowed(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Workspace office-admin access required')
+    from app.services.moses_agent import readiness
+    state = readiness(platform)
+    if not state.get('ready_for_live_check'):
+        return {'workspace': platform, 'live_api_verified': False,
+                'ready_for_live_check': False,
+                'reason': 'Enable the workspace agent and configure the SDK, model and API key'}
+    try:
+        # No customer information, history, tool calls, or secret material sent.
+        from openai import OpenAI
+        model = os.getenv('DOORKS_MOSES_MODEL', 'gpt-4.1-mini')
+        client = OpenAI(timeout=12.0, max_retries=0)
+        response = client.responses.create(model=model,
+                                           input='Reply with exactly MOSES_READY',
+                                           max_output_tokens=20, store=False)
+        output = str(getattr(response, 'output_text', '') or '').strip()
+        success = 'MOSES_READY' in output
+        return {'workspace': platform, 'live_api_verified': success,
+                'ready_for_live_check': True,
+                'result': 'reachable' if success else 'unexpected_response',
+                'record_access_verified': False,
+                'action_execution_verified': False}
+    except Exception:
+        return {'workspace': platform, 'live_api_verified': False,
+                'ready_for_live_check': True,
+                'result': 'provider_check_failed',
+                'record_access_verified': False,
+                'action_execution_verified': False}
+
+
+@router.post('/agent-sdk-tool-check')
+def agent_sdk_tool_check(request: Request):
+    """Manually test a synthetic Agents SDK tool call; never touch records."""
+    platform = allowed(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Workspace office-admin access required')
+    if request.headers.get('x-moses-validation') != 'synthetic-tool-check':
+        raise HTTPException(400, 'Explicit synthetic validation header required')
+    from app.services.moses_sdk_probe import check
+    return check(platform)
+
+
+@router.get('/permissions')
+def moses_permissions(request: Request):
+    """Authorized office admin view of configured, approval-gated Moses abilities."""
+    from app.services.moses_permissions import report
+    return report(request)
+
 
 @router.get('/storage-readiness')
 def storage_readiness(request: Request):
@@ -293,6 +354,146 @@ def _pds_verified_job_details(request, record_id):
     return {'job': details, 'verified': True, 'read_only': True}
 
 
+def _pds_quote_context(request, record_id):
+    """Quote-specific, admin-only PDS read. No raw forms or private office notes."""
+    if (not getattr(request.state, 'auth_user', None)
+            or getattr(request.state, 'auth_role', None) != 'office_admin'
+            or request.session.get('active_platform') != 'pds'):
+        raise HTTPException(403, 'PDS office-admin access required')
+    verified = _pds_verified_job_details(request, record_id)
+    if not verified.get('verified'):
+        return {'verified': False, 'read_only': True, 'error': verified.get('error', 'Job unavailable')}
+    try:
+        source = request.app.state.calendar_store.get_job(record_id)
+    except (KeyError, AttributeError, OSError, ValueError, TypeError):
+        source = None
+    if not isinstance(source, dict) or str(source.get('id') or '') != record_id:
+        return {'verified': False, 'read_only': True, 'error': 'Job unavailable'}
+    lines = []
+    for key, label in [('description', 'Job description'),
+                       ('work_performed', 'Work performed'),
+                       ('additional_recommendations', 'Recommendations')]:
+        value = source.get(key)
+        if isinstance(value, str) and value.strip():
+            lines.append(label + ': ' + ' '.join(value.split())[:600])
+    forms = source.get('completion_forms')
+    count = len(forms) if isinstance(forms, list) else 0
+    if isinstance(forms, list):
+        for index, form in enumerate(forms[-3:], 1):
+            if not isinstance(form, dict):
+                continue
+            for key, label in [('tech_notes', 'Technician notes'),
+                               ('parts_used', 'Parts used'),
+                               ('additional_recommendations', 'Recommendations'),
+                               ('parts_required', 'Parts required')]:
+                value = form.get(key)
+                if isinstance(value, str) and value.strip():
+                    lines.append(f'Completion form {index} {label}: '
+                                 + ' '.join(value.split())[:650])
+    record = verified['job']
+    return {'verified': True, 'read_only': True, 'draft_created': False,
+            'id': record_id, 'customer': record.get('customer', ''),
+            'job_number': record.get('job_number', ''),
+            'status': record.get('status', ''),
+            'completion_form_count': count, 'scope': lines[:12],
+            'next_step': 'Confirm the correct job and price in the existing Estimate/Invoice editor'}
+
+
+def _pds_work_queue(request):
+    """Read-only PDS dispatch priorities. Never alter job status or prices."""
+    if (not getattr(request.state, 'auth_user', None)
+            or getattr(request.state, 'auth_role', None) != 'office_admin'
+            or request.session.get('active_platform') != 'pds'):
+        raise HTTPException(403, 'PDS office-admin access required')
+    try:
+        jobs = request.app.state.calendar_store.list_jobs()
+    except (AttributeError, OSError, ValueError, TypeError):
+        jobs = None
+    if not isinstance(jobs, list):
+        return {'error': 'PDS job records unavailable', 'read_only': True}
+    categories = {
+        'needs_quote': {'to be quoted', 'quote', 'complete/quote'},
+        'quote_sent': {'quote sent'},
+        'approved': {'approved'},
+        'needs_invoice': {'to be invoiced'},
+        'in_progress': {'in progress'},
+        'scheduled': {'scheduled'},
+        'parts_on_order': {'parts on order'},
+    }
+    result = {'workspace':'pds', 'read_only':True,
+              'total_saved_jobs': len([j for j in jobs if isinstance(j, dict)]),
+              'queues': {}}
+    for group, statuses in categories.items():
+        matching = [j for j in jobs if isinstance(j, dict) and
+                    str(j.get('status') or '').strip().casefold() in statuses]
+        result['queues'][group] = {
+            'count': len(matching),
+            'examples': [{k: str(j[k])[:140] for k in
+                          ('id', 'job_number', 'customer', 'status', 'date')
+                          if isinstance(j.get(k), (str, int, float))}
+                         for j in matching[:5]],
+        }
+    return result
+
+
+def _pds_estimate_preview(request, record_id):
+    """Prepare a document-editor-compatible, unpriced estimate preview.
+
+    The description comes from the SAME deterministic PDS document generator
+    used by the existing editor. This read-only tool does not issue, assign a
+    number, mutate a job, save a PDF, or send a customer document.
+    """
+    context = _pds_quote_context(request, record_id)
+    if not context.get('verified'):
+        return {'verified': False, 'read_only': True, 'error': context.get('error', 'Job not available')}
+    try:
+        job = request.app.state.calendar_store.get_job(record_id)
+    except (AttributeError, KeyError, OSError, TypeError, ValueError):
+        job = None
+    if not isinstance(job, dict) or str(job.get('id') or '') != record_id:
+        return {'verified': False, 'read_only': True, 'error': 'Job not available'}
+    # The preview must not pick unrelated completion forms for another job.
+    # Preserve only the fields explicitly used by the PDS description builder.
+    permitted_form_fields = ('ready_to_quote', 'status_update', 'tech_notes',
+        'recommendations', 'additional_recommendations', 'parts_required',
+        'parts_used', 'time_required', 'door_location', 'door_type')
+    forms = []
+    raw_forms = job.get('completion_forms')
+    if isinstance(raw_forms, list):
+        for form in raw_forms[-10:]:
+            if not isinstance(form, dict):
+                continue
+            clean = {}
+            for field in permitted_form_fields:
+                value = form.get(field)
+                if isinstance(value, str) and value.strip():
+                    clean[field] = ' '.join(value.split())[:800]
+                elif field == 'ready_to_quote' and isinstance(value, bool):
+                    clean[field] = value
+            if clean:
+                forms.append(clean)
+    # Use the existing PDS builder's guidance against quoting work already done.
+    from app.routers.documents import generate_description_from_data
+    description = generate_description_from_data({
+        'doc_type': 'estimate', 'customer': context.get('customer', ''),
+        'job_number': context.get('job_number', ''),
+        'completion_forms': forms,
+        'recommendation_forms': [form for form in forms if
+            form.get('ready_to_quote') or
+            str(form.get('status_update', '')).strip().casefold() == 'quote'],
+    })
+    return {
+        'verified': True, 'read_only': True, 'draft_saved': False,
+        'official_number_assigned': False, 'email_sent': False,
+        'job_id': record_id, 'customer': context.get('customer', ''),
+        'job_number': context.get('job_number', ''), 'status': context.get('status', ''),
+        'description_preview': description[:2600],
+        'technician_scope': context.get('scope', [])[:12],
+        'pricing': 'Review trip, labor, parts, tax, and customer pricing in PDS editor',
+        'next_step': 'Open the matching PDS job and review the existing Estimate/Invoice editor before issuing',
+    }
+
+
 def _execute_pds_tool(request, name, arguments=None):
     """PDS-only, read-only CalendarStore adapter. Never access business workspace JSON."""
     if not getattr(request.state, 'auth_user', None):
@@ -315,6 +516,18 @@ def _execute_pds_tool(request, name, arguments=None):
             request.state.moses_action_proposals = []
         request.state.moses_action_proposals.append(safe)
         return {'proposal': safe, 'approval_required': True, 'executed': False}
+    if name == 'get_pds_estimate_preview':
+        if not isinstance(arguments, dict) or set(arguments) != {'record_id'}:
+            return {'error': 'Exact job ID required', 'read_only': True}
+        return _pds_estimate_preview(request, arguments['record_id'])
+    if name == 'get_pds_work_queue':
+        if arguments not in (None, {}):
+            return {'error': 'Invalid work queue arguments', 'read_only': True}
+        return _pds_work_queue(request)
+    if name == 'get_pds_estimate_context':
+        if not isinstance(arguments, dict) or set(arguments) != {'record_id'}:
+            return {'error': 'Invalid quote context arguments', 'read_only': True}
+        return _pds_quote_context(request, arguments['record_id'])
     if name == 'get_pds_job_details':
         if not isinstance(arguments, dict) or set(arguments) != {'record_id'}:
             return {'error': 'Invalid job detail arguments', 'read_only': True}
@@ -332,13 +545,30 @@ def _execute_pds_tool(request, name, arguments=None):
         return {'error': 'PDS job records are unavailable', 'read_only': True}
     if not isinstance(rows, list):
         return {'error': 'PDS job records are unavailable', 'read_only': True}
+    import re
     needle = query.strip().casefold()
     search_keys = ('job_number', 'customer', 'customer_name', 'address', 'status',
                    'contact', 'estimate_number', 'invoice_number', 'po_number')
     display_keys = ('id', 'job_number', 'customer', 'customer_name', 'address',
                     'status', 'date', 'estimate_number', 'invoice_number', 'po_number')
-    matches = [job for job in rows if isinstance(job, dict) and any(
-        needle in str(job.get(key) or '').casefold() for key in search_keys)]
+    # Prefer exact/partial field search. Otherwise strip conversational filler
+    # while preserving customer and job numbers; never match every job from filler.
+    stop = {'can', 'you', 'please', 'could', 'would', 'i', 'we', 'me', 'the', 'a', 'an',
+            'for', 'from', 'on', 'about', 'show', 'find', 'get', 'previous', 'prior',
+            'recent', 'latest', 'last', 'job', 'jobs', 'work', 'order', 'ticket',
+            'estimate', 'estimates', 'quote', 'quoted', 'quoting', 'needs', 'need',
+            'to', 'be', 'that', 'which', 'provide', 'prepare', 'draft', 'create'}
+    terms = [term for term in re.findall(r'[a-z0-9#-]+', needle) if term not in stop]
+    def is_match(job):
+        hay = [str(job.get(key) or '').casefold() for key in search_keys]
+        return any(needle in field for field in hay) or (
+            bool(terms) and all(any(term in field for field in hay) for term in terms))
+    matches = [job for job in rows if isinstance(job, dict) and is_match(job)]
+    if any(word in needle for word in ('quote', 'quoting', 'quoted', 'estimate')):
+        priority = {'to be quoted', 'quote', 'complete/quote'}
+        matches.sort(key=lambda job: (
+            str(job.get('status') or '').strip().casefold() in priority,
+            str(job.get('date') or ''), str(job.get('job_number') or '')), reverse=True)
     return {'matching_count': len(matches), 'examples_limited_to': 8,
             'examples': [{key: str(job[key])[:160] for key in display_keys
                           if isinstance(job.get(key), (str, int, float))}
@@ -718,6 +948,27 @@ def chat(payload:Message,request:Request):
     can_search=role=='office_admin'
     matches=[]
     query=text.lower()
+    # Office-admin requests for a daily briefing are deterministic and should
+    # not require a live model. Never blend PDS/Doorks/SDC records together.
+    import re as _brief_re
+    daily_brief_intent = bool(_brief_re.search(
+        r'\b(?:daily briefing|morning briefing|business briefing|what needs my attention|'
+        r'what should i (?:do|focus on|prioriti[sz]e)|what is (?:urgent|pending)|'
+        r'what(?: is|\x27s) on my plate|give me (?:a |my )?(?:overview|briefing|priorities)|'
+        r'today(?:\x27s)? priorities)\b', query))
+    if can_search and daily_brief_intent:
+        from app.services.moses_briefing import brief, summary
+        from fastapi import HTTPException as _BriefHTTPException
+        try:
+            report = brief(request)
+        except _BriefHTTPException as exc:
+            return {'answer': ('I cannot verify a current briefing from the saved '
+                               'records in this workspace. No records were changed.'),
+                    'workspace': platform, 'matches': [], 'navigation': [],
+                    'read_only': True, 'briefing_available': False}
+        return {'answer': summary(report), 'workspace': platform,
+                'matches': [], 'navigation': [], 'read_only': True,
+                'briefing_available': True, 'briefing': report}
     # Follow-up context is conversational only, not authority to change records.
     # Resolve short references such as 'what about those expenses?' for read-only queries.
     if platform == 'sdc' and len(query.split()) <= 7 and not any(
@@ -734,70 +985,154 @@ def chat(payload:Message,request:Request):
     import re
     stop={'find','show','me','the','all','for','about','please','jobs','job','work','orders','order','ticket','tickets','open','pull','up','scheduled','what','which','are','is','do','we','have','customer','customers','on','in','at','to','my','get','records','record','of','a','an','and'}
     tokens=[word for word in re.findall(r"[a-z0-9#-]+",query) if word not in stop]
-    if can_search and platform=='pds':
-        # A conversational quote request must never be matched by requiring
-        # every filler word to occur in the job record. Confirm the relevant
-        # saved job first, then open the editor for a human-priced draft.
-        quote_request = ('estimate' in query or 'quote' in query) and any(
-            word in query for word in ('create', 'draft', 'prepare', 'make', 'provide', 'generate', 'write', 'need', 'needs', 'needed', 'help'))
-        customer_terms = []
+    if can_search and platform == 'pds':
+        # Estimate/quote requests MUST reach the actual PDS CalendarStore, not
+        # a generic text completion fed only a zero-result keyword search.
+        # Never create, price, issue, or send an estimate from this chat route.
+        wants_quote = bool(re.search(r'\b(estimate|quot(?:e|ed|ing)|pricing|bid)\b', query))
+        wants_work = bool(re.search(r'\b(provide|prepare|create|draft|generate|write|make|help|need|needs|needed|pull|find|previous|prior|last)\b', query))
+        quote_request = wants_quote and wants_work
+        # Direct, verified operational summaries work even before live AI activation.
+        # Never allow a broad queue request to override a specifically named job.
+        queue_phrase = bool(re.search(
+            r'\b(?:what|which|show|list|overview|summary|priorit(?:y|ies)|queue|how many)\b', query))
+        queue_category = None
+        if re.search(r'\b(?:to be quoted|needs? (?:a )?quot(?:e|ing)|awaiting (?:a )?quot(?:e|ing)|quotes? (?:pending|needed))\b', query):
+            queue_category = 'needs_quote'
+        elif re.search(r'\b(?:to be invoiced|needs? (?:an? )?invoic(?:e|ing)|awaiting invoic(?:e|ing))\b', query):
+            queue_category = 'needs_invoice'
+        elif re.search(r'\b(?:parts on order|awaiting parts|ordered parts)\b', query):
+            queue_category = 'parts_on_order'
+        elif re.search(r'\b(?:in progress|currently working)\b', query):
+            queue_category = 'in_progress'
+        elif re.search(r'\b(?:scheduled jobs?|upcoming jobs?)\b', query):
+            queue_category = 'scheduled'
+        elif re.search(r'\b(?:dispatch queue|operational overview|business overview|work queue|job priorities|work priorities)\b', query):
+            queue_category = 'all'
+        if queue_phrase and queue_category and not re.search(r'\b(?:for|at)\s+(?:the\s+)?[a-z0-9 &.-]+\s+(?:company|customer|job|ticket)\b', query):
+            work_queue = _pds_work_queue(request)
+            if work_queue.get('error'):
+                return {'answer': 'The saved PDS work queue is unavailable right now. No records were changed.',
+                        'matches': [], 'navigation': [], 'workspace': platform}
+            names = {'needs_quote': 'Needs quote', 'needs_invoice': 'Needs invoice',
+                     'parts_on_order': 'Parts on order', 'in_progress': 'In progress',
+                     'scheduled': 'Scheduled', 'quote_sent': 'Quote sent', 'approved': 'Approved'}
+            chosen = ([queue_category] if queue_category != 'all' else
+                      ['needs_quote', 'needs_invoice', 'parts_on_order', 'in_progress', 'scheduled', 'quote_sent', 'approved'])
+            lines = ['PDS work queue (saved records):']
+            found = []
+            for group in chosen:
+                entry = work_queue['queues'].get(group, {})
+                lines.append(f"{names[group]}: {entry.get('count', 0)}")
+                for job in entry.get('examples', [])[:5]:
+                    parts = [str(job.get(k) or '').strip() for k in ('job_number', 'customer', 'status')]
+                    lines.append('  • ' + ' | '.join(p for p in parts if p)[:310])
+                    found.append({'type': 'jobs', 'id': job.get('id', ''),
+                                  'name': job.get('customer', ''),
+                                  'job_number': job.get('job_number', ''),
+                                  'status': job.get('status', ''),
+                                  'navigate': 'all_jobs'})
+            lines.append('Read-only. No jobs, estimates, or invoices were changed.')
+            return {'answer': '\n'.join(lines), 'matches': found[:15],
+                    'navigation': [{'label': 'Open All Jobs', 'target': 'all_jobs'}],
+                    'workspace': platform}
+        terms = []
         if quote_request:
-            named = re.search(r'\b(?:for|previous|recent|latest)\s+(?:the\s+)?(?:previous\s+|most recent\s+|latest\s+|last\s+)?([a-z][a-z\s&.-]{2,55}?)\s+(?:job|work order|ticket)\b', query)
+            # Natural requests: "provide estimate for previous Irvine company job
+            # that needs to be quoted" or "quote the Irvine Company job".
+            named = re.search(
+                r'\b(?:for|from|on|about|quote|estimate)\s+(?:the\s+)?'
+                r'(?:(?:previous|prior|recent|latest|last|most recent)\s+)*'
+                r'([a-z][a-z0-9&.\s-]{1,75}?)\s+'
+                r'(?:job|work order|ticket)\b', query)
             if named:
-                customer_terms = [x for x in re.findall(r'[a-z0-9]+', named.group(1))
-                                  if x not in ('most','recent','latest','the','last','previous','prior')]
-            if not customer_terms:
-                customer_terms = [x for x in tokens if x not in (
-                    'can','you','create','draft','prepare','make','provide','generate','write',
-                    'estimate','quote','help','with','an','a','from','previous','prior',
-                    'most','recent','latest','last','that','needs','need','needed',
-                    'quoted','quoting','company','please','for','job','work','order',
-                    'the','to','be','of','me','on','and')]
-        if quote_request and not customer_terms:
-            return {'answer': ('I can help prepare an estimate from an existing PDS job. '
-                              'Tell me the customer or job number so I can locate the correct record. '
-                              'No estimate has been created.'),
-                    'matches': [], 'navigation': [{'label': 'Open Estimates',
-                    'target': 'estimates'}], 'workspace': platform}
-        # PDS dispatch uses CalendarStore on the existing Render persistent disk,
-        # not the separate business_workspaces JSON directory.
+                terms = re.findall(r'[a-z0-9#-]+', named.group(1))
+            else:
+                terms = re.findall(r'[a-z0-9#-]+', query)
+            filler = {'the','a','an','for','from','on','about','can','you','me',
+                      'please','could','would','i','we','want','need','needs','needed',
+                      'help','with','provide','prepare','create','draft','generate',
+                      'write','make','find','pull','estimate','estimates','quote',
+                      'quoted','quoting','pricing','bid','previous','prior',
+                      'recent','latest','last','most','that','to','be','should',
+                      'still','job','work','order','ticket','is','of','and','one'}
+            terms = [t for t in terms if t not in filler]
+            if not terms:
+                return {'answer': ('I can prepare an estimate from a saved PDS job. '
+                                   'Which customer or job number should I look up? '
+                                   'No estimate has been created.'),
+                        'matches': [], 'navigation': [{'label': 'Open Estimates', 'target': 'estimates'}],
+                        'workspace': platform}
         try:
-            jobs=request.app.state.calendar_store.list_jobs()
+            jobs = request.app.state.calendar_store.list_jobs()
+        except (AttributeError, OSError, ValueError, TypeError):
+            jobs = None
+        if not isinstance(jobs, list):
+            if quote_request:
+                return {'answer': ('The PDS job records are currently unavailable. '
+                                   'I cannot verify a job or prepare its estimate without them. '
+                                   'No records were changed.'),
+                        'matches': [], 'navigation': [], 'workspace': platform}
+        else:
             for item in jobs:
-                if not isinstance(item,dict):continue
-                searchable=' '.join(str(item.get(k) or '') for k in ('customer','customer_name','contact','address','job_number','date','status','job_notes','description','estimate_number','invoice_number','po_number')).lower()
-                customer_text=' '.join(str(item.get(k) or '') for k in ('customer','customer_name')).lower()
-                search_ok=(all(t in customer_text for t in customer_terms) if quote_request and customer_terms else
-                           (bool(tokens) and all(t in searchable for t in tokens)))
+                if not isinstance(item, dict):
+                    continue
+                customer = ' '.join(str(item.get(k) or '') for k in ('customer','customer_name')).casefold()
+                searchable = ' '.join(str(item.get(k) or '') for k in (
+                    'customer','customer_name','contact','address','job_number','date',
+                    'status','job_notes','description','estimate_number',
+                    'invoice_number','po_number')).casefold()
+                # Quote lookup uses customer/job-number matching; filler words
+                # are never required to appear in business records.
+                if quote_request:
+                    ident = str(item.get('job_number') or '').casefold()
+                    search_ok = all(t in (customer + ' ' + ident) for t in terms)
+                else:
+                    search_ok = bool(tokens) and all(t in searchable for t in tokens)
                 if search_ok:
-                    matches.append({'type':'jobs','id':str(item.get('id') or ''),
-                        'name':str(item.get('customer') or item.get('customer_name') or item.get('job_number') or '')[:140],
-                        'status':str(item.get('status') or '')[:60],
-                        'job_number':str(item.get('job_number') or '')[:60],
-                        'date':str(item.get('date') or '')[:30],
-                        'address':str(item.get('address') or '')[:200],
-                        'navigate':'all_jobs'})
-                if len(matches)>=15:break
-        except (AttributeError, OSError, ValueError, TypeError):pass
-        if quote_request:
-            quoted=[m for m in matches if 'quot' in m.get('status','').lower()]
-            chosen=quoted or matches
-            chosen=sorted(chosen,key=lambda m:(m.get('date',''),m.get('job_number','')),reverse=True)
-            if chosen:
-                candidate=chosen[0]
-                description='; '.join(' '.join(str(candidate.get(k,'')).split()) for k in
-                                      ('name','job_number','status','date') if candidate.get(k))
-                answer=('I found a saved PDS job to review: '+description+'. '
-                        'I have not created an estimate or changed any records. '
-                        'Open the job in All Jobs to review the technician notes, pricing and customer information, '
-                        'then prepare the estimate draft in the existing editor.')
-                return {'answer':answer,'matches':chosen[:8],
-                        'navigation':[{'label':'Open All Jobs','target':'all_jobs'}],
-                        'workspace':platform}
-            return {'answer':('I could not verify a matching PDS job from the saved job records. '
-                              'Try the customer name or job number; I have not created an estimate.'),
-                    'matches':[],'navigation':[{'label':'Open All Jobs','target':'all_jobs'}],
-                    'workspace':platform}
+                    matches.append({
+                        'type': 'jobs', 'id': str(item.get('id') or '')[:80],
+                        'name': str(item.get('customer') or item.get('customer_name') or item.get('job_number') or '')[:140],
+                        'status': str(item.get('status') or '')[:60],
+                        'job_number': str(item.get('job_number') or '')[:60],
+                        'date': str(item.get('date') or '')[:30],
+                        'address': str(item.get('address') or '')[:200],
+                        'navigate': 'all_jobs'})
+                if len(matches) >= 100:
+                    break
+            if quote_request:
+                if not matches:
+                    return {'answer': ('I could not verify a matching PDS job in the saved job records. '
+                                       'Try the exact customer name or job number. '
+                                       'No estimate was created.'),
+                            'matches': [], 'navigation': [{'label': 'Open All Jobs', 'target': 'all_jobs'}],
+                            'workspace': platform}
+                # Prioritize work needing quotation, not estimates already sent.
+                quote_statuses = {'to be quoted', 'quote', 'complete/quote'}
+                ranked = sorted(matches, key=lambda row: (
+                    str(row['status']).strip().casefold() in quote_statuses,
+                    row['date'], row['job_number']), reverse=True)
+                candidate = ranked[0]
+                details = _pds_verified_job_details(request, candidate['id']) if candidate['id'] else {}
+                job = details.get('job', {}) if details.get('verified') else {}
+                context = _pds_quote_context(request, candidate['id'])
+                scope = context.get('scope', []) if context.get('verified') else []
+                summary = [f"{candidate['name']}"]
+                for label, key in [('job', 'job_number'), ('status', 'status'),
+                                   ('date', 'date'), ('address', 'address')]:
+                    if candidate.get(key):
+                        summary.append(f"{label}: {candidate[key]}")
+                lines = ['I found a saved PDS job for estimate review: ' + ' | '.join(summary) + '.']
+                lines.extend(scope[:12])
+                if job.get('completion_form_count'):
+                    lines.append(f"Saved completion forms: {job['completion_form_count']}. Review the forms in the job before pricing.")
+                if len(ranked) > 1:
+                    lines.append(f"I found {len(matches)} potential matches. This is the highest-priority candidate, not a confirmed selection. Verify the job before drafting.")
+                lines.append('Open this job and the existing Estimate/Invoice editor to review labor, parts, pricing and scope. No estimate was created, numbered, sent, or changed.')
+                return {'answer': '\n'.join(lines), 'matches': ranked[:8],
+                        'navigation': [{'label': 'Open All Jobs', 'target': 'all_jobs'},
+                                       {'label': 'Open Estimates', 'target': 'estimates'}],
+                        'workspace': platform}
     elif can_search:
         collections={'doorks':['work_orders','customers','vendors','customer_inquiries','vendor_assignments','estimates','invoices','purchase_orders'],
                      'sdc':['orders','customers','vendors','expenses','purchases']}[platform]
@@ -941,6 +1276,13 @@ def chat(payload:Message,request:Request):
     elif 'job' in query or 'ticket' in query or 'dispatch' in query:navigation.append({'label':'Open All Jobs','target':'all_jobs'})
     key=os.getenv('OPENAI_API_KEY','')
     if not key:
+        if platform in ('pds', 'doorks') and can_search:
+            return {'answer': ('Moses AI is not configured for this workspace. '
+                               'Read-only business lookups are available, but live AI tools '
+                               'require a configured provider and enabled workspace agent. '
+                               'No records were changed.'),
+                    'matches': matches, 'navigation': navigation, 'workspace': platform,
+                    'agent_connected': False}
         answer=('I found '+str(len(matches))+' matching records in '+platform+'.' if matches else
                 'I can help navigate '+platform+'. Try asking for a specific customer, job number, or vendor. Record searches require office administrator access.')
         return {'answer':answer,'matches':matches,'navigation':navigation,'workspace':platform}
@@ -969,6 +1311,18 @@ def chat(payload:Message,request:Request):
         *history,
         {'role':'user','content':text}],
         'max_output_tokens':350,'store':False}
+    # Never pass PDS/Doorks business questions to a generic text model with no
+    # enabled tool registry. That path previously fabricated a sense of access.
+    if platform in ('pds', 'doorks') and can_search:
+        from app.services.moses_agent import enabled as moses_enabled
+        if not moses_enabled(platform):
+            return {'answer': ('Moses business tools are not enabled for this workspace. '
+                               'I can show only the verified records returned by the read-only '
+                               'lookup. An office administrator must enable the workspace agent '
+                               'and confirm the live AI readiness check before I can assist '
+                               'with connected operations. No records were changed.'),
+                    'matches': matches, 'navigation': navigation, 'workspace': platform,
+                    'agent_connected': False}
     # Agent-disabled workspaces retain the existing limited conversational endpoint.
     try:
         out = _request_model(data, key)

@@ -15,12 +15,12 @@ def test_atlas_redesign_video_and_inquiry_are_connected(tmp_path):
             page = client.get('/software')
             assert page.status_code == 200
             assert 'Less busywork.' in page.text
-            assert '/static/atlas_overview.mp4' in page.text
+            assert 'id="atlas-product-tour"' in page.text
+            assert 'id="atlas-gallery-slides"' in page.text
+            assert '/static/atlas_preview_6.webp' in page.text
+            assert 'id="atlas-moses-workflows"' in page.text
+            assert 'id="atlas-butler-briefing"' in page.text
             assert "'/api/software/inquiries'" in page.text
-            video = client.get('/static/atlas_overview.mp4')
-            assert video.status_code == 200
-            assert video.headers['content-type'].startswith('video/mp4')
-            assert len(video.content) > 100_000
 
             inquiry = {
                 'company': 'Synthetic Atlas Company',

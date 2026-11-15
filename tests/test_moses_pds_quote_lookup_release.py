@@ -33,7 +33,7 @@ def test_conversational_pds_quote_request_locates_saved_customer_and_chooses_quo
     assert response['workspace'] == 'pds'
     assert response['matches'][0]['id'] == 'pds-1'
     assert all('Irvine' in entry['name'] for entry in response['matches'])
-    assert 'have not created an estimate' in response['answer']
+    assert 'no estimate was created' in response['answer'].lower()
 
 
 def test_pds_quote_request_does_not_invent_missing_job(monkeypatch):

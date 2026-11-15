@@ -10,10 +10,10 @@ import os
 from fastapi import HTTPException
 
 READ_ONLY = {
-    'doorks': ('workspace_record_search', 'work_order_lookup', 'purchase_order_receiving_review',
+    'doorks': ('business_briefing', 'workspace_record_search', 'work_order_lookup', 'purchase_order_receiving_review',
                'supplier_bill_match', 'supplier_payment_reconciliation', 'stripe_test_status'),
-    'pds': ('pds_job_lookup', 'pds_job_detail', 'purchase_order_receiving_review'),
-    'sdc': ('workspace_record_search', 'order_status_reporting', 'expense_reporting',
+    'pds': ('business_briefing', 'pds_job_lookup', 'pds_job_detail', 'pds_work_queue', 'pds_estimate_context', 'pds_estimate_description_preview', 'purchase_order_receiving_review'),
+    'sdc': ('business_briefing', 'workspace_record_search', 'order_status_reporting', 'expense_reporting',
             'purchase_order_receiving_review', 'stripe_test_status'),
 }
 PROPOSALS = {
