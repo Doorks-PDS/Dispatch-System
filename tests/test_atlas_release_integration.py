@@ -14,10 +14,12 @@ def test_atlas_redesign_video_and_inquiry_are_connected(tmp_path):
         with TestClient(main.app) as client:
             page = client.get('/software')
             assert page.status_code == 200
-            assert 'Less busywork.' in page.text
-            assert 'id="atlas-product-tour"' in page.text
-            assert 'id="atlas-gallery-slides"' in page.text
-            assert '/static/atlas_preview_6.webp' in page.text
+            assert 'Run the work.' in page.text
+            assert 'id="atlas-real-stage"' in page.text
+            assert 'id="atlas-real-next"' in page.text
+            assert '<video' not in page.text
+            assert 'atlas_preview_1.webp' not in page.text
+            assert '/static/atlas_real_team.webp' in page.text
             assert 'id="atlas-moses-workflows"' in page.text
             assert 'id="atlas-butler-briefing"' in page.text
             assert "'/api/software/inquiries'" in page.text
