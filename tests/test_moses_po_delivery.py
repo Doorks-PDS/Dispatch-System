@@ -7,7 +7,8 @@ from app.services import moses_po_delivery as service
 
 
 def setup(tmp_path, monkeypatch, platform='doorks'):
-    for k,v in {'MOSES_PO_SEND_ENABLED':'true','MOSES_DOCUMENTS_FROM':'office@example.com',
+    for k,v in {'MOSES_PO_SEND_ENABLED':'true','MOSES_EMAIL_PROVIDER':'resend',
+                'RESEND_API_KEY':'re_synthetic_test_only','MOSES_DOCUMENTS_FROM':'office@example.com',
                 'MOSES_PURCHASING_REPLY_TO':'purchasing@example.com','DOORKS_SMTP_FROM':'office@example.com',
                 'DOORKS_SMTP_HOST':'smtp.example.com','DOORKS_SMTP_USERNAME':'test',
                 'DOORKS_SMTP_PASSWORD':'test'}.items():monkeypatch.setenv(k,v)
@@ -33,7 +34,7 @@ def setup(tmp_path, monkeypatch, platform='doorks'):
 def test_approved_po_sends_pdf_once(tmp_path,monkeypatch,platform):
     req,path,record=setup(tmp_path,monkeypatch,platform)
     sent=[]
-    monkeypatch.setattr(service,'_transmit',lambda snap,pdf:sent.append((snap, pdf)))
+    monkeypatch.setattr(service,'_transmit',lambda snap,pdf:(sent.append((snap, pdf)),'email_mock_purchase')[1])
     p=service.propose(req,platform,'po1')['proposal']
     assert not sent
     assert p['to']=='ap@vendor.example'

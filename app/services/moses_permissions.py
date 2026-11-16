@@ -66,15 +66,12 @@ def _guard(request):
 
 def _email_prerequisites():
     """Configuration hints only; never attempt a send or return a secret."""
-    provider = os.getenv('MOSES_EMAIL_PROVIDER', 'smtp').strip().lower()
-    if provider == 'resend':
-        return (bool(os.getenv('RESEND_API_KEY', '').startswith('re_'))
-                and bool(os.getenv('MOSES_DOCUMENTS_FROM', '').strip()))
-    if provider == 'smtp':
-        required = ('DOORKS_SMTP_HOST', 'DOORKS_SMTP_USERNAME',
-                    'DOORKS_SMTP_PASSWORD', 'DOORKS_SMTP_FROM')
-        return all(bool(os.getenv(key, '').strip()) for key in required)
-    return False
+    # Moses sends from a single, verified Resend identity in every workspace.
+    # Legacy Outlook/SMTP configuration is never sufficient for Moses readiness.
+    provider = os.getenv('MOSES_EMAIL_PROVIDER', '').strip().lower()
+    return (provider == 'resend'
+            and bool(os.getenv('RESEND_API_KEY', '').startswith('re_'))
+            and bool(os.getenv('MOSES_DOCUMENTS_FROM', '').strip()))
 
 
 def inspect(request):

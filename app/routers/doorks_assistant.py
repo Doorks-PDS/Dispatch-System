@@ -26,6 +26,85 @@ def moses_business_briefing(request: Request):
     return brief(request)
 
 
+
+# Unified Moses Butler API: existing action backends own the records, approvals
+# and audit ledgers. The model is NEVER given a decision/execution tool.
+class MosesButlerPrepare(BaseModel):
+    kind: str = Field(min_length=1, max_length=45)
+    record_id: str = Field(min_length=1, max_length=80)
+    details: dict = Field(default_factory=dict)
+
+class MosesButlerDecision(BaseModel):
+    approve: bool
+
+@router.get('/butler/actions/pending')
+def moses_butler_pending(request: Request):
+    from app.services.moses_butler_flow import pending_actions
+    return pending_actions(request)
+
+@router.get('/butler/capabilities')
+def moses_butler_capabilities(request: Request):
+    from app.services.moses_butler_flow import capabilities
+    return capabilities(request)
+
+@router.post('/butler/actions/prepare')
+def moses_butler_prepare(payload: MosesButlerPrepare, request: Request):
+    from app.services.moses_butler_flow import prepare
+    return prepare(request, payload.kind, payload.record_id, payload.details)
+
+@router.get('/butler/actions/{kind}/{proposal_id}/receipt')
+def moses_butler_receipt(kind: str, proposal_id: str, request: Request):
+    from app.services.moses_butler_flow import receipt
+    return receipt(request, kind, proposal_id)
+
+@router.post('/butler/actions/{kind}/{proposal_id}/decide')
+def moses_butler_decide(kind: str, proposal_id: str, payload: MosesButlerDecision, request: Request):
+    from app.services.moses_butler_flow import decide
+    return decide(request, kind, proposal_id, payload.approve)
+
+@router.get('/provider-readiness')
+def moses_provider_readiness(request: Request):
+    """Configuration-only diagnostics. Never return credentials or business data."""
+    platform = allowed(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Workspace office-admin access required')
+    from urllib.parse import urlsplit
+    from app.services.moses_mail_identity import identity
+    sender_info = identity(platform, 'estimate')
+    resend = os.getenv('MOSES_EMAIL_PROVIDER', '').strip().lower() == 'resend'
+    origin = urlsplit(os.getenv('MOSES_PUBLIC_BASE_URL', ''))
+    return {
+        'workspace': platform, 'configuration_only': True,
+        'provider_delivery_verified': False, 'stripe_payment_verified': False,
+        'ai_tool_execution_verified': False,
+        'email': {
+            'provider': 'resend' if resend else 'not_resend',
+            'sender_configured': bool(sender_info.get('from')),
+            'reply_to_configured': bool(sender_info.get('reply_to')),
+            'sender_identity_issues': sender_info.get('issues', []),
+            'resend_key_configured': os.getenv('RESEND_API_KEY', '').startswith('re_'),
+        },
+        'stripe': {
+            'test_mode_enabled': os.getenv('MOSES_STRIPE_TEST_ENABLED', '').lower() == 'true',
+            'test_secret_configured': os.getenv('STRIPE_SECRET_KEY', '').startswith('sk_test_'),
+            'webhook_secret_configured': os.getenv('STRIPE_WEBHOOK_SECRET', '').startswith('whsec_'),
+            'https_base_configured': origin.scheme == 'https' and bool(origin.netloc),
+            'live_payments_enabled': False,
+        },
+        'ai': {'openai_key_configured': bool(os.getenv('OPENAI_API_KEY'))},
+    }
+
+
+@router.get('/provider-verify')
+def moses_provider_verify(request: Request):
+    """Read-only external Resend-domain/Stripe-sandbox probes for office admins.
+
+    This does not send email, create a Checkout, execute a tool or confirm
+    delivery; explicit live test actions are separate and approval-controlled.
+    """
+    from app.services.moses_provider_probe import inspect
+    return inspect(request)
+
 @router.get('/agent-readiness')
 def agent_readiness(request: Request):
     """Read-only active-workspace readiness; never return credentials or customer data."""
@@ -990,7 +1069,7 @@ def chat(payload:Message,request:Request):
         # a generic text completion fed only a zero-result keyword search.
         # Never create, price, issue, or send an estimate from this chat route.
         wants_quote = bool(re.search(r'\b(estimate|quot(?:e|ed|ing)|pricing|bid)\b', query))
-        wants_work = bool(re.search(r'\b(provide|prepare|create|draft|generate|write|make|help|need|needs|needed|pull|find|previous|prior|last)\b', query))
+        wants_work = bool(re.search(r'\b(give|provide|prepare|create|draft|generate|write|make|help|need|needs|needed|pull|find|previous|prior|last)\b', query))
         quote_request = wants_quote and wants_work
         # Direct, verified operational summaries work even before live AI activation.
         # Never allow a broad queue request to override a specifically named job.
@@ -1051,10 +1130,11 @@ def chat(payload:Message,request:Request):
                 terms = re.findall(r'[a-z0-9#-]+', query)
             filler = {'the','a','an','for','from','on','about','can','you','me',
                       'please','could','would','i','we','want','need','needs','needed',
-                      'help','with','provide','prepare','create','draft','generate',
+                      'help','with','give','provide','prepare','create','draft','generate',
                       'write','make','find','pull','estimate','estimates','quote',
                       'quoted','quoting','pricing','bid','previous','prior',
                       'recent','latest','last','most','that','to','be','should',
+                      'recommended','recommendation','recommendations','repairs','repair','scope','us','my',
                       'still','job','work','order','ticket','is','of','and','one'}
             terms = [t for t in terms if t not in filler]
             if not terms:
@@ -1298,8 +1378,10 @@ def chat(payload:Message,request:Request):
                 from app.services.moses_agent import answer as agent_answer
                 answer = agent_answer(request, text, history)
                 proposals = getattr(request.state, 'moses_action_proposals', [])
-            except Exception:
-                answer = 'Moses could not connect to the AI service. An action proposal may have been saved; check the pending approval queue before retrying.'
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error('Moses agent turn failed workspace=%s exception_type=%s', platform, type(exc).__name__)
+                answer = 'Moses could not complete the live AI request. Check pending approvals before retrying; no action is confirmed.'
                 proposals = []
             return {'answer': answer, 'matches': matches, 'navigation': navigation, 'workspace': platform,
                     'action_proposals': proposals}

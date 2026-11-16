@@ -222,4 +222,9 @@ def original(kind:str,item_id:str,request:Request,x_api_key:Optional[str]=Header
     if not item or not item.get('attachment'):raise HTTPException(404,'Document not found')
     file=base/'attachments'/Path(item['attachment']).name
     if not file.is_file():raise HTTPException(404,'Document missing')
-    return FileResponse(file,filename=item.get('original_filename','document'))
+    # Keep the original download behavior; allow same-auth inline image previews.
+    inline = request.query_params.get('inline') == '1' and file.suffix.lower() in ('.png','.jpg','.jpeg','.webp')
+    types={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}
+    return FileResponse(file,filename=item.get('original_filename','document'),
+                        media_type=types.get(file.suffix.lower(),'application/octet-stream'),
+                        content_disposition_type='inline' if inline else 'attachment')

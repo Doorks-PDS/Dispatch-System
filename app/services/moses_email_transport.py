@@ -13,9 +13,9 @@ from fastapi import HTTPException
 
 
 def provider():
-    name = os.getenv('MOSES_EMAIL_PROVIDER', 'smtp').strip().lower()
-    if name not in ('smtp', 'resend'):
-        raise HTTPException(503, 'Unsupported outbound email provider')
+    name = os.getenv('MOSES_EMAIL_PROVIDER', '').strip().lower()
+    if name != 'resend':
+        raise HTTPException(503, 'Moses requires Resend; SMTP/Outlook disabled for Moses delivery')
     return name
 
 
@@ -79,3 +79,57 @@ def delivery_receipt(result):
         return {'transport': 'resend', 'provider_message_id': result,
                 'delivery_status': 'accepted_by_provider'}
     return {'transport': 'smtp', 'delivery_status': 'submitted_to_provider'}
+
+
+def send_resend_attachment(message, attachment, filename, mime, *, idempotency_key):
+    """Send a published original through Resend after approved portal validations.
+
+    Returns provider acceptance ID, not inbox delivery. The caller passes a stable
+    idempotency token based on the approved document/recipient/content.
+    """
+    import re
+    from pathlib import Path
+    from app.services.moses_delivery import _email
+    ready(message['from'])
+    if not isinstance(attachment, bytes) or not 1 <= len(attachment) <= 10*1024*1024:
+        raise HTTPException(422,'Invalid document attachment size')
+    mimetypes={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg',
+               '.jpeg':'image/jpeg','.webp':'image/webp'}
+    if (not isinstance(filename,str) or len(filename)>180 or
+        filename!=Path(filename).name or any(c in filename for c in '\r\n\\/')):
+        raise HTTPException(422,'Invalid document filename')
+    extension=Path(filename).suffix.lower()
+    if mimetypes.get(extension)!=mime:
+        raise HTTPException(422,'Filename/attachment type mismatch')
+    signatures={'.pdf':attachment.startswith(b'%PDF'),
+                '.png':attachment.startswith(b'\x89PNG\r\n\x1a\n'),
+                '.jpg':attachment.startswith(b'\xff\xd8'),
+                '.jpeg':attachment.startswith(b'\xff\xd8'),
+                '.webp':attachment.startswith(b'RIFF') and attachment[8:12]==b'WEBP'}
+    if not signatures.get(extension):
+        raise HTTPException(422,'Attachment content mismatch')
+    if not isinstance(idempotency_key,str) or not re.fullmatch('[a-f0-9]{64}',idempotency_key):
+        raise HTTPException(422,'Invalid idempotency key')
+    def header(name):
+        value=message.get(name)
+        if not isinstance(value,str) or not value.strip() or '\r' in value or '\n' in value:
+            raise HTTPException(422,'Invalid email header field')
+        return value.strip()
+    recipient=header('to');reply_to=header('reply_to')
+    if not _email(recipient) or not _email(reply_to):
+        raise HTTPException(422,'Invalid recipient/Reply-To')
+    body={'from':header('from'),'to':[recipient],
+          'subject':header('subject'),'text':header('text'),'reply_to':reply_to,
+          'attachments':[{'filename':filename,'content':base64.b64encode(attachment).decode('ascii')}]}
+    req=Request('https://api.resend.com/emails',data=json.dumps(body).encode('utf-8'),method='POST',headers={
+        'Authorization':'Bearer '+os.environ['RESEND_API_KEY'],
+        'Content-Type':'application/json','User-Agent':'Doorks-Moses/2.0',
+        'Idempotency-Key':idempotency_key})
+    try:
+        with urlopen(req,timeout=15) as response:
+            data=json.loads(response.read(16384))
+            if not (200 <= response.status < 300 and isinstance(data,dict) and data.get('id')):
+                raise RuntimeError('Resend did not confirm acceptance')
+            return data['id']
+    except (HTTPError, URLError, TimeoutError, ValueError, OSError) as exc:
+        raise RuntimeError('Resend acceptance uncertain; check provider history') from exc

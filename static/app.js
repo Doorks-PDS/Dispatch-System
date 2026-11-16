@@ -164,7 +164,47 @@
     const pendingButton=document.createElement('button');pendingButton.className='btn';pendingButton.type='button';pendingButton.textContent='Review pending Moses actions';
     const actionNote=document.createElement('small');actionNote.textContent='Only explicitly approved actions change records.';
     actionPanel.append(pendingButton,actionNote);
+    const showButlerAction=(proposal,container=actionPanel)=>{
+      if (!proposal?.butler_action || !/^[a-f0-9]{32}$/.test(String(proposal.id||''))) return;
+      const kind=String(proposal.butler_action);
+      const supported=new Set(['job_status','order_status','schedule','new_work_order',
+        'estimate_draft','estimate_to_invoice','purchase_order','catalog_part','receiving','supplier_bill']);
+      if (!supported.has(kind)) return;
+      const card=document.createElement('div');
+      card.style.cssText='border:1px solid #d4dae2;border-radius:10px;padding:10px;display:grid;gap:7px';
+      const title=document.createElement('strong');
+      title.textContent='Moses approval: '+kind.replaceAll('_',' ')+' · '+String(proposal.record_id||'');
+      card.append(title);
+      const status=document.createElement('small');status.setAttribute('role','status');
+      status.textContent=proposal.state==='needs_review'?'Manual review required — not executed.':
+        'Awaiting your approval — no change executed.';card.append(status);
+      if (proposal.state==='pending') {
+        const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px';
+        for (const [approve,label] of [[true,'Approve'],[false,'Reject']]) {
+          const button=document.createElement('button');button.className='btn';button.type='button';button.textContent=label;
+          button.addEventListener('click',async()=>{
+            if(approve&&!window.confirm('Approve this Moses '+kind.replaceAll('_',' ')+
+              ' action for '+String(proposal.record_id||'the saved record')+'?'))return;
+            for(const control of buttons.querySelectorAll('button'))control.disabled=true;
+            const path='/doorks-assistant/butler/actions/'+encodeURIComponent(kind)+'/'+encodeURIComponent(proposal.id);
+            try {
+              await fetchJSON(path+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve})});
+              const receipt=await fetchJSON(path+'/receipt');
+              status.textContent=receipt.executed?'Confirmed executed and saved · '+receipt.proposal_id:
+                receipt.state==='rejected'?'Rejected — nothing executed.':
+                'Not confirmed: '+receipt.state+'; review the pending queue.';
+              add('Moses',status.textContent);
+            } catch(err) {
+              status.textContent='No execution confirmed: '+err.message+'. Refresh approvals before retrying.';
+              for(const control of buttons.querySelectorAll('button'))control.disabled=false;
+            }
+          });buttons.append(button);
+        }card.append(buttons);
+      }
+      container.append(card);
+    };
     const showAction=(proposal,container=actionPanel)=>{
+      if (proposal?.butler_action) { showButlerAction(proposal,container); return; }
       if(!proposal || !/^[a-f0-9]{32}$/.test(String(proposal.id||'')))return;
       const card=document.createElement('div');card.style.cssText='border:1px solid #d4dae2;border-radius:10px;padding:10px;display:grid;gap:7px';
       const isInvoice=proposal.kind==='estimate_to_draft_invoice';
@@ -193,13 +233,32 @@
       container.append(card)
     };
     const refreshPending=async()=>{
-      actionPanel.querySelectorAll('div').forEach(el=>el.remove());
+      actionPanel.querySelectorAll('div').forEach(element=>element.remove());
       const workspace=document.body.dataset.platform||'';
-      if(!['sdc','doorks','pds'].includes(workspace)){actionNote.textContent='Approvals unavailable in this workspace.';return}
-      try{const queue=await fetchJSON('/doorks-assistant/'+workspace+'/actions/pending');
-        actionNote.textContent=queue.count?'Pending Moses actions (latest '+queue.proposals.length+'):':'No pending Moses actions.';
-        for(const p of queue.proposals||[])showAction(p)
-      }catch(e){actionNote.textContent='Approval queue unavailable: '+e.message}
+      if(!['sdc','doorks','pds'].includes(workspace)){
+        actionNote.textContent='Approvals unavailable in this workspace.';return;
+      }
+      let total=0,available=0;
+      const seen=new Set();
+      try {
+        const inbox=await fetchJSON('/doorks-assistant/butler/actions/pending');
+        for(const p of inbox.proposals||[]){
+          if(seen.has(p.id))continue;
+          showButlerAction(p);seen.add(p.id);total++;
+        }
+        available++;
+      }catch(error){console.warn('Butler inbox unavailable',error);}
+      try {
+        // Preserve legacy approvals until all existing action types are mapped.
+        const queue=await fetchJSON('/doorks-assistant/'+workspace+'/actions/pending');
+        for(const p of queue.proposals||[]){
+          if(seen.has(p.id))continue;
+          showAction(p);seen.add(p.id);total++;
+        }
+        available++;
+      }catch(error){console.warn('Legacy action inbox unavailable',error);}
+      actionNote.textContent=available?(total?total+' Moses approvals to review.':'No pending Moses actions.'):
+        'Approval queue unavailable. No change was made.';
     };
     pendingButton.onclick=refreshPending;
     history.after(actionPanel);
@@ -2248,8 +2307,29 @@
         const panel=document.createElement('aside');panel.id='doorksReceiptDetailDrawer';panel.setAttribute('aria-label',(kind==='receipts'?'Receipt':'Statement')+' details');panel.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(620px,100vw);overflow:auto;background:#fff;z-index:10010;padding:26px;box-shadow:-12px 0 55px #0004;box-sizing:border-box';
         const header=document.createElement('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px';const heading=document.createElement('h2');heading.textContent=kind==='receipts'?'Receipt Details':'Statement Details';const close=document.createElement('button');close.className='btn';close.textContent='Close';close.onclick=()=>panel.remove();header.append(heading,close);panel.append(header);
         for(const [key,value] of Object.entries(record)){if(['id','created_at','updated_at'].includes(key)||value===null||value===undefined||value==='')continue;const row=document.createElement('div');row.style.cssText='padding:11px 0;border-bottom:1px solid #e2e8f0;overflow-wrap:anywhere';const label=document.createElement('strong');label.textContent=key.replaceAll('_',' ');label.style.cssText='display:block;text-transform:capitalize';const val=document.createElement('div');val.textContent=typeof value==='object'?JSON.stringify(value):String(value);row.append(label,val);panel.append(row);}
-        const file=record.file_url||record.attachment_url||record.document_url||record.image_url||record.receipt_image_url||record.original_file_url||'';
-        if(typeof file==='string'&&file.startsWith('/')&&!file.startsWith('//')||typeof file==='string'&&file.startsWith('https://')){const link=document.createElement('a');link.href=file;link.target='_blank';link.rel='noopener noreferrer';link.className='btn';link.textContent='Open Original Document';link.style.display='inline-block';link.style.marginTop='15px';panel.append(link);if(/\.(png|jpg|jpeg|webp)(\?|$)/i.test(file)){const img=document.createElement('img');img.src=file;img.alt='Original receipt or statement';img.style.cssText='display:block;width:100%;max-height:460px;object-fit:contain;margin-top:16px';panel.append(img);}}
+        // Uploaded originals live behind the authenticated Doorks accounting API.
+        // An image preview uses a separate inline response; the download route
+        // continues to serve the original as an attachment. No data is copied.
+        const uploaded = Boolean(record.attachment && record.id);
+        const original = uploaded
+          ? '/doorks-accounting/'+encodeURIComponent(kind)+'/'+encodeURIComponent(record.id)+'/file'
+          : (record.file_url||record.attachment_url||record.document_url||record.image_url||record.receipt_image_url||record.original_file_url||'');
+        const safeOriginal=typeof original==='string' &&
+          (original.startsWith('/')&&!original.startsWith('//') ||
+           /^https:\/\/[^/?#]+/i.test(original));
+        if(safeOriginal){
+          const actions=document.createElement('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin-top:15px';
+          const link=document.createElement('a');link.href=original;link.target='_blank';link.rel='noopener noreferrer';link.className='btn';
+          link.textContent='Download Original';actions.append(link);panel.append(actions);
+          const filename=String(record.original_filename||record.attachment||original).split('?')[0];
+          if(/\.(png|jpg|jpeg|webp)$/i.test(filename)){
+            const image=document.createElement('img');image.src=uploaded?original+'?inline=1':original;
+            image.alt='Attached '+(kind==='receipts'?'receipt':'statement');
+            image.style.cssText='display:block;width:100%;max-height:650px;object-fit:contain;margin-top:14px;border:1px solid #e2e8f0;border-radius:10px;background:#f8fafc';
+            image.onerror=()=>{image.remove();const note=document.createElement('p');note.className='hint';note.textContent='Preview unavailable. Use Download Original.';panel.append(note);};
+            panel.append(image);
+          }
+        }
         document.body.append(panel);
       };card.append(info,button);host.append(card);}};
     try{const responses=await Promise.all(['receipts','statements'].map(async kind=>({kind,data:await fetchJSON('/doorks-accounting/'+kind)})));records=responses.flatMap(({kind,data})=>(data.items||[]).map(record=>({kind,record})));draw();}catch(e){el('derCount').textContent='Unable to load receipts or statements: '+(e.message||e);}
@@ -5351,11 +5431,91 @@ function renderAttachmentSection(titleText, items, options = {}) {
     });
   }
 
+  // Only the five office reference fields are inline-editable. Each update
+  // uses the existing authorized CalendarStore PATCH endpoint, not a full job save.
+  function attachInlineJobReferences(fields, job, ctx) {
+    if (!fields || !job?.id || job.kind === 'sales_lead') return;
+    const keys = new Map([
+      ['PO #', 'po_number'],
+      ['Estimate #', 'estimate_number'],
+      ['Sent Estimate #', 'sent_quote_number'],
+      ['Quote Assigned To', 'quote_assigned_to'],
+      ['Invoice #', 'invoice_number']
+    ]);
+    // Serialize quick edits so two blur events cannot race on the same record.
+    let previousSave = Promise.resolve();
+    for (const cell of fields.children) {
+      const label = cell.querySelector('.label')?.textContent?.trim();
+      const key = keys.get(label);
+      const valueCell = cell.querySelector('.field');
+      if (!key || !valueCell || valueCell.querySelector('input')) continue;
+      const input = document.createElement('input');
+      input.className = 'input';
+      input.type = 'text';
+      input.maxLength = 240;
+      input.value = String(job[key] ?? '');
+      input.setAttribute('aria-label', label);
+      input.style.cssText = 'width:100%;min-width:0;box-sizing:border-box';
+      const state = document.createElement('small');
+      state.setAttribute('role', 'status');
+      state.style.cssText = 'display:block;min-height:14px;font-size:11px;color:#64748b';
+      valueCell.replaceChildren(input, state);
+      let saved = input.value.trim();
+      let busy = false;
+      input.addEventListener('input', () => { state.textContent = input.value.trim() === saved ? '' : 'Unsaved'; });
+      const persist = async () => {
+        if (busy) return;
+        const next = input.value.trim();
+        if (next === saved) { state.textContent = ''; return; }
+        busy = true;
+        input.disabled = true;
+        state.textContent = 'Saving…';
+        const work = previousSave.catch(() => {}).then(async () => {
+          // Explicit one-field PATCH, with response verification.
+          const updated = await apiUpdateJob(job.id, { [key]: next });
+          if (!updated || String(updated[key] ?? '').trim() !== next) {
+            throw new Error('Server did not confirm the updated field');
+          }
+          Object.assign(job, updated);
+          saved = next;
+          state.textContent = 'Saved';
+          refreshBadges();
+          if (ctx?.afterSave) {
+            try { await ctx.afterSave(); }
+            catch (err) { console.warn('Reference saved; list refresh failed', err); }
+          }
+        });
+        previousSave = work;
+        try { await work; }
+        catch (err) {
+          input.value = saved;
+          state.textContent = 'Not saved: ' + (err.message || String(err));
+        } finally {
+          busy = false;
+          input.disabled = false;
+        }
+      };
+      input.addEventListener('blur', persist);
+      input.addEventListener('keydown', event => {
+        if (event.key === 'Enter') { event.preventDefault(); input.blur(); }
+      });
+    }
+  }
+
+  // PDS office interface polish: ticket and new-dispatch groups (Moses 2.0).
+  function pdsLoadOfficePolish(){
+    if(document.querySelector('link[data-pds-office-polish]'))return;
+    const link=document.createElement('link');link.rel='stylesheet';
+    link.href='/static/pds_office_ticket_polish.css';link.dataset.pdsOfficePolish='1';
+    document.head.appendChild(link);
+  }
+
   function renderJobDetails(container, job, ctx) {
     container.innerHTML = "";
+    pdsLoadOfficePolish();
  
     const card = document.createElement("div");
-    card.className = "card";
+    card.className = "card pds-office-ticket";
  
     const header = document.createElement("div");
     header.style.display = "flex";
@@ -5450,12 +5610,18 @@ function renderAttachmentSection(titleText, items, options = {}) {
       <div><div class="label">Invoice #</div><div class="field">${job.invoice_number || ""}</div></div>
     `;
  
+    // Show editable reference values immediately, including before optional
+    // shared-ticket rendering resolves. No additional Edit button is needed.
+    attachInlineJobReferences(fields, job, ctx);
     doorksLoadSharedTicket().then(shared => {
       if (fields.isConnected && shared?.renderTicketFields) {
+        // Never discard characters entered while the shared module was loading.
+        if (fields.querySelector('input:focus') || Array.from(fields.querySelectorAll('small[role="status"]')).some(el => /^(Unsaved|Saving)/.test(el.textContent||''))) return;
         shared.renderTicketFields(fields, job, { role: 'office', only: [
           'Job #','Address','Contact','Phone','Email','PO #','Estimate #',
           'Sent Estimate #','Quote Assigned To','Invoice #'
         ] });
+        attachInlineJobReferences(fields, job, ctx);
       }
     }).catch(() => {});
 
@@ -5505,53 +5671,6 @@ function renderAttachmentSection(titleText, items, options = {}) {
     btnEdit.className = "btn btn-orange";
     btnEdit.textContent = "Edit";
     primaryActions.appendChild(btnEdit);
-
-    // Shared, authenticated ticket quick editor: uses the exact same field
-    // controller as portal requests, but saves through the existing office API.
-    // The full legacy Edit drawer remains available for all other fields.
-    const btnSharedEdit = document.createElement("button");
-    btnSharedEdit.className = "btn";
-    btnSharedEdit.textContent = "Quick Edit Ticket Details";
-    btnSharedEdit.type = "button";
-    primaryActions.appendChild(btnSharedEdit);
-    btnSharedEdit.addEventListener("click", async () => {
-      try {
-        const shared = await doorksLoadSharedTicket();
-        if (!shared?.createTicketEditPanel) throw Error("Shared ticket editor unavailable");
-        const editorHost = document.createElement("div");
-        editorHost.className = "card";
-        editorHost.style.cssText = "margin-top:12px;padding:16px;width:100%;box-sizing:border-box";
-        const heading = document.createElement("h3");
-        heading.textContent = "Edit Work Order Details";
-        const close = document.createElement("button");
-        close.type = "button";
-        close.className = "btn";
-        close.textContent = "Cancel";
-        close.addEventListener("click", () => editorHost.remove());
-        editorHost.append(heading, close);
-        const editBody = document.createElement("div");
-        editorHost.append(editBody);
-        btnSharedEdit.after(editorHost);
-        btnSharedEdit.disabled = true;
-        const fieldsToEdit = ['address','contact','phone','email','po_number',
-          'estimate_number','invoice_number','quote_assigned_to','sent_quote_number'];
-        shared.createTicketEditPanel(editBody, {
-          role: 'office', fields: fieldsToEdit, values: job,
-          submit: async values => {
-            // Server-side office authorization remains in apiUpdateJob.
-            const updated = await apiUpdateJob(job.id, {...values});
-            if (ctx?.afterSave) await ctx.afterSave();
-            renderJobDetails(container, updated, ctx);
-            refreshBadges();
-            return {message: 'Work order saved.'};
-          }
-        });
-        close.addEventListener("click", () => {btnSharedEdit.disabled = false});
-      } catch (error) {
-        btnSharedEdit.disabled = false;
-        alert(error.message || String(error));
-      }
-    });
 
     const btnForm = document.createElement("button");
     styleActionButton(btnForm, "green", false);
@@ -5661,19 +5780,18 @@ function renderAttachmentSection(titleText, items, options = {}) {
       primaryActions.appendChild(qt);
     }
 
-    if (String(job.status || "") === "Quote Sent") {
-      const follow = document.createElement("button");
-      follow.className = "btn btn-orange";
-      follow.textContent = "Create Follow-Up Job";
-      follow.addEventListener("click", () => openFollowUpJobFromQuote(job, container, ctx));
-      primaryActions.appendChild(follow);
-    }
-
     actions.appendChild(primaryActions);
     if (secondaryActions.childNodes.length) actions.appendChild(secondaryActions);
  
     
-    card.appendChild(fields);
+    // Preserve original field controls (including five existing inline editors).
+    // This is a visual wrapper only; it never writes or copies ticket data.
+    const ticketInfo=document.createElement('section');ticketInfo.className='pds-office-group';
+    const ticketHeading=document.createElement('h3');ticketHeading.textContent='Job & contact information';
+    ticketInfo.append(ticketHeading,fields);
+    card.appendChild(ticketInfo);
+    const noteHeading=document.createElement('h3');noteHeading.className='pds-office-section-label';noteHeading.textContent='Notes & history';
+    card.appendChild(noteHeading);
     card.appendChild(officeNotes);
     if (job.parts_order && Object.values(job.parts_order).some(v => String(v || "").trim())) {
       const poCard = document.createElement("div");
@@ -6302,16 +6420,47 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const speechBtn=document.createElement("button");speechBtn.type="button";speechBtn.className="btn";speechBtn.textContent="Start Recording";voiceActions.appendChild(speechBtn);
       const aiBtn=document.createElement("button");aiBtn.type="button";aiBtn.className="btn btn-orange";aiBtn.textContent="Fill Form with OpenAI";voiceActions.appendChild(aiBtn);
       if(!speechCtor){speechBtn.disabled=true;speechHint.textContent="Voice recognition is unavailable in this browser. Type notes below and select Fill Form with OpenAI.";}
-      else {let recognition=null,active=false,finalText="";
+      else {let recognition=null,active=false,manualStop=false;
+        // Chrome/Android tablet speech engines often stop continuous dictation early.
+        // Short sessions preserve accepted text and never save the underlying form.
+        const tabletVoice=/Android/i.test(navigator.userAgent||"");
+        if(tabletVoice)speechHint.textContent="Tablet mode: record short phrases (15–30 seconds). Tap Start again to add more. You can also use the keyboard microphone. Review the transcript before Fill Form with OpenAI.";
         speechBtn.addEventListener("click",()=>{
-          if(active){recognition?.stop();return;}
-          recognition=new speechCtor();recognition.lang="en-US";recognition.continuous=true;recognition.interimResults=true;
-          finalText=transcript.value.trim();
-          recognition.onresult=(e)=>{let interim="";for(let i=e.resultIndex;i<e.results.length;i++){const part=e.results[i][0]?.transcript||"";if(e.results[i].isFinal)finalText=[finalText,part].filter(Boolean).join(" ");else interim+=part;}transcript.value=[finalText,interim].filter(Boolean).join(" ");};
-          recognition.onerror=(e)=>{speechHint.textContent=`Recording error: ${e.error||"microphone error"}. You can type notes manually.`;};
-          recognition.onend=()=>{active=false;speechBtn.textContent="Start Recording";speechHint.textContent="Recording stopped. Review the transcript, then select Fill Form with OpenAI.";};
-          try{recognition.start();active=true;speechBtn.textContent="Stop Recording";speechHint.textContent="Recording... press Stop Recording when finished.";}catch(e){speechHint.textContent=`Could not record: ${e.message||e}`;}
+          if(active){manualStop=true;try{recognition?.stop()}catch(_e){}return;}
+          let baseText=transcript.value.trim();
+          if(!speechCtor){speechHint.textContent="Use the keyboard microphone or type your notes.";return;}
+          recognition=new speechCtor();recognition.lang="en-US";
+          recognition.continuous=!tabletVoice;recognition.interimResults=!tabletVoice;
+          manualStop=false;
+          recognition.onresult=(e)=>{
+            // Rebuild from the current recognition session's results, rather than
+            // appending callbacks that may repeat on Android/Chrome.
+            let confirmed=[],interim=[];
+            for(let i=0;i<e.results.length;i++){
+              const part=(e.results[i][0]?.transcript||"").trim();
+              if(!part)continue;
+              (e.results[i].isFinal?confirmed:interim).push(part);
+            }
+            transcript.value=[baseText,...confirmed,...interim].filter(Boolean).join(" ");
+          };
+          recognition.onerror=(e)=>{
+            const code=String(e.error||"unknown");
+            const hints={"not-allowed":"Allow microphone access in Chrome site settings.",
+              "service-not-allowed":"Speech recognition service is blocked on this tablet.",
+              "no-speech":"No speech detected. Try nearer the microphone or in a quieter area.",
+              "network":"Speech recognition needs a reliable internet connection.",
+              "audio-capture":"No working microphone was found."};
+            speechHint.textContent=(hints[code]||`Voice recognition stopped (${code}).`)+" Existing transcript is preserved. Use keyboard dictation or type if needed.";
+          };
+          recognition.onend=()=>{
+            active=false;speechBtn.textContent="Start Recording";
+            if(manualStop)speechHint.textContent="Stopped. Review the transcript; tap Start again to add more, or Fill Form with OpenAI.";
+          };
+          try{recognition.start();active=true;speechBtn.textContent="Stop Recording";
+            speechHint.textContent=tabletVoice?"Listening for a short segment… tap Stop when finished.":"Listening… tap Stop when finished.";
+          }catch(e){active=false;speechBtn.textContent="Start Recording";speechHint.textContent=`Could not start microphone: ${e.message||e}. Use the keyboard microphone or type notes.`;}
         });
+        document.addEventListener("visibilitychange",()=>{if(document.hidden&&active){manualStop=true;try{recognition?.stop()}catch(_e){}}});
       }
       aiBtn.addEventListener("click",async()=>{
         const text=transcript.value.trim();if(!text){alert("Record or type your notes first.");return;}
@@ -6738,7 +6887,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
  
         container.innerHTML = "";
         const card = document.createElement("div");
-        card.className = "card";
+        card.className = "card pds-office-intake";
+        pdsLoadOfficePolish();
  
         const row0 = document.createElement("div");
         row0.className = "grid2";
@@ -6934,15 +7084,20 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           }catch(err){statusBox.textContent=`Unable to read: ${err.message||err}. Enter details manually.`;}
           finally{button.disabled=false;}
         });
+        // Same inputs, IDs, listeners and save handler: group only their DOM presentation.
+        const section=(title,hint,...elements)=>{
+          const block=document.createElement('section');block.className='pds-office-group';
+          const heading=document.createElement('h3');heading.textContent=title;
+          const description=document.createElement('p');description.className='hint';description.textContent=hint;
+          block.append(heading,description,...elements);return block;
+        };
+        aiPanel.classList.add('pds-moses-intake');
+        aiPanel.querySelector('summary').textContent='✨ Moses — Read & Pre-Fill Document';
         card.appendChild(aiPanel);
-        card.appendChild(row0);
-        card.appendChild(row1);
-        card.appendChild(row1b);
-        card.appendChild(row2);
-        card.appendChild(row3);
-        card.appendChild(row4);
-        card.appendChild(notes);
-        card.appendChild(addWrap);
+        card.appendChild(section('Dispatch & scheduling','Choose the job type and service date.',row0));
+        card.appendChild(section('Customer & service location','Select existing customers and contacts or add new records.',row1,row1b,row2,row3,addWrap));
+        card.appendChild(section('Work details & references','Add the job number, customer reference numbers, notes and attachments.',row4,notes));
+        actions.classList.add('pds-office-intake-actions');
         card.appendChild(actions);
  
         container.appendChild(card);
@@ -7692,15 +7847,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         wrap.appendChild(website);
         website.querySelector('#part_url_read').onclick=async()=>{const url=wrap.querySelector('#part_product_url').value.trim(),status=website.querySelector('#part_url_status');if(!url){status.textContent='Enter an HTTPS product URL first';return;}status.textContent='Reading public product page…';try{const r=await fetchJSON('/moses/part-from-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=r.fields||{};for(const [key,id] of [['manufacturer','#part_mfg'],['part_number','#part_item'],['description','#part_desc'],['supplier','#part_supplier'],['image_url','#part_image_url']])if(d[key])wrap.querySelector(id).value=d[key];showPhoto();status.textContent='Suggestions loaded — verify before saving';}catch(e){status.textContent='Could not read product page: '+e.message;}};
         const upload=document.createElement('label');upload.style.cssText='display:grid;gap:5px;margin-top:10px';upload.textContent='Upload Part Photo (JPG, PNG, WEBP; max 5 MB)';const input=document.createElement('input');input.type='file';input.accept='.jpg,.jpeg,.png,.webp';upload.append(input);wrap.append(upload);input.onchange=async()=>{const file=input.files?.[0];if(!file)return;const status=website.querySelector('#part_url_status');if(file.size>5*1024*1024){status.textContent='Photo is larger than 5 MB';return;}try{const fd=new FormData();fd.append('file',file);const r=await fetch('/moses/part-image/pds',{method:'POST',body:fd,credentials:'same-origin'});const d=await r.json();if(!r.ok)throw Error(d.detail||'Upload failed');wrap.querySelector('#part_image_url').value=d.url;showPhoto();status.textContent='Photo uploaded. Save the part to link it.';}catch(e){status.textContent='Photo upload failed: '+e.message;}};
-        const assist=document.createElement('details');
-        assist.style.cssText='margin-top:12px;border:1px solid #d9e1ea;border-radius:10px;padding:12px';
-        assist.innerHTML='<summary style="cursor:pointer;font-weight:700">Part Data Assistant — Paste & Autofill</summary><p class="hint">Paste supplier catalog text. Fields are suggestions; verify before saving. AI document extraction is not connected yet.</p><textarea class="input" id="part_assist_text" rows="4" style="width:100%;box-sizing:border-box" placeholder="Manufacturer: ...\\nPart #: ...\\nDescription: ...\\nSupplier: ...\\nPrice: ..."></textarea><button type="button" class="btn" id="part_assist_apply">Autofill labeled fields</button>';
-        wrap.appendChild(assist);
-        assist.querySelector('#part_assist_apply').onclick=()=>{
-          const raw=assist.querySelector('#part_assist_text').value;
-          const fields=[[/^(?:manufacturer|mfg)\s*:\s*(.+)$/im,'#part_mfg'],[/^(?:part\s*(?:#|number)|item)\s*:\s*(.+)$/im,'#part_item'],[/^description\s*:\s*(.+)$/im,'#part_desc'],[/^supplier\s*:\s*(.+)$/im,'#part_supplier'],[/^price\s*:\s*\$?([\d,.]+)$/im,'#part_price']];
-          for(const [rx,sel] of fields){const m=raw.match(rx);if(m)wrap.querySelector(sel).value=m[1].trim().replace(/,/g,'');}
-        };
         const actions = document.createElement("div");
         actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "12px";
         const save = document.createElement("button"); save.className = "btn btn-orange"; save.textContent = "Save";
@@ -8141,8 +8287,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       {id:'payables',icon:'💸',label:'Accounts Payable',description:'Review purchase orders and supplier payment status.'},
       {id:'manual-ledger',icon:'🧾',label:'Supplier Bills & Payments',description:'Record supplier bills, payments sent and customer payments received. Manual records; no bank settlement.'},
       {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
-      {id:'receipts',icon:'🧾',label:'Receipts & Expenses',description:'All existing PDS receipts, expense records, AI intake and authorization.'},
-      {id:'statements',icon:'🏦',label:'Statements',description:'Statements and document records.'},
+      {id:'receipts',icon:'🧾',label:'Receipts & Statements',description:'One view of existing PDS receipts and accounting statements, with original documents.'},
       {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'},
       {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'}
     ];
@@ -8201,8 +8346,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         currentView={refresh:()=>renderAccountingView(section)};
         return;
       }
-      const [res, cat] = await Promise.all([fetchJSON("/receipts"), fetchJSON("/receipts/categories")]);
+      const [res, cat, statementResponse] = await Promise.all([
+        fetchJSON('/receipts'),fetchJSON('/receipts/categories'),
+        fetchJSON('/accounting/statements').catch(error => ({items:[],load_error:String(error.message||error)}))
+      ]);
       const items = (res.items || []).filter(r => !r.deleted_at); const categories = cat.items || [];
+      const pdsStatements=(statementResponse.items||[]).filter(row=>row&&!row.deleted_at);
+
       const periodReceipts=items.filter(r=>inPeriod(r.date));
       const money = n => "$" + Number(n || 0).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
       const total = periodReceipts.filter(r=>r.authorization_status==="Authorized").reduce((sum, r) => sum + Number(r.amount || 0), 0);
@@ -8269,7 +8419,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV";
         const showAllLabel=document.createElement('label');showAllLabel.style.cssText='display:flex;align-items:center;gap:8px;font-weight:600';
         const showAllReceipts=document.createElement('input');showAllReceipts.type='checkbox';showAllReceipts.checked=true;
-        showAllLabel.append(showAllReceipts,document.createTextNode('Show all saved receipts (regardless of reporting period)'));
+        showAllLabel.append(showAllReceipts,document.createTextNode('Show all saved receipts and statements (regardless of reporting period)'));
         bar.append(showAllLabel);
         const list = make("div", "");
         showAllReceipts.onchange=()=>draw();
@@ -8310,12 +8460,41 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const detailButton=document.createElement('button');detailButton.type='button';detailButton.className='btn';detailButton.textContent='View Details';detailButton.onclick=()=>{const existing=line.querySelector('.receipt-detail-panel');if(existing){existing.remove();return;}const panel=document.createElement('div');panel.className='receipt-detail-panel';panel.style.cssText='padding:16px;margin-top:10px;background:#f7f8fa;border:1px solid #d9dee7;border-radius:12px;white-space:pre-wrap';panel.textContent=[['Vendor',r.vendor],['Date',r.date],['Amount',money(r.amount)],['Employee',r.employee],['Category',r.category],['Receipt #',r.receipt_number],['Card',r.card_last4?'•••• '+r.card_last4:''],['Notes',r.notes],['Authorization',r.authorization_status||'Pending Authorization'],['Authorized by',r.authorized_by],['Authorized at',r.authorized_at]].filter(x=>x[1]).map(x=>x[0]+': '+x[1]).join('\n');line.append(panel);};controls.append(detailButton);
             controls.append(edit,view,del);line.append(name,controls);list.appendChild(line);
           });
+          const statementRows=(showAllReceipts.checked?pdsStatements:pdsStatements.filter(r=>inPeriod(r.period_start||r.date||r.created_at)));
+          for(const r of statementRows){
+            const name=String(r.issuer||r.document_type||'Statement');
+            const searchable=[name,r.period_start,r.period_end,r.date,r.notes,r.original_filename,r.document_type].map(v=>String(v||'')).join(' ').toLowerCase();
+            if(q&&!searchable.includes(q))continue;
+            const line=document.createElement('div');line.className='card';line.style.cssText='padding:14px;margin:10px 0;border:1px solid #d9dfe8;border-radius:12px';
+            const title=document.createElement('strong');title.textContent='Statement · '+name;
+            const info=document.createElement('div');info.className='hint';info.textContent=[r.period_start||r.date,r.period_end?'Through '+r.period_end:'',r.document_type].filter(Boolean).join(' · ');
+            const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+            const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='View Statement';
+            open.onclick=()=>{const existing=line.querySelector('.pds-statement-detail');if(existing){existing.remove();return;}
+              const detail=document.createElement('div');detail.className='pds-statement-detail';detail.style.cssText='margin-top:12px;padding:12px;background:#f8fafc;border:1px solid #d9dee7;border-radius:10px;display:grid;gap:7px';
+              for(const [label,value] of [['Issuer',r.issuer],['Period Start',r.period_start],['Period End',r.period_end],['Type',r.document_type],['Notes',r.notes]]){
+                if(value===undefined||value===null||value==='')continue;
+                const row=document.createElement('div');const strong=document.createElement('strong');strong.textContent=label+': ';row.append(strong,document.createTextNode(String(value)));detail.append(row);
+              }
+              if(r.attachment&&r.id){const path='/accounting/statements/'+encodeURIComponent(r.id)+'/file';
+                const link=document.createElement('a');link.className='btn';link.textContent='Download Original';link.href=path;link.target='_blank';link.rel='noopener noreferrer';detail.append(link);
+                const filename=String(r.original_filename||r.attachment);
+                if(/\.(png|jpg|jpeg|webp)$/i.test(filename)){const image=document.createElement('img');image.src=path+'?inline=1';image.alt='Attached statement';image.style.cssText='width:100%;max-height:550px;object-fit:contain;border:1px solid #d9dee7;border-radius:9px';detail.append(image);}
+              }
+              line.append(detail);
+            };
+            const edit=document.createElement('button');edit.type='button';edit.className='btn';edit.textContent='Open Statement Editor';edit.onclick=()=>renderAccountingView('statements');
+            buttons.append(open,edit);line.append(title,info,buttons);list.append(line);
+          }
+          if(statementResponse.load_error){const note=document.createElement('p');note.className='hint';note.textContent='Statements could not be loaded: '+statementResponse.load_error;list.append(note);}
         }
         // Receipts: saved records first, compact action buttons, optional summaries.
         const receiptActions=document.createElement("div");receiptActions.style.cssText="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:12px 0";
         const newReceipt=document.createElement("button");newReceipt.type="button";newReceipt.className="btn btn-orange";newReceipt.textContent="+ New Receipt";
         const uploadReceipt=document.createElement("button");uploadReceipt.type="button";uploadReceipt.className="btn";uploadReceipt.textContent="Upload Receipt / Read with AI";
-        receiptActions.append(newReceipt,uploadReceipt);
+        const newStatement=document.createElement('button');newStatement.type='button';newStatement.className='btn btn-orange';newStatement.textContent='+ New Statement';
+        newStatement.onclick=()=>renderAccountingView('statements');
+        receiptActions.append(newReceipt,newStatement,uploadReceipt);
         host.insertBefore(receiptActions,bar);
         host.insertBefore(bar,dashboard);
         host.insertBefore(list,dashboard);
@@ -11814,14 +11993,14 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     btnPO.innerHTML = `<span>Purchase Orders</span>`;
     tabs.append(btnGen, btnEst, btnInv, btnPO);
  
-    const hubIntro=document.createElement('div');hubIntro.className='card';hubIntro.innerHTML='<h2>Business Hub</h2><p class="hint">Generate documents or open saved estimates, invoices and purchase orders.</p><div id="pdsBusinessCards"></div>';
+    const hubIntro=document.createElement('div');hubIntro.className='card pds-office-business-hub';hubIntro.innerHTML='<h2>Business Hub</h2><p class="hint">Manage estimates, invoices, purchasing, documents, customers and suppliers from one workspace.</p><div id="pdsBusinessCards"></div>';
     root.append(hubIntro);
     makeHubCards(hubIntro.querySelector('#pdsBusinessCards'),[
       {icon:'📝',label:'Generator',description:'Create estimates and invoices.',open:()=>btnGen.click()},
       {icon:'📋',label:'Estimates',description:'Search and manage saved estimates.',open:()=>btnEst.click()},
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
-      {icon:'📥',label:'Inventory & Receiving',description:'Receive deliveries and review PO receiving history.',open:()=>renderPoReceiving('pds',()=>renderEstimatePage())},
+      {icon:'💳',label:'Supplier Bills & Payments',description:'Review supplier bills and manual payments through the existing accounting ledger.',open:()=>renderManualAccountingLedger('pds','bills')},
       {icon:'📎',label:'Document Library & AI Upload',description:'Upload receipts, packing slips, bills and statements separately.',open:()=>renderDocumentVault('pds','',()=>renderEstimatePage())},
       {icon:'👥',label:'Customers & Contacts',description:'Open the existing PDS customer and contact database.',open:()=>renderCustomersView()},
       {icon:'🏢',label:'Suppliers',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()},

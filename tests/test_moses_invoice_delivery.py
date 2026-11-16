@@ -10,6 +10,8 @@ from tests.test_moses_stripe import setup as stripe_setup, mock_session
 def setup(tmp_path, monkeypatch, platform='doorks'):
     request = stripe_setup(tmp_path, monkeypatch, platform)
     monkeypatch.setenv('MOSES_INVOICE_SEND_ENABLED', 'true')
+    monkeypatch.setenv('MOSES_EMAIL_PROVIDER', 'resend')
+    monkeypatch.setenv('RESEND_API_KEY', 're_synthetic_test_only')
     monkeypatch.setenv('MOSES_DOCUMENTS_FROM', 'documents@example.com')
     monkeypatch.setenv('MOSES_INVOICES_REPLY_TO', 'invoices@example.com')
     monkeypatch.setenv('DOORKS_SMTP_HOST', 'smtp.example.com')
@@ -32,7 +34,7 @@ def setup(tmp_path, monkeypatch, platform='doorks'):
 def test_email_approval_pdf_and_ap_address(tmp_path, monkeypatch, platform):
     request, path = setup(tmp_path, monkeypatch, platform)
     delivered = []
-    monkeypatch.setattr(mail, '_transmit', lambda snap, pdf: delivered.append((snap, pdf)))
+    monkeypatch.setattr(mail, '_transmit', lambda snap, pdf:(delivered.append((snap, pdf)),'email_mock_invoice')[1])
     proposal = mail.propose(request, platform, 'inv1')['proposal']
     assert proposal['to'] == 'ap@example.com' and proposal['recipient_source'] == 'customer_ap'
     assert not delivered

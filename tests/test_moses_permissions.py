@@ -31,9 +31,9 @@ def test_pds_disabled_is_reported_explicitly(monkeypatch):
 
 
 def test_enabling_flags_only_enables_proposal_not_execution(monkeypatch):
-    monkeypatch.setenv('MOSES_EMAIL_PROVIDER', 'smtp')
-    for field in ('DOORKS_SMTP_HOST', 'DOORKS_SMTP_USERNAME', 'DOORKS_SMTP_PASSWORD', 'DOORKS_SMTP_FROM'):
-        monkeypatch.setenv(field, 'synthetic-not-real')
+    monkeypatch.setenv('MOSES_EMAIL_PROVIDER', 'resend')
+    monkeypatch.setenv('RESEND_API_KEY', 're_synthetic_not_real')
+    monkeypatch.setenv('MOSES_DOCUMENTS_FROM', 'NoReply@prioritydoors.com')
     monkeypatch.setenv('STRIPE_SECRET_KEY', 'sk_test_synthetic')
     for platform in ('pds', 'doorks', 'sdc'):
         monkeypatch.setenv(moses_permissions.AGENT_FLAGS[platform], 'true')

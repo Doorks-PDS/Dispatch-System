@@ -21,6 +21,9 @@ def identity(platform: str, kind: str) -> dict:
         raise ValueError('Unsupported workspace')
     if kind not in ('estimate', 'invoice', 'purchase_order', 'dispatch'):
         raise ValueError('Unsupported email category')
+    # PDS uses an independent verified sender; Atlas/SDC retain their own sender.
+    # One Resend sender identity across PDS, Doorks and Atlas/SDC.
+    # Reply-To remains department- and workspace-specific.
     sender = _email(os.getenv('MOSES_DOCUMENTS_FROM'))
     if platform == 'pds':
         key = {

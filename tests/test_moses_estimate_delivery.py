@@ -9,6 +9,8 @@ from tests.test_moses_estimate_acceptance import setup
 def configured(monkeypatch):
     for key, value in {
         'MOSES_ESTIMATE_SEND_ENABLED':'true',
+        'MOSES_EMAIL_PROVIDER':'resend',
+        'RESEND_API_KEY':'re_synthetic_test_only',
         'MOSES_PUBLIC_BASE_URL':'https://portal.example.com',
         'MOSES_DOCUMENTS_FROM':'documents@example.com',
         'MOSES_ESTIMATES_REPLY_TO':'estimates@example.com',
@@ -24,7 +26,7 @@ def test_approved_email_pdf_and_link_sent_once(tmp_path, monkeypatch, platform):
     configured(monkeypatch)
     request, public, folder = setup(tmp_path, platform)
     sent = []
-    monkeypatch.setattr(delivery, '_transmit', lambda snapshot, pdf: sent.append((snapshot, pdf)))
+    monkeypatch.setattr(delivery, '_transmit', lambda snapshot, pdf:(sent.append((snapshot, pdf)),'email_mock_estimate')[1])
     proposal = delivery.propose(request, platform, 'estimate-1')['proposal']
     assert proposal['to'] == 'contact@example.com'
     assert not sent

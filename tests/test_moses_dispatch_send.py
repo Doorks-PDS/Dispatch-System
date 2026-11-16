@@ -7,6 +7,8 @@ from app.services import moses_dispatch_send as send
 
 def setup(tmp_path, monkeypatch, platform='doorks'):
     monkeypatch.setenv('MOSES_DISPATCH_SEND_ENABLED','true')
+    monkeypatch.setenv('MOSES_EMAIL_PROVIDER', 'resend')
+    monkeypatch.setenv('RESEND_API_KEY', 're_synthetic_test_only')
     monkeypatch.setenv('MOSES_DOCUMENTS_FROM','office@example.com')
     monkeypatch.setenv('MOSES_DISPATCH_REPLY_TO','dispatch@example.com')
     monkeypatch.setenv('DOORKS_SMTP_FROM','office@example.com')
@@ -27,7 +29,7 @@ def setup(tmp_path, monkeypatch, platform='doorks'):
 def test_approval_and_no_duplicate_sends(tmp_path,monkeypatch):
     req,job,path=setup(tmp_path,monkeypatch)
     sent=[]
-    monkeypatch.setattr(send,'_transmit',lambda msg:sent.append(msg.copy()))
+    monkeypatch.setattr(send,'_transmit',lambda msg:(sent.append(msg.copy()),'email_mock_dispatch')[1])
     proposal=send.propose(req,'doorks','j1','scheduled')['proposal']
     assert not sent
     result=send.decide(req,'doorks',proposal['id'],True)

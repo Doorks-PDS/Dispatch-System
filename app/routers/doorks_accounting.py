@@ -174,4 +174,10 @@ def original(kind:str,item_id:str,request:Request):
     if not item or not item.get("attachment"):raise HTTPException(404,"No original attached")
     path=folder/"attachments"/Path(item["attachment"]).name
     if not path.is_file():raise HTTPException(404,"Original not found")
-    return FileResponse(path,filename=item.get("original_filename","document"))
+    # Inline preview is restricted to the exact same authenticated original.
+    # Default remains attachment download for every format.
+    inline = request.query_params.get('inline') == '1' and path.suffix.lower() in ('.png','.jpg','.jpeg','.webp')
+    types={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp'}
+    return FileResponse(path,filename=item.get('original_filename','document'),
+                        media_type=types.get(path.suffix.lower(),'application/octet-stream'),
+                        content_disposition_type='inline' if inline else 'attachment')

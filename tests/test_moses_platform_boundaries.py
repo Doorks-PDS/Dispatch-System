@@ -51,7 +51,7 @@ def test_pds_agent_has_search_and_proposal_only(monkeypatch):
         Agent=FakeAgent, Runner=FakeRunner, RunConfig=lambda **kwargs: None,
         function_tool=lambda fn: fn))
     assert 'no changes' in moses_agent.answer(req(), 'Find Acme', []).lower()
-    assert [tool.__name__ for tool in captured['tools']] == ['get_moses_permissions', 'get_business_briefing', 'review_purchase_order_receiving', 'propose_purchase_order_receipt', 'search_pds_jobs', 'get_pds_job_details', 'get_pds_work_queue', 'get_pds_estimate_context', 'get_pds_estimate_preview', 'propose_pds_job_status', 'inspect_product_page', 'propose_pds_catalog_part', 'preview_dispatch_customer_email', 'propose_vendor_po_email']
+    assert [tool.__name__ for tool in captured['tools']] == ['get_moses_permissions', 'prepare_moses_action', 'get_moses_action_receipt', 'get_moses_pending_actions', 'get_business_briefing', 'review_purchase_order_receiving', 'propose_purchase_order_receipt', 'search_pds_jobs', 'get_pds_job_details', 'get_pds_work_queue', 'get_pds_estimate_context', 'get_pds_estimate_preview', 'propose_pds_job_status', 'inspect_product_page', 'propose_pds_catalog_part', 'preview_dispatch_customer_email', 'propose_vendor_po_email']
     assert 'PDS' in captured['name']
     with pytest.raises(HTTPException):
         moses_agent.answer(req('sdc', 'technician'), 'Find Acme', [])

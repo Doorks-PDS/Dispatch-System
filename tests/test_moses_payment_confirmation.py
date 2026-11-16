@@ -13,7 +13,7 @@ from tests.test_moses_stripe import signed, event
 def test_complete_checkout_email_webhook_receipt_preview(tmp_path, monkeypatch, platform):
     req, invoice_path = invoice_setup(tmp_path, monkeypatch, platform)
     outbound = []
-    monkeypatch.setattr(mail, '_transmit', lambda msg, pdf: outbound.append((msg, pdf)))
+    monkeypatch.setattr(mail, '_transmit', lambda msg, pdf:(outbound.append((msg, pdf)),'email_mock_payment')[1])
     proposal = mail.propose(req, platform, 'inv1')['proposal']
     assert not outbound
     assert mail.decide(req, platform, proposal['id'], True)['sent']

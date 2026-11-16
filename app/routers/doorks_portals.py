@@ -2140,7 +2140,7 @@ async def publish_document_original(document_id: str, request: Request, file: Up
 
 
 # Explicit office-only delivery of the published, customer-facing original.
-# SMTP is opt-in via environment variables; no vendor draft is ever attached.
+# Published Doorks customer document email uses the shared Resend sender.
 class OfficeDocumentEmail(BaseModel):
     recipient: str = Field(min_length=5, max_length=250)
     subject: str = Field(min_length=1, max_length=200)
@@ -2150,9 +2150,9 @@ class OfficeDocumentEmail(BaseModel):
 def email_published_customer_document(document_id: str, payload: OfficeDocumentEmail, request: Request):
     _portal_origin(request)
     admin(request)
-    from email.message import EmailMessage
     from email.utils import parseaddr
-    import smtplib, ssl
+    from app.services.moses_mail_identity import identity
+    from app.services.moses_email_transport import send_resend_attachment, delivery_receipt
     recipient = payload.recipient.strip().lower()
     if (not recipient or any(c in recipient for c in '\r\n,;') or
             parseaddr(recipient)[1].lower() != recipient or
@@ -2183,46 +2183,58 @@ def email_published_customer_document(document_id: str, payload: OfficeDocumentE
     if not original: raise HTTPException(409, 'Publish the approved customer-facing original first')
     file_path = store(request).parent/'portal_private_uploads'/(original['file_id']+'.'+original['extension'])
     if not file_path.is_file(): raise HTTPException(404, 'Published document file missing')
-    host = os.environ.get('DOORKS_SMTP_HOST','').strip()
-    sender = os.environ.get('DOORKS_SMTP_FROM','').strip()
-    username = os.environ.get('DOORKS_SMTP_USERNAME','').strip()
-    password = os.environ.get('DOORKS_SMTP_PASSWORD','')
-    if not host or not sender or not username or not password:
-        raise HTTPException(503, 'Office email not configured; set Doorks SMTP environment variables')
-    try: port = int(os.environ.get('DOORKS_SMTP_PORT','465'))
-    except ValueError: raise HTTPException(503,'SMTP port invalid')
-    if not (1 <= port <= 65535): raise HTTPException(503,'SMTP port invalid')
-    msg = EmailMessage()
-    msg['From'] = sender
-    msg['To'] = recipient
-    msg['Subject'] = payload.subject.strip()
-    msg.set_content(payload.message.strip())
+    kind = 'invoice' if doc['document_type'] == 'Invoice' else 'estimate'
+    sender_info = identity('doorks', kind)
+    if sender_info.get('issues'):
+        raise HTTPException(503, 'Resend sender or Reply-To not configured for Doorks')
     attachment = file_path.read_bytes()
-    if len(attachment)>10*1024*1024: raise HTTPException(413,'Document exceeds email attachment limit')
-    mime = original.get('mime','application/pdf').split('/',1)
+    if len(attachment)>10*1024*1024:
+        raise HTTPException(413,'Document exceeds email attachment limit')
     safe_name = Path(original.get('filename') or ('customer-document.'+original['extension'])).name
-    msg.add_attachment(attachment,maintype=mime[0],subtype=mime[1],filename=safe_name)
+    mime = str(original.get('mime') or '').strip().lower()
+    import hashlib
+    fingerprint=hashlib.sha256(json.dumps({
+        'document_id':document_id, 'recipient':recipient,
+        'subject':payload.subject.strip(),'message':payload.message.strip(),
+        'published_file_id':original['file_id']},sort_keys=True).encode('utf-8')).hexdigest()
+    # Commit intent before an external call. A retry after an ambiguous result is
+    # held for review rather than causing a duplicate email to a real customer.
+    with _lock:
+        p=store(request);data=read(p)
+        history=data.setdefault('document_email_history',[])
+        if any(row.get('fingerprint')==fingerprint and
+               row.get('state') in ('sending','needs_review','accepted_by_provider')
+               for row in history):
+            raise HTTPException(409,'Matching send is recorded or requires review; check Resend/audit before repeating')
+        intent={'id':uuid.uuid4().hex,'document_id':document_id,'customer_id':customer_id,
+                'recipient':recipient,'requested_at':iso(now()),'subject':payload.subject.strip(),
+                'original_file_id':original['file_id'],'provider':'resend',
+                'fingerprint':fingerprint,'state':'sending'}
+        history.append(intent);write(p,data)
     try:
-        context = ssl.create_default_context()
-        if port == 465:
-            with smtplib.SMTP_SSL(host,port,timeout=15,context=context) as smtp:
-                smtp.login(username,password)
-                smtp.send_message(msg)
-        else:
-            with smtplib.SMTP(host,port,timeout=15) as smtp:
-                smtp.starttls(context=context)
-                smtp.login(username,password)
-                smtp.send_message(msg)
-    except (OSError, smtplib.SMTPException) as exc:
-        raise HTTPException(502, 'Email delivery failed; check SMTP configuration and try again') from exc
+        provider_id=send_resend_attachment({
+            'from':sender_info['from'],'to':recipient,'reply_to':sender_info['reply_to'],
+            'subject':payload.subject.strip(),'text':payload.message.strip()},
+            attachment,safe_name,mime,idempotency_key=fingerprint)
+        receipt=delivery_receipt(provider_id)
+    except Exception as exc:
+        with _lock:
+            p=store(request);data=read(p)
+            row=next((x for x in data.get('document_email_history',[]) if x.get('id')==intent['id']),None)
+            if row:
+                row['state']='needs_review';row['review_required_at']=iso(now())
+                write(p,data)
+        raise HTTPException(502,'Resend acceptance unconfirmed; check provider/audit before retrying') from exc
     with _lock:
         p=store(request); data=read(p)
-        data.setdefault('document_email_history',[]).append({'id':uuid.uuid4().hex,
-            'document_id':document_id,'customer_id':customer_id,'recipient':recipient,
-            'sent_at':iso(now()),'subject':payload.subject.strip(),
-            'original_file_id':original['file_id']})
+        row=next((x for x in data.get('document_email_history',[]) if x.get('id')==intent['id']),None)
+        if not row:raise HTTPException(500,'Resend accepted but audit receipt missing; manual review required')
+        row.update(state='accepted_by_provider',sent_at=iso(now()),**receipt)
         write(p,data)
-    return {'ok':True,'recipient':recipient,'document_id':document_id,'message':'Email sent with published original attached'}
+    return {'ok':True,'recipient':recipient,'document_id':document_id,
+            'provider':'resend','provider_message_id':provider_id,
+            'delivery_status':'accepted_by_provider',
+            'message':'Resend accepted published original; inbox delivery not verified'}
 
 @router.get('/accounts/document-originals/{document_id}')
 def customer_document_original(document_id: str, request: Request):

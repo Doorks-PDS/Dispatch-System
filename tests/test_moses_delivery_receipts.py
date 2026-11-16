@@ -14,6 +14,7 @@ def test_reject_unverifiable_receipts(monkeypatch,bad):
     monkeypatch.setenv('MOSES_EMAIL_PROVIDER','resend')
     with pytest.raises(RuntimeError):transport.delivery_receipt(bad)
 
-def test_smtp_receipt_does_not_fabricate_message_id(monkeypatch):
+def test_outlook_smtp_not_accepted_as_moses_provider(monkeypatch):
     monkeypatch.setenv('MOSES_EMAIL_PROVIDER','smtp')
-    assert transport.delivery_receipt(None) == {'transport':'smtp','delivery_status':'submitted_to_provider'}
+    from fastapi import HTTPException
+    with pytest.raises(HTTPException):transport.delivery_receipt(None)

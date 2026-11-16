@@ -386,7 +386,7 @@ def test_agent_sdk_tools_are_read_only_or_proposal_only(monkeypatch):
     assert result == 'Done, no records changed'
     assert captured['run_kwargs']['max_turns'] == 5
     assert captured['config']['tracing_disabled'] is True
-    assert len(captured['tools']) == 22
+    assert len(captured['tools']) == 25
     assert {'get_business_briefing', 'get_moses_permissions'} <= {fn.__name__ for fn in captured['tools']}
     assert 'propose_customer_estimate_email' in {fn.__name__ for fn in captured['tools']}
     assert 'propose_draft_purchase_order' in {fn.__name__ for fn in captured['tools']}
@@ -419,7 +419,7 @@ def test_sdc_agent_failure_does_not_fall_back_to_legacy(monkeypatch):
     monkeypatch.setattr(moses_agent, 'answer', lambda *_: (_ for _ in ()).throw(RuntimeError('offline')))
     monkeypatch.setattr(assistant, '_request_model', lambda *_: pytest.fail('legacy model called'))
     result = assistant.chat(assistant.Message(message='Analyze business trends'), request('sdc'))
-    assert 'could not connect' in result['answer']
+    assert 'could not complete the live AI request' in result['answer']
 
 
 def test_agent_service_rejects_unknown_workspace_and_non_admin():
