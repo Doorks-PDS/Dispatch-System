@@ -79,7 +79,7 @@ def sanitize(kind, data):
             try:amount=round(float(line.get('amount') or 0),2)
             except (ValueError,TypeError):raise HTTPException(400,'Invalid transaction amount')
             if abs(amount)>100000000:raise HTTPException(400,'Invalid transaction amount')
-            result['transactions'].append({'date':clean_text(line.get('date'),20),'vendor':clean_text(line.get('vendor')),'employee':clean_text(line.get('employee')),'card_last4':clean_text(line.get('card_last4'),4),'receipt_number':clean_text(line.get('receipt_number')),'category':clean_text(line.get('category')),'amount':amount,'notes':clean_text(line.get('notes'),300),'exclude_from_expenses':line.get('exclude_from_expenses') is True})
+            result['transactions'].append({'date':clean_text(line.get('date'),20),'vendor':clean_text(line.get('vendor')),'employee':clean_text(line.get('employee')),'card_last4':clean_text(line.get('card_last4'),4),'receipt_number':clean_text(line.get('receipt_number')),'category':clean_text(line.get('category')),'amount':amount,'notes':clean_text(line.get('notes'),300),'exclude_from_expenses':line.get('exclude_from_expenses') is True,'matched_receipt_id':clean_text(line.get('matched_receipt_id'),64)})
         return result
     raise HTTPException(404,'Unknown record type')
 

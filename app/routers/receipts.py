@@ -62,7 +62,8 @@ async def create_receipt(
     date: str = Form(...), employee: str = Form(...), vendor: str = Form(...),
     amount: float = Form(...), card_last4: str = Form(""), receipt_number: str = Form(""),
     notes: str = Form(""), category: str = Form("Other"), document_type: str = Form(""),
-    job_number: str = Form(""), customer: str = Form(""), file: UploadFile = File(...),
+    job_number: str = Form(""), customer: str = Form(""),
+    stock_reference: str = Form(""), po_number: str = Form(""), file: UploadFile = File(...),
     x_api_key: Optional[str] = Header(default=None),
 ):
     _require(request, x_api_key)
@@ -89,6 +90,7 @@ async def create_receipt(
     record = {
         "id": item_id, "document_type": document_type,
         "job_number": job_number.strip()[:80], "customer": customer.strip()[:200],
+         "stock_reference": stock_reference.strip()[:100], "po_number": po_number.strip()[:80],
         "date": date.strip(), "employee": employee.strip(),
         "vendor": vendor.strip(), "amount": round(amount, 2),
         "card_last4": card_last4, "receipt_number": receipt_number.strip()[:120],
@@ -208,7 +210,7 @@ async def edit_receipt(request: Request, receipt_id: str, x_api_key: Optional[st
     from app.routers.accounting import require_office
     require_office(request, x_api_key)
     changes = await request.json()
-    allowed = {"document_type", "job_number", "customer", "date", "employee", "vendor", "amount", "card_last4", "receipt_number", "notes", "category"}
+    allowed = {"document_type", "job_number", "customer", "stock_reference", "po_number", "date", "employee", "vendor", "amount", "card_last4", "receipt_number", "notes", "category"}
     if not isinstance(changes, dict) or any(k not in allowed for k in changes):
         raise HTTPException(400, "Invalid receipt fields")
     base, index = _paths(request)
@@ -300,7 +302,8 @@ def get_receipt_file(request: Request, receipt_id: str, x_api_key: Optional[str]
     target = base / Path(item["stored_file"]).name
     if not target.is_file():
         raise HTTPException(404, "Receipt file missing")
-    return FileResponse(target, media_type=mimetypes.guess_type(str(target))[0] or "application/octet-stream", filename=item["filename"])
+    return FileResponse(target, media_type=mimetypes.guess_type(str(target))[0] or "application/octet-stream", filename=item["filename"],
+                        content_disposition_type="inline" if request.query_params.get("inline") == "1" and target.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp"} else "attachment")
 
 @router.post("/extract")
 async def extract_receipt(request: Request, file: UploadFile = File(...), x_api_key: Optional[str] = Header(default=None)):

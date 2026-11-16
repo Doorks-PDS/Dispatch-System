@@ -1,23 +1,34 @@
-"""Public Moses Q&A is explicitly a guided local-only demo, not a live AI endpoint."""
+"""Regression coverage for the public floating Moses assistant.
+
+The previous guided inline demo was intentionally replaced. Keep the lead
+form, package cards, and customer-data boundary intact.
+"""
 from pathlib import Path
 
-BASE=Path(__file__).resolve().parents[1]
+BASE = Path(__file__).resolve().parents[1]
 
-def test_demo_rendered_without_removing_lead_form():
-    text=(BASE/'static/sdc_software.html').read_text(encoding='utf-8')
-    assert 'id="atlas-moses-demo"' in text
-    assert 'id="atlas-moses-workflows"' in text
-    assert text.index('id="atlas-moses-demo"') < text.index('id="atlas-moses-workflows"')
-    assert 'id="lead"' in text and '/api/software/inquiries' in text
-    assert 'id="packages"' in text
-    assert '/static/atlas_moses_demo.js' in text and '/static/atlas_moses_demo.css' in text
-    assert 'No business records accessed' in text
-    assert 'not sent to Atlas' in text
 
-def test_public_demo_is_not_network_connected_or_actionable():
-    js=(BASE/'static/atlas_moses_demo.js').read_text(encoding='utf-8')
-    for forbidden in ('fetch(', 'XMLHttpRequest', 'WebSocket(', 'localStorage', 'sessionStorage', 'eval(', 'innerHTML', '/api/'):
+def test_floating_moses_replaces_inline_demo_without_removing_lead_form():
+    page = (BASE / "static/sdc_software.html").read_text(encoding="utf-8")
+    assert 'id="atlas-moses-chat-widget"' in page
+    assert 'data-moses-open' in page and 'data-moses-panel' in page
+    assert '/static/atlas_moses_public.js' in page
+    assert '/static/atlas_moses_public.css' in page
+    assert 'id="atlas-moses-demo"' not in page
+    assert 'id="atlas-moses-workflows"' in page
+    assert 'id="lead"' in page and '/api/software/inquiries' in page
+    assert 'id="packages"' in page
+
+
+def test_public_moses_uses_public_product_endpoint_only():
+    js = (BASE / "static/atlas_moses_public.js").read_text(encoding="utf-8")
+    assert "/doorks-assistant/public/atlas-chat" in js
+    assert "data-moses-log" in js
+    assert 'content.textContent=body' in js
+    for forbidden in (
+        "/doorks-assistant/chat", "/butler/actions/", "/documents/estimate",
+        "/calendar/jobs/", "/workspaces/", "localStorage", "sessionStorage",
+        "eval(", "innerHTML",
+    ):
         assert forbidden not in js
-    for topic in ('quote','invoice','permission','purchase','plan','work-order'):
-        assert topic in js
-    assert "p.textContent=content" in js
+    assert (BASE / "static/atlas_moses_public.css").is_file()

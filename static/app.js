@@ -263,15 +263,49 @@
     pendingButton.onclick=refreshPending;
     history.after(actionPanel);
     let mosesTurns=[],mosesWorkspace=document.body.dataset.platform||'';
-    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10)})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[])showAction(proposal);for(const m of r.matches||[]){
-      const item=document.createElement('div');item.style.cssText='padding:10px;border:1px solid #d9dee7;border-radius:10px;display:grid;gap:6px';
-      const label=document.createElement('strong');label.textContent=[m.name,m.job_number,m.date,m.status].filter(Boolean).join(' · ');item.append(label);
-      if(m.address){const address=document.createElement('small');address.textContent=m.address;item.append(address)}
-      if(m.navigate==='all_jobs'){
-        const button=document.createElement('button');button.className='btn';button.textContent='Find in All Jobs';button.onclick=()=>{panel.hidden=true;renderAllJobsView();const field=document.getElementById('all_jobs_search');if(field){field.value=m.job_number||m.name;document.getElementById('all_jobs_refresh')?.click()}};item.append(button)
-      }history.append(item)
-    }
-    for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
+    const mosesJobCards=(groups, fallback=[])=>{
+      const results=document.createElement('section');results.className='moses-job-results';
+      results.style.cssText='display:grid;gap:10px;margin:10px 0';
+      const openJob=async row=>{
+        panel.hidden=true;renderAllJobsView();
+        const field=document.getElementById('all_jobs_search');
+        if(field){field.value=row.job_number||row.customer||row.name||'';document.getElementById('all_jobs_refresh')?.click();}
+      };
+      const addCard=(row, groupName)=>{
+        const card=document.createElement('article');card.style.cssText='border:1px solid #d8e3dc;background:#fff;border-radius:12px;padding:12px;display:grid;gap:7px';
+        const top=document.createElement('div');top.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap';
+        const name=document.createElement('strong');name.textContent=row.customer||row.name||'Saved job';
+        const status=document.createElement('span');status.textContent=row.status||groupName||'Open';status.style.cssText='border-radius:999px;background:#eef3f5;padding:4px 9px;font-size:12px';
+        top.append(name,status);card.append(top);
+        const meta=document.createElement('small');meta.textContent=[row.job_number?'Job #'+row.job_number:'',row.date||'',row.address||''].filter(Boolean).join(' • ');card.append(meta);
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+        const view=document.createElement('button');view.type='button';view.className='btn';view.textContent='Open Ticket';view.onclick=()=>openJob(row);actions.append(view);
+        if(row.can_prepare_estimate && row.id && mosesWorkspace==='pds'){
+          const estimate=document.createElement('button');estimate.type='button';estimate.className='btn btn-orange';estimate.textContent='Prepare Estimate';
+          estimate.onclick=async()=>{
+            estimate.disabled=true;
+            try{
+              // Re-read current server job; never trust a chat-supplied description or price.
+              const current=await apiGetJob(row.id);
+              if(!current || String(current.id||'')!==String(row.id))throw new Error('Job could not be verified');
+              panel.hidden=true;
+              await openEstimateInvoiceDrawer(current,'estimate',null,{skipHelper:true,helperPrefill:{autoFill:true,tripQty:0,fuelQty:0}});
+            }catch(e){estimate.disabled=false;add('Moses','Could not open verified PDS estimator: '+(e.message||e));}
+          };actions.append(estimate);
+        }
+        card.append(actions);results.append(card);
+      };
+      if(Array.isArray(groups)&&groups.length){
+        for(const group of groups){
+          const heading=document.createElement('div');heading.style.cssText='font-weight:700;padding:6px 2px';
+          heading.textContent=(group.label||'Jobs')+' ('+Number(group.count||0)+')';results.append(heading);
+          for(const row of group.jobs||[])addCard(row,group.label);
+        }
+      }else for(const row of fallback)addCard(row,'');
+      history.append(results);history.scrollTop=history.scrollHeight;
+    };
+    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10)})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[])showAction(proposal);if((r.queue_cards&&r.queue_cards.length)||(r.matches&&r.matches.length))mosesJobCards(r.queue_cards,r.matches||[]);
+        for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
     // SDC command center: persistent approval queue. No automatic task execution.
     const commandBtn=document.createElement('button');commandBtn.type='button';commandBtn.className='btn';commandBtn.textContent='Command Center';
     header.insertBefore(commandBtn,close);
@@ -5811,6 +5845,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }));
     card.appendChild(renderDocumentsSection(job));
     card.appendChild(renderSavedForms(job, container, ctx));
+     // Read-only links from legacy receipts. No job, inventory, or accounting record is changed.
+     if (job.kind === "dispatch" && window.PDSOfficeTickets) window.PDSOfficeTickets.jobReceipts(card,job);
  
     container.appendChild(card);
  
@@ -8457,7 +8493,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             });
             const approval=document.createElement('span');approval.className='hint';approval.textContent=r.authorization_status==='Authorized'?`Authorized by ${r.authorized_by||'office'} ${r.authorized_at||''}`:'Pending Authorization';controls.append(approval);
             {const authorize=document.createElement('button');authorize.className='btn';authorize.textContent=r.authorization_status==='Authorized'?'Unauthorize':'Authorize';authorize.onclick=async()=>{if(!confirm(authorize.textContent+' this receipt?'))return;try{await fetchJSON(`/receipts/${encodeURIComponent(r.id)}/${r.authorization_status==='Authorized'?'unauthorize':'authorize'}`,{method:'POST'});await renderAccountingView('receipts');}catch(e){alert(e.message||e);}};controls.append(authorize);}
-            const detailButton=document.createElement('button');detailButton.type='button';detailButton.className='btn';detailButton.textContent='View Details';detailButton.onclick=()=>{const existing=line.querySelector('.receipt-detail-panel');if(existing){existing.remove();return;}const panel=document.createElement('div');panel.className='receipt-detail-panel';panel.style.cssText='padding:16px;margin-top:10px;background:#f7f8fa;border:1px solid #d9dee7;border-radius:12px;white-space:pre-wrap';panel.textContent=[['Vendor',r.vendor],['Date',r.date],['Amount',money(r.amount)],['Employee',r.employee],['Category',r.category],['Receipt #',r.receipt_number],['Card',r.card_last4?'•••• '+r.card_last4:''],['Notes',r.notes],['Authorization',r.authorization_status||'Pending Authorization'],['Authorized by',r.authorized_by],['Authorized at',r.authorized_at]].filter(x=>x[1]).map(x=>x[0]+': '+x[1]).join('\n');line.append(panel);};controls.append(detailButton);
+            const detailButton=document.createElement('button');detailButton.type='button';detailButton.className='btn';detailButton.textContent='View Details';detailButton.onclick=()=>window.PDSOfficeTickets.show('receipt',r,items);controls.append(detailButton);
             controls.append(edit,view,del);line.append(name,controls);list.appendChild(line);
           });
           const statementRows=(showAllReceipts.checked?pdsStatements:pdsStatements.filter(r=>inPeriod(r.period_start||r.date||r.created_at)));
@@ -8470,19 +8506,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const info=document.createElement('div');info.className='hint';info.textContent=[r.period_start||r.date,r.period_end?'Through '+r.period_end:'',r.document_type].filter(Boolean).join(' · ');
             const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
             const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='View Statement';
-            open.onclick=()=>{const existing=line.querySelector('.pds-statement-detail');if(existing){existing.remove();return;}
-              const detail=document.createElement('div');detail.className='pds-statement-detail';detail.style.cssText='margin-top:12px;padding:12px;background:#f8fafc;border:1px solid #d9dee7;border-radius:10px;display:grid;gap:7px';
-              for(const [label,value] of [['Issuer',r.issuer],['Period Start',r.period_start],['Period End',r.period_end],['Type',r.document_type],['Notes',r.notes]]){
-                if(value===undefined||value===null||value==='')continue;
-                const row=document.createElement('div');const strong=document.createElement('strong');strong.textContent=label+': ';row.append(strong,document.createTextNode(String(value)));detail.append(row);
-              }
-              if(r.attachment&&r.id){const path='/accounting/statements/'+encodeURIComponent(r.id)+'/file';
-                const link=document.createElement('a');link.className='btn';link.textContent='Download Original';link.href=path;link.target='_blank';link.rel='noopener noreferrer';detail.append(link);
-                const filename=String(r.original_filename||r.attachment);
-                if(/\.(png|jpg|jpeg|webp)$/i.test(filename)){const image=document.createElement('img');image.src=path+'?inline=1';image.alt='Attached statement';image.style.cssText='width:100%;max-height:550px;object-fit:contain;border:1px solid #d9dee7;border-radius:9px';detail.append(image);}
-              }
-              line.append(detail);
-            };
+            open.onclick=()=>window.PDSOfficeTickets.show('statement',r,items);
             const edit=document.createElement('button');edit.type='button';edit.className='btn';edit.textContent='Open Statement Editor';edit.onclick=()=>renderAccountingView('statements');
             buttons.append(open,edit);line.append(title,info,buttons);list.append(line);
           }
@@ -8545,7 +8569,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       <form id="receipt_submit_form">
         <div class="grid2">
           <div><div class="label">Upload Category</div><select class="input" name="document_type" id="pds_doc_type" required><option value="">Select document type…</option><option value="Receipt">Receipt</option><option value="Packing Slip">Packing Slip</option></select></div>
-          <div><div class="label">Job # (optional)</div><input class="input" name="job_number" placeholder="Job number" /></div>
+          <div><div class="label">Job # (optional)</div><input class="input" name="job_number" placeholder="Exact dispatch job number" /></div>
+          <div><div class="label">Stock / Parts Reference (optional)</div><input class="input" name="stock_reference" placeholder="Stock location or part number" /></div>
+          <div><div class="label">PO # (optional)</div><input class="input" name="po_number" placeholder="Related purchase order" /></div>
           <div><div class="label">Customer (optional)</div><input class="input" name="customer" placeholder="Customer" /></div>
           <div><div class="label">Date</div><input class="input" type="date" name="date" required /></div>
           <div><div class="label">Employee</div><input class="input" name="employee" required /></div>
@@ -13443,14 +13469,14 @@ function openEstimateDrawer(job, container = null, ctx = null) {
 function renderDataUploadView() {
     setNavActive(navDataUpload);
     setActiveChip("Office Flow");
-    setWorkspace("Data Upload");
+    setWorkspace("Data Import");
     clearWorkspaceActions();
 
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <h3>Admin Data Upload</h3>
+      <h3>Admin Data Import</h3>
       <div class="hint">Upload only billable_time.csv or tech_notes.csv to the live Render disk.</div>
       <div class="grid2" style="margin-top:12px;">
         <div>
