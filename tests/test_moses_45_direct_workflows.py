@@ -14,7 +14,7 @@ def test_job_flow_button_opens_office_queue_not_failed_ai_chat():
 
 
 def test_todo_actions_use_existing_workflows_and_keep_job_id():
-    assert "window.openMosesDrafts({jobId:String(job.id)})" in APP
+    assert "window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true})" in APP
     assert "await openEstimateInvoiceDrawer(full,'invoice')" in APP
     assert "Review this job for an estimate: " not in APP
 
@@ -42,6 +42,6 @@ def test_direct_actions_do_not_auto_send_or_change_work_records():
     assert "apiListJobs({limit:5000})" in queue
     assert "openDrawer('Job Details'" in queue
     assert "openEstimateInvoiceDrawer(await apiGetJob(job.id),'invoice')" in queue
-    assert "window.openMosesDrafts({jobId:String(job.id)})" in queue
+    assert "await openPdsSingleQuoteReview(job)" in queue
     assert '/resend' not in queue
     assert 'apiUpdateJob(' not in queue

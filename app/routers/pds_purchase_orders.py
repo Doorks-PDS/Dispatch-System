@@ -480,6 +480,114 @@ def _import_prepare(request: Request, payload: ImportBatch):
     return results, new_records
 
 
+# Read-only, bounded intake for PDS source files. Commit remains restricted to
+# separately reviewed, duplicate-checked supplier/parts CSV-style rows.
+@router.post('/import/file-preview')
+async def preview_import_file(request: Request, file: UploadFile = File(...)):
+    _import_guard(request)
+    import csv, io
+    filename = Path(file.filename or 'document').name
+    ext = Path(filename).suffix.casefold()
+    allowed = {'.csv', '.xlsx', '.pdf', '.txt', '.docx', '.png', '.jpg', '.jpeg', '.webp'}
+    if ext not in allowed:
+        raise HTTPException(400, 'Supported: CSV, XLSX, PDF, DOCX, TXT and images')
+    raw = await file.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(413, 'File is too large (8 MB maximum)')
+    if not raw:
+        raise HTTPException(400, 'Empty file')
+    rows, extracted = [], ''
+    if ext == '.csv':
+        try:
+            text = raw.decode('utf-8-sig')
+        except UnicodeDecodeError:
+            text = raw.decode('cp1252')
+        reader = csv.DictReader(io.StringIO(text))
+        if not reader.fieldnames or len(reader.fieldnames) > 80:
+            raise HTTPException(422, 'CSV requires 1–80 columns')
+        for i, record in enumerate(reader):
+            if i >= 1000: raise HTTPException(413, 'Preview up to 1,000 rows per file')
+            rows.append({str(k).strip()[:100]:str(v or '').strip()[:3000] for k,v in record.items() if k is not None})
+    elif ext == '.xlsx':
+        # Standard-library OOXML reader: no new runtime dependency or file writes.
+        try:
+            from zipfile import ZipFile
+            import xml.etree.ElementTree as ET
+            with ZipFile(io.BytesIO(raw)) as archive:
+                filenames = archive.namelist()
+                worksheet = next((n for n in filenames if n.startswith('xl/worksheets/sheet') and n.endswith('.xml')), None)
+                if not worksheet:raise ValueError('No Excel worksheet found')
+                if archive.getinfo(worksheet).file_size > 12 * 1024 * 1024:
+                    raise HTTPException(413, 'Excel worksheet too large')
+                ns = '{http://schemas.openxmlformats.org/spreadsheetml/2006/main}'
+                shared = []
+                if 'xl/sharedStrings.xml' in filenames:
+                    if archive.getinfo('xl/sharedStrings.xml').file_size > 5 * 1024 * 1024:
+                        raise HTTPException(413, 'Excel shared strings too large')
+                    sr = ET.fromstring(archive.read('xl/sharedStrings.xml'))
+                    shared = [''.join(node.itertext()) for node in sr.findall(ns+'si')]
+                sheet = ET.fromstring(archive.read(worksheet))
+                parsed=[]
+                for row_node in sheet.iter(ns+'row'):
+                    cells={}
+                    for cell in row_node.findall(ns+'c'):
+                        ref=cell.get('r','')
+                        letters=''.join(ch for ch in ref if ch.isalpha()).upper()
+                        index=0
+                        for ch in letters:index=index*26+ord(ch)-64
+                        if not (1 <= index <= 80):continue
+                        raw_value=cell.findtext(ns+'v') or ''
+                        if cell.get('t')=='s':
+                            idx=int(raw_value)
+                            value=shared[idx] if 0 <= idx < len(shared) else ''
+                        elif cell.get('t')=='inlineStr':
+                            inline=cell.find(ns+'is')
+                            value=''.join(inline.itertext()) if inline is not None else ''
+                        else:value=raw_value
+                        cells[index-1]=str(value)[:3000]
+                    if cells:parsed.append([cells.get(i,'') for i in range(max(cells)+1)])
+                    if len(parsed)>1001:raise HTTPException(413,'Preview up to 1,000 rows per file')
+                if not parsed:raise ValueError('Spreadsheet is empty')
+                headers=[str(v).strip()[:100] for v in parsed.pop(0)]
+                if not (1 <= len(headers) <= 80) or not any(headers):
+                    raise ValueError('Excel requires 1–80 named columns')
+                for row in parsed:
+                    rows.append({k:str(v) for k,v in zip(headers,row) if k})
+        except HTTPException:raise
+        except Exception as exc:raise HTTPException(422,'Excel preview failed: '+str(exc)[:120])
+    elif ext == '.pdf':
+        try:
+            from pypdf import PdfReader
+            pdf = PdfReader(io.BytesIO(raw))
+            if len(pdf.pages) > 35:raise HTTPException(413,'PDF preview limited to 35 pages')
+            extracted='\n'.join((page.extract_text() or '') for page in pdf.pages)[:12000]
+        except ImportError:
+            raise HTTPException(501, 'PDF text reader not installed; export CSV for structured import')
+        except HTTPException:raise
+        except Exception:raise HTTPException(422,'PDF text extraction unavailable for this file')
+    elif ext == '.docx':
+        try:
+            from zipfile import ZipFile
+            import xml.etree.ElementTree as ET
+            with ZipFile(io.BytesIO(raw)) as archive:
+                info=archive.getinfo('word/document.xml')
+                if info.file_size>12*1024*1024:raise HTTPException(413,'Word document too large')
+                root=ET.fromstring(archive.read('word/document.xml'))
+                ns='{http://schemas.openxmlformats.org/wordprocessingml/2006/main}'
+                extracted='\n'.join(''.join(x.text or '' for x in p.iter(ns+'t')) for p in root.iter(ns+'p'))[:12000]
+        except HTTPException:raise
+        except Exception:raise HTTPException(422,'DOCX preview failed')
+    elif ext == '.txt':
+        extracted=raw.decode('utf-8-sig',errors='replace')[:12000]
+    else:
+        # No OCR claims: images are not silently converted into records.
+        extracted='Image uploaded for review only; no structured fields were extracted.'
+    return {'filename':filename,'file_type':ext.lstrip('.'),'count':len(rows),
+            'columns':list(rows[0]) if rows else [],'sample':rows[:30],
+            'rows':rows if ext in ('.csv','.xlsx') else [],'text_preview':extracted,
+            'can_import_supplier_parts':ext in ('.csv','.xlsx'),
+            'note':'Preview only. No records changed. PDFs, documents, and images require manual structured review.'}
+
 @router.post('/import/preview')
 def preview_import(payload: ImportBatch, request: Request):
     _import_guard(request)

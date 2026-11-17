@@ -7971,10 +7971,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='View Job';
               open.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',body=>{const local=document.createElement('div');body.append(local);renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh})})}catch(error){alert('Unable to open job: '+(error.message||error))}};
               const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
-              const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Ask Moses to review this saved job';
+              const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Open the saved draft or estimator for this job';
               const isInvoice=heading==='Office Invoices To Review';
-              assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else if(typeof window.openMosesDrafts==='function'){window.openMosesDrafts({jobId:String(job.id)})}else{alert('Quote review is unavailable. Refresh the page.')}};
-              buttons.append(open,assist);card.append(name,info,buttons);officeList.append(card);
+              assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else if(typeof window.openMosesDrafts==='function'){window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true})}else{alert('Quote review is unavailable. Refresh the page.')}};
+              const statusChip=document.createElement('span');statusChip.textContent=String(job.status||'New');statusChip.style.cssText='display:inline-block;align-self:flex-start;font-size:12px;font-weight:700;border-radius:12px;border:1px solid #f8b778;background:#fff5e9;color:#965010;padding:3px 9px';
+              buttons.append(open,assist);card.append(name,statusChip,info,buttons);officeList.append(card);
             }
           }
         }catch(error){const msg=document.createElement('p');msg.className='hint';msg.textContent='Unable to load office tasks: '+(error.message||error);officeList.append(msg)}
@@ -8312,6 +8313,49 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     });
   }
 
+  // These are deterministic, record-backed office workflows, not speculative chat requests.
+  async function openPdsSingleQuoteReview(job){
+    if(!job?.id){alert('Save the job before preparing a review.');return;}
+    if(typeof window.openMosesDrafts==='function'){
+      window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true});return;
+    }
+    alert('Quote drafts are still loading. Refresh the page and retry.');
+  }
+
+  async function openPdsPartReview(job){
+    if(!job?.id)return;
+    let full;try{full=await apiGetJob(job.id)}catch(e){alert('Could not load saved job: '+(e.message||e));return;}
+    const veil=document.createElement('div');veil.className='pds-parts-review-overlay';veil.style.cssText='position:fixed;inset:0;z-index:11280;background:#14213391;display:grid;place-items:center;padding:12px';
+    const panel=document.createElement('section');panel.style.cssText='width:min(780px,100%);max-height:90vh;overflow:auto;background:white;border:1px solid #dee5ea;border-radius:15px;padding:18px;display:grid;gap:12px';
+    const header=document.createElement('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px';
+    const title=document.createElement('strong');title.textContent='Parts Review · '+(full.customer||job.customer||'Job');
+    const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>veil.remove();header.append(title,close);panel.append(header);
+    const source=document.createElement('div');source.className='card';source.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto';
+    const formNotes=(Array.isArray(full.completion_forms)?full.completion_forms:[]).flatMap(f=>[f?.recommendations,f?.additional_recommendations,f?.parts_required,f?.work_performed,f?.technician_notes]).filter(Boolean);
+    const notes=[full.job_description,full.office_notes,full.notes,full.description,full.work_performed,full.additional_recommendations,full.recommendations,full.parts_needed,...formNotes].filter(Boolean);
+    const notesLabel=document.createElement('strong');notesLabel.textContent='Saved job notes / recommendations';
+    const notesBody=document.createElement('p');notesBody.textContent=[...new Set(notes.map(x=>String(x).trim()))].join('\n\n')||'No part details in saved job fields. Review the completion and recommendation forms.';source.append(notesLabel,notesBody);panel.append(source);
+    const search=document.createElement('input');search.className='input';search.placeholder='Find part number, manufacturer or description';search.setAttribute('aria-label','Search PDS parts catalog');panel.append(search);
+    const matches=document.createElement('div');matches.style.cssText='display:grid;gap:8px';panel.append(matches);
+    const status=document.createElement('small');status.setAttribute('role','status');panel.append(status);
+    const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+    const view=document.createElement('button');view.className='btn';view.textContent='View Job';view.onclick=()=>{openDrawer('Job Details',body=>{const node=document.createElement('div');body.append(node);renderJobDetails(node,full,{})});const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11300'};
+    const add=document.createElement('button');add.className='btn';add.textContent='Open Parts List';add.onclick=()=>{veil.remove();renderPartsListView()};actions.append(view,add);panel.append(actions);veil.append(panel);document.body.append(veil);
+    veil.addEventListener('click',e=>{if(e.target===veil)veil.remove()});
+    let generation=0;
+    const find=async()=>{
+      const id=++generation;matches.replaceChildren();status.textContent='Looking up saved PDS parts…';
+      try{
+        const rows=await apiListParts({q:search.value.trim(),limit:25});if(id!==generation)return;
+        status.textContent=rows.length+' matching saved parts. Select a part to inspect its catalog information; prices are not assigned to the quote automatically.';
+        for(const part of rows){const card=document.createElement('div');card.className='jobrow';card.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap';
+          const label=document.createElement('span');label.textContent=[part.part_number,part.description,part.supplier,part.supplier_rate?'Supplier $'+part.supplier_rate:''].filter(Boolean).join(' · ');
+          const button=document.createElement('button');button.className='btn';button.textContent='Review Part';button.onclick=()=>{status.textContent='Catalog match: '+[part.part_number,part.description,part.supplier].filter(Boolean).join(' · ')+'. Confirm fit, quantities and supplier pricing before estimating.'};card.append(label,button);matches.append(card)}
+      }catch(e){status.textContent='Parts catalog unavailable: '+(e.message||e)}
+    };
+    let debounce;search.addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(find,250)});await find();
+  }
+
   // Office work queue: uses saved PDS jobs and the existing review/estimator tools.
   // No LLM call, automatic email, status change or staff assignment is performed here.
   async function openPdsJobFlowWorkQueue(){
@@ -8347,8 +8391,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const action=document.createElement('button');action.className='btn';action.textContent=active==='quotes'?'Review Quote':active==='invoices'?'Draft Invoice':'Review Parts';
         action.onclick=async()=>{
           if(active==='invoices'){try{await openEstimateInvoiceDrawer(await apiGetJob(job.id),'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}
-          else if(active==='quotes'){if(typeof window.openMosesDrafts==='function')window.openMosesDrafts({jobId:String(job.id)});else alert('Moses Drafts unavailable')}
-          else{view.click()}
+          else if(active==='quotes'){await openPdsSingleQuoteReview(job)}
+          else{await openPdsPartReview(job)}
         };controls.append(action);card.append(meta,controls);body.append(card);
       }
       if(rows.length>120){const note=document.createElement('small');note.textContent='Showing 120 of '+rows.length+' jobs. Search to narrow the list.';body.append(note)}
@@ -14747,14 +14791,15 @@ function renderDataUploadView() {
     card.innerHTML = `
       <h3>Data Import</h3>
       <div class="card" style="margin:12px 0;border:1px solid #d5e5da;padding:16px">
-        <h3 style="margin-top:0">QuickBooks CSV — Vendors &amp; Parts</h3>
-        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Vendors / Suppliers</option><option value="parts">Parts / Items</option></select></label>
-        <input class="input" id="qb_import_file" type="file" accept=".csv,text/csv" style="margin-top:10px;width:100%" />
+        <h3 style="margin-top:0">PDS Import Review</h3>
+        <p class="hint">CSV or Excel records can be mapped to saved suppliers or parts after duplicate review. PDF, DOCX, TXT and image files are preview-only; no live records are altered.</p>
+        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Parts Suppliers</option><option value="parts">Parts / Items</option></select></label>
+        <input class="input" id="qb_import_file" type="file" accept=".csv,.xlsx,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" style="margin-top:10px;width:100%" />
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn btn-orange" type="button" id="qb_preview">Preview &amp; Check Duplicates</button><button class="btn" type="button" id="qb_import_commit" disabled>Import New Records</button></div>
         <p class="hint" id="qb_import_status" role="status">Nothing is changed during preview. Existing records will never be overwritten.</p>
         <div id="qb_import_preview" style="max-height:320px;overflow:auto"></div>
       </div>
-      <details style="margin-top:12px"><summary style="font-weight:800;cursor:pointer">Legacy CSV Replacement (existing tools)</summary>
+      <details style="margin-top:12px"><summary style="font-weight:800;cursor:pointer">Legacy CSV Replacement (use with care)</summary>
       <div class="hint">Upload only billable_time.csv or tech_notes.csv to the live Render disk.</div>
       <div class="grid2" style="margin-top:12px;">
         <div>
@@ -14843,11 +14888,19 @@ function renderDataUploadView() {
     const resetPreview=()=>{checked=null;qbCommit.disabled=true;qbPreviewHost.replaceChildren();};
     qbFile.onchange=resetPreview;qbKind.onchange=resetPreview;
     qbPreview.onclick=async()=>{
-      resetPreview();const file=qbFile.files?.[0];if(!file){qbStatus.textContent='Choose a QuickBooks CSV.';return;}
-      if(file.size>1500000){qbStatus.textContent='CSV is too large (1.5 MB maximum).';return;}
-      qbPreview.disabled=true;qbStatus.textContent='Checking current records…';
+      resetPreview();const file=qbFile.files?.[0];if(!file){qbStatus.textContent='Choose a source file.';return;}
+      qbPreview.disabled=true;qbStatus.textContent='Reading file (no records changed)…';
       try{
-        const rows=parseImportCSV(await file.text());
+        const form=new FormData();form.append('file',file);
+        const previewResponse=await fetch('/pds-purchase-orders/import/file-preview',{method:'POST',credentials:'same-origin',body:form});
+        const extracted=await previewResponse.json();if(!previewResponse.ok)throw Error(extracted.detail||'File preview failed');
+        if(!extracted.can_import_supplier_parts){
+          qbStatus.textContent='Document preview only; no data has been imported.';
+          const content=document.createElement('div');content.style.cssText='padding:12px;border:1px solid #dce3e9;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:290px;overflow:auto';
+          content.textContent=extracted.text_preview||'No readable text. Review the original file and prepare a structured CSV for import.';
+          qbPreviewHost.append(content);return;
+        }
+        const rows=extracted.rows||[];if(!rows.length)throw Error('No spreadsheet records found');
         const response=await fetchJSON('/pds-purchase-orders/import/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:qbKind.value,rows})});
         checked={kind:qbKind.value,rows};qbStatus.textContent=`${response.new_count} new · ${response.duplicate_count} duplicates · ${response.invalid_count} invalid. No changes made.`;
         for(const item of (response.preview||[]).slice(0,150)){
@@ -14855,9 +14908,9 @@ function renderDataUploadView() {
           line.textContent=`Row ${item.row}: ${item.name||item.sku||'(blank)'} — ${item.status}${item.reason?' · '+item.reason:''}`;qbPreviewHost.append(line);
         }
         qbCommit.disabled=!response.new_count||!!response.invalid_count;
-        if(response.invalid_count)qbStatus.textContent+=' Correct the CSV and preview again before importing.';
-      }catch(e){qbStatus.textContent='Preview failed: '+(e.message||e);}
-      finally{qbPreview.disabled=false;}
+        if(response.invalid_count)qbStatus.textContent+=' Correct the spreadsheet and preview again.';
+      }catch(e){qbStatus.textContent='Preview failed: '+(e.message||e)}
+      finally{qbPreview.disabled=false}
     };
     qbCommit.onclick=async()=>{
       if(!checked)return;

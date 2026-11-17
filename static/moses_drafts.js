@@ -8,12 +8,12 @@ const request=async(path,method='GET',data)=>{
   let result;try{result=await r.json()}catch{throw Error('Unable to read Moses draft response')}
   if(!r.ok)throw Error(typeof result.detail==='string'?result.detail:'Moses draft request failed');return result;
 };
-let panel,body,feedback,focusJobId='';
+let panel,body,feedback,focusJobId='',prepareIfMissing=false;
 function mount(){
  if(document.getElementById('mosesDraftsLaunch'))return;
  const launch=h('button','Moses Drafts','btn');launch.type='button';launch.id='mosesDraftsLaunch';
  launch.hidden=true;launch.style.display='none';
- const openDrafts=(options={})=>{if(document.body.dataset.platform!=='pds')return;focusJobId=String(options?.jobId||'');panel.hidden=false;panel.style.display='flex';render()};
+ const openDrafts=(options={})=>{if(document.body.dataset.platform!=='pds')return;focusJobId=String(options?.jobId||'');prepareIfMissing=!!options?.prepareIfMissing;panel.hidden=false;panel.style.display='flex';render()};
  launch.onclick=openDrafts;
  window.openMosesDrafts=openDrafts;
  panel=h('section');panel.id='mosesDraftsPanel';panel.hidden=true;panel.style.cssText='position:fixed;inset:6vh max(14px,calc((100vw - 1100px)/2));z-index:11100;display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 15px 70px #0006;border:1px solid #dce5dd;overflow:hidden';
@@ -47,7 +47,10 @@ async function render(){
      const notice=h('p','No saved review for this job.');body.append(notice);
      const prepareOne=h('button','Prepare quote review','btn btn-orange');
      prepareOne.onclick=async()=>{prepareOne.disabled=true;try{await request('/prepare-job','POST',{record_id:focusJobId});await render()}catch(e){announce(e.message);prepareOne.disabled=false}};
-     body.append(prepareOne);return;
+     body.append(prepareOne);
+     // One targeted preparation attempt per explicit click; no background retries.
+     if(prepareIfMissing){prepareIfMissing=false;prepareOne.click()}
+     return;
    }
    rows=selected;
  }
