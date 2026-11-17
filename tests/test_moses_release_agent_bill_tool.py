@@ -20,7 +20,7 @@ def tools_from_agent(monkeypatch, tmp_path, platform='doorks'):
     class Runner:
         @staticmethod
         def run_sync(agent, turns, **kwargs):
-            assert kwargs['max_turns'] == 5
+            assert kwargs['max_turns'] == 16
             assert kwargs['run_config'].tracing_disabled is True
             return SimpleNamespace(final_output='Bill review requires approval.')
     class RunConfig:

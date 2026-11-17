@@ -187,7 +187,6 @@ def preview_dispatch_eta(request, platform: str, record_id: str, mode: str,
     if not recipient: issues.append('Verified customer email missing')
     issues.extend(mail['issues'])
     if not customer: issues.append('Customer name missing')
-    if not job_number: issues.append('Job number missing')
     if mode == 'scheduled' and not visit_date:
         issues.append('No scheduled visit date recorded')
     if mode in ('en_route', 'delay') and not eta_time:
@@ -196,28 +195,27 @@ def preview_dispatch_eta(request, platform: str, record_id: str, mode: str,
         issues.append('Enter the update message')
     if str(job.get('status') or '').lower() in ('cancelled', 'canceled'):
         issues.append('Job is cancelled; review before contacting customer')
+    company = 'Priority Door Systems' if platform == 'pds' else 'Our Team'
     subjects = {
-        'scheduled': 'Scheduled service reminder', 'en_route': 'Technician on the way',
-        'delay': 'Updated arrival time', 'general': 'Service update',
+        'scheduled': 'Your upcoming visit', 'en_route': 'Arrival time update',
+        'delay': 'Updated arrival time', 'general': 'A quick update',
     }
-    lines = [f'Hello {customer or "customer"},', '',
-             f'This is an update regarding service job {job_number or "(number pending)"}.']
+    # Customer emails must be useful even when the job reference is private.
+    # Never put an internal job, lead, or service number in the subject/body.
+    lines = [f'Hello,', '', f'{company} is writing with an update regarding your upcoming visit.']
     if mode == 'scheduled':
-        lines.append('Your service visit is scheduled for '+
-                     (visit_date or '(date not confirmed)')+
-                     ((' at '+visit_time) if visit_time else '')+'.')
-        if eta_time: lines.append('Our estimated arrival time is '+eta_time+'.')
+        lines.extend(['', 'We are scheduled to arrive on '+(visit_date or '(date pending)')+
+                      ((' at '+visit_time) if visit_time else '')+'.'])
+        if eta_time: lines.append('Our expected arrival time is '+eta_time+'.')
     elif mode == 'en_route':
-        lines.append('Our technician is on the way.'+
-                     ((' The estimated arrival time is '+eta_time+'.') if eta_time else ''))
+        lines.extend(['', 'Our technician is on the way. We expect to arrive at '+(eta_time or '(time pending)')+'.'])
     elif mode == 'delay':
-        lines.append('Your expected arrival time has changed.'+
-                     ((' The updated ETA is '+eta_time+'.') if eta_time else ''))
+        lines.extend(['', 'Our arrival time has changed. The updated estimated time is '+(eta_time or '(time pending)')+'.'])
     if note:
         lines.extend(['', note])
-    lines.extend(['', 'Please reply to this email if you have any questions.', 'Thank you.'])
-    if platform == 'pds':
-        lines.append(general_inquiry_footer(platform, mail).strip())
+    lines.extend(['', 'If you have any questions or need to make an adjustment, please reply to this email or call our office'+
+                  (' at 760-233-5037' if platform == 'pds' else '')+'.',
+                  '', 'Thank you,', company])
     # Always preview-only. Outbound transport and send history require a
     # separate approval + idempotent delivery action, not implemented here.
     return {
@@ -225,7 +223,7 @@ def preview_dispatch_eta(request, platform: str, record_id: str, mode: str,
         'customer': customer, 'mode': mode, 'scheduled_date': visit_date,
         'eta_time': eta_time, 'to': recipient, 'from': sender,
         'reply_to': reply_to, 'cc': cc,
-        'subject': subjects[mode]+(' — Job '+job_number if job_number else ''),
+        'subject': subjects[mode]+' — '+company,
         'text': '\n'.join(lines), 'ready_to_send': False, 'sent': False,
         'issues': issues + ['Approved outbound email transport not enabled'],
     }

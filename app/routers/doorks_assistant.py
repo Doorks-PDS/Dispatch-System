@@ -1165,6 +1165,31 @@ def chat(payload:Message,request:Request):
                 'action_proposals': request.state.moses_action_proposals,
                 'document_proposals': request.state.moses_document_proposals,
                 'agent_connected': True}
+    # A configured live Moses should interpret natural requests before any
+    # keyword-based queue/priority shortcuts. The shortcuts below are ONLY the
+    # deterministic fallback when the SDK agent isn't ready. Every agent tool
+    # still validates signed-in workspace, records and approval requirements.
+    if getattr(request.state, 'auth_role', None) == 'office_admin':
+        from app.services.moses_agent import readiness as _agent_readiness
+        if _agent_readiness(platform)['ready_for_live_check']:
+            request.state.moses_action_proposals = []
+            request.state.moses_document_proposals = []
+            try:
+                from app.services.moses_agent import answer as _agent_answer
+                natural_answer = _agent_answer(request, text, history)
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).error(
+                    'Moses live conversation failed workspace=%s exception_type=%s',
+                    platform, type(exc).__name__)
+                return {'answer': ('Moses could not finish the live AI request. No completion is confirmed. '
+                                   'Check saved drafts or approvals before retrying.'),
+                        'workspace': platform, 'matches': [], 'navigation': [],
+                        'agent_connected': False, 'action_proposals': [], 'document_proposals': []}
+            return {'answer': natural_answer, 'workspace': platform,
+                    'matches': [], 'navigation': [], 'agent_connected': True,
+                    'action_proposals': request.state.moses_action_proposals,
+                    'document_proposals': request.state.moses_document_proposals}
     # Record lookup is restricted to office admins; technicians receive generic help.
     role=str(getattr(request.state,'auth_role',''))
     can_search=role=='office_admin'

@@ -68,11 +68,72 @@
   const navMoses = el("navMoses");
   function installWorkspaceMoses(){
     if(document.getElementById('workspaceMosesBubble'))return;
-    const launch=document.createElement('button');launch.id='workspaceMosesBubble';launch.type='button';launch.textContent='✨ Moses';launch.setAttribute('aria-label','Open Moses assistant');launch.style.cssText='position:fixed;right:24px;bottom:22px;z-index:11000;background:#395c3e;color:white;border:0;border-radius:28px;padding:14px 18px;box-shadow:0 5px 24px #0004;font-weight:800;cursor:pointer';
-    const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.hidden=true;panel.style.cssText='position:fixed;right:22px;bottom:88px;z-index:11001;width:min(440px,calc(100vw - 35px));background:white;border:1px solid #d9dee7;border-radius:18px;padding:18px;box-shadow:0 12px 40px #0003;max-height:min(70vh,620px);overflow-y:auto';
-    const header=document.createElement('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='✨ Moses Assistant';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true};header.append(title,close);
-    const help=document.createElement('p');help.className='hint';help.textContent='Ask Moses about your workspace. Record results follow your signed-in permissions.';
-    const agentStatus=document.createElement('small');
+    const launch=document.createElement('button');launch.id='workspaceMosesBubble';launch.type='button';launch.innerHTML='<span aria-hidden="true" class="moses-launch-glow"></span><span> Moses</span>';launch.setAttribute('aria-label','Open Moses assistant');launch.style.cssText='position:fixed;right:24px;bottom:22px;z-index:11000;background:#395c3e;color:white;border:0;border-radius:28px;padding:14px 18px;box-shadow:0 5px 24px #0004;font-weight:800;cursor:pointer';
+    const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.className='moses-chat-shell';panel.hidden=true;panel.style.cssText='position:fixed;right:20px;bottom:85px;z-index:11001;width:min(560px,calc(100vw - 24px));background:white;border:1px solid #d9dee7;border-radius:22px;padding:18px;box-shadow:0 18px 52px #0003;max-height:min(83vh,820px);overflow-y:auto';
+    const header=document.createElement('div');header.className='moses-chat-header';header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='Moses';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.title='Close Moses';close.setAttribute('aria-label','Close Moses');close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true;launch.focus()};const draftsButton=document.createElement('button');draftsButton.type='button';draftsButton.className='btn';draftsButton.textContent='Drafts';draftsButton.title='Open saved Moses PDS quote-review drafts';draftsButton.onclick=()=>{if(typeof window.openMosesDrafts==='function')window.openMosesDrafts();else input.value='Show my saved quote drafts';};const headerActions=document.createElement('div');headerActions.className='moses-header-actions';headerActions.append(draftsButton,close);header.append(title,headerActions);
+    // Lightweight Jarvis-inspired state orb: UI only, no hidden audio recording or claim of live AI.
+    if(!document.getElementById('mosesOrbStyle')){
+      const css=document.createElement('style');css.id='mosesOrbStyle';css.textContent=`
+        .moses-orb{width:56px;height:56px;flex:none;border-radius:50%;position:relative;isolation:isolate;
+          background:radial-gradient(circle at 33% 28%,#e7fff8 0%,#83e0cd 15%,#2f9eaa 43%,#28597c 69%,#173a62 100%);
+          box-shadow:inset -7px -10px 16px #091b4570,0 0 0 5px #dcefed,0 0 22px #56b5be80;
+          transition:filter .3s,box-shadow .3s}
+        .moses-orb:after{content:'';position:absolute;inset:-6px;border:2px solid #58aec0aa;border-radius:50%;animation:moses-halo 4s linear infinite}
+        .moses-orb[data-mode=thinking]{box-shadow:inset -7px -10px 16px #091b4570,0 0 0 5px #e7eefb,0 0 25px #5179e9a8;animation:moses-breathe 1.25s ease-in-out infinite}
+        .moses-orb[data-mode=listening]{box-shadow:inset -7px -10px 16px #091b4570,0 0 0 5px #e7f5ed,0 0 30px #2bae82cc;animation:moses-breathe .8s ease-in-out infinite}
+        .moses-orb[data-mode=speaking]{animation:moses-breathe .7s ease-in-out infinite}
+        @keyframes moses-breathe{50%{filter:brightness(1.2);transform:scale(1.055)}}
+        @keyframes moses-halo{to{transform:rotate(360deg)}}
+        @media(prefers-reduced-motion:reduce){.moses-orb,.moses-orb:after{animation:none!important}}
+        .moses-suggestions{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
+        .moses-suggestions button{font-size:12px;padding:8px 10px;border:1px solid #d8e3e1;border-radius:18px;background:#f8fbfa;color:#23493e;cursor:pointer}
+        .moses-suggestions button:focus-visible{outline:2px solid #317e8e}
+        .moses-chat-shell{display:flex!important;flex-direction:column;gap:0;padding:0!important;overflow:hidden!important;
+          background:linear-gradient(155deg,#f5faf9 0%,#fff 34%,#fff 100%)!important;color:#1b2933;
+          border:1px solid #bfd4d2!important;box-shadow:0 22px 70px #071b2940!important}
+        .moses-chat-shell[hidden]{display:none!important}
+        .moses-chat-header{position:sticky;top:0;z-index:2;padding:15px 18px 11px;background:#fffefa;border-bottom:1px solid #e0eae7}
+        .moses-chat-header>strong{font-size:21px;color:#214e48;letter-spacing:-.4px}
+        .moses-header-actions{display:flex;align-items:center;gap:7px}
+        .moses-chat-shell .moses-orb-row{padding:4px 18px 0;margin:8px 0 3px!important}
+        .moses-chat-shell .moses-agent-status{margin:2px 18px 4px!important;padding:7px 10px;background:#ecf5f2;border-radius:9px;line-height:1.4}
+        .moses-chat-shell .moses-help{margin:4px 18px 6px;font-size:12px;color:#586b69}
+        .moses-chat-history{flex:1;min-height:110px!important;max-height:none!important;overflow-y:auto;overflow-x:hidden;
+          align-content:start;overscroll-behavior:contain;padding:14px 18px!important;margin:0!important;background:#fafcfc}
+        .moses-chat-line{max-width:93%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;
+          padding:10px 13px!important;border-radius:16px!important;font-size:14px;box-shadow:0 1px 3px #172c3812}
+        .moses-chat-line[data-author=you]{justify-self:end;background:#dcece3!important;border-bottom-right-radius:4px!important}
+        .moses-chat-line[data-author=moses]{justify-self:start;background:#fff!important;border:1px solid #dce9e7;border-bottom-left-radius:4px!important}
+        .moses-compose{flex:none;background:#fff;padding:12px 18px 14px;border-top:1px solid #e1e8e6;display:grid;gap:8px}
+        .moses-compose-label{font-size:12px;font-weight:700;letter-spacing:.03em;color:#526a62}
+        .moses-compose textarea{min-height:68px;max-height:24vh;resize:vertical;border-radius:13px!important;padding:12px!important;box-sizing:border-box;
+          background:#fbfdfd;border:1px solid #cbdedb;line-height:1.45;font-size:15px}
+        .moses-compose-row{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+        .moses-compose-note{font-size:11px;color:#677a74}
+        .moses-compose-row button.moses-send{background:#295e53;color:#fff;font-weight:700;border:0;border-radius:14px;padding:11px 16px;margin:0!important;min-height:42px}
+        .moses-compose-row button.moses-send:disabled{opacity:.55;cursor:wait}
+        .moses-chat-shell .moses-suggestions{margin:0;gap:7px}
+        .moses-chat-shell details.moses-extra{padding:0 18px 5px;background:#fff}
+        .moses-chat-shell details.moses-extra>summary{padding:9px 0;font-size:12px;cursor:pointer;color:#46675e}
+        .moses-chat-shell button:focus-visible,.moses-chat-shell textarea:focus-visible{outline:3px solid #3caaa3;outline-offset:2px}
+        .moses-launch-glow{display:inline-block;vertical-align:middle;width:13px;height:13px;border-radius:50%;
+          background:radial-gradient(circle at 35% 30%,#e9fff8,#7fdec4 35%,#1f84a2 70%,#163955);box-shadow:0 0 0 2px #ffffff6e,0 0 14px #8edfd0}
+        @media(max-width:640px){.moses-chat-shell{right:8px!important;bottom:8px!important;left:8px!important;width:auto!important;
+          max-height:calc(100dvh - 16px)!important;border-radius:17px!important}.moses-chat-history{padding:10px 12px!important}
+          .moses-compose{padding:10px 12px 12px}.moses-chat-header{padding:11px 12px}}
+        @media(prefers-reduced-motion:reduce){.moses-launch-glow{animation:none!important}}
+
+      `;document.head.append(css);
+    }
+    const orbRow=document.createElement('div');orbRow.className='moses-orb-row';orbRow.style.cssText='display:flex;align-items:center;gap:15px;margin:14px 0 8px';
+    const orb=document.createElement('div');orb.className='moses-orb';orb.dataset.mode='idle';orb.setAttribute('role','img');orb.setAttribute('aria-label','Moses ready');
+    const orbText=document.createElement('div');orbText.style.cssText='display:grid;gap:3px';
+    const orbTitle=document.createElement('strong');orbTitle.textContent='Moses is ready';
+    const orbCaption=document.createElement('small');orbCaption.textContent='Ask naturally · Moses can prepare actions for approval';
+    orbText.append(orbTitle,orbCaption);orbRow.append(orb,orbText);
+    const setMosesMode=(mode)=>{orb.dataset.mode=mode;const label={idle:'Moses is ready',thinking:'Moses is working…',listening:'Listening on this device…',speaking:'Moses is responding…'}[mode]||'Moses is ready';orbTitle.textContent=label;orb.setAttribute('aria-label',label)};
+    const help=document.createElement('p');help.className='hint moses-help';help.textContent='One conversation. Tell Moses what outcome you want; review any actions before they change records.';
+    const agentStatus=document.createElement('small');agentStatus.className='moses-agent-status';
     agentStatus.setAttribute('role','status');
     agentStatus.style.cssText='display:block;color:#5a6873;font-size:12px;margin:4px 0 10px';
     agentStatus.textContent='Checking enhanced Moses availability…';
@@ -89,45 +150,9 @@
         agentStatus.textContent='Enhanced Moses status unavailable for this account.';
       }
     };
-    const priorityPreview=document.createElement('section');
-    priorityPreview.style.cssText='display:grid;gap:8px;margin:8px 0;padding:10px;border:1px solid #d8e3dc;border-radius:12px;background:#f8faf9';
-    const priorityHeader=document.createElement('div');priorityHeader.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px';
-    const priorityTitle=document.createElement('strong');priorityTitle.textContent='Moses · Work priorities';
-    const priorityRefresh=document.createElement('button');priorityRefresh.type='button';priorityRefresh.className='btn';priorityRefresh.textContent='Refresh';
-    priorityHeader.append(priorityTitle,priorityRefresh);
-    const priorityContent=document.createElement('div');priorityContent.className='hint';priorityContent.textContent='Open Moses to review saved business priorities.';
-    priorityPreview.append(priorityHeader,priorityContent);
-    let priorityLoadedWorkspace=null,priorityLoading=false;
-    const refreshMosesPriorities=async(force=false)=>{
-      const workspace=document.body.dataset.platform||'';
-      if(priorityLoading||(!force&&priorityLoadedWorkspace===workspace))return;
-      priorityLoading=true;priorityContent.textContent='Reviewing saved '+workspace.toUpperCase()+' work…';
-      try{
-        const report=await fetchJSON('/doorks-assistant/priorities');
-        if((document.body.dataset.platform||'')!==workspace)return;
-        if(report?.workspace!==workspace||report?.verified!==true)throw Error('Workspace priority review not verified');
-        priorityLoadedWorkspace=workspace;priorityContent.replaceChildren();
-        const note=document.createElement('small');note.textContent='Suggested review order · Read-only · '+String(report.total_matched||0)+' matching items';priorityContent.append(note);
-        for(const entry of (report.priorities||[]).slice(0,4)){
-          const record=entry.record||{};
-          const item=document.createElement('div');item.style.cssText='padding:8px 0;border-top:1px solid #e3e9e5;display:grid;gap:3px';
-          const title=document.createElement('strong');title.textContent=[record.job_number||record.order_number||record.document_number||'',record.customer||record.customer_name||record.company||record.name||'',record.status||''].filter(Boolean).join(' · ')||'Saved record';
-          const detail=document.createElement('small');detail.textContent=String(entry.suggestion||'Review saved record');item.append(title,detail);
-          if(workspace==='pds'&&record.id){
-            const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='Find in All Jobs';
-            open.onclick=()=>{panel.hidden=true;renderAllJobsView();const field=document.getElementById('all_jobs_search');if(field){field.value=record.job_number||record.customer||'';document.getElementById('all_jobs_refresh')?.click();}};
-            item.append(open);
-          }
-          priorityContent.append(item);
-        }
-        if(!(report.priorities||[]).length){const empty=document.createElement('small');empty.textContent='No matches in the available queues. Other work may still need attention.';priorityContent.append(empty);}
-      }catch(error){if((document.body.dataset.platform||'')===workspace)priorityContent.textContent='Priorities unavailable for this account: '+(error.message||'Unable to verify records');}
-      finally{priorityLoading=false;}
-    };
-    priorityRefresh.onclick=()=>refreshMosesPriorities(true);
-    const history=document.createElement('div');history.style.cssText='min-height:95px;max-height:230px;overflow:auto;display:grid;gap:9px;margin:10px 0';
-    const input=document.createElement('textarea');input.className='input';input.rows=2;input.placeholder='Ask Moses a question…';input.style.width='100%';
-    const send=document.createElement('button');send.className='btn';send.textContent='Send to Moses';send.style.margin='8px 0';
+    const history=document.createElement('div');history.className='moses-chat-history';history.setAttribute('role','log');history.setAttribute('aria-label','Moses conversation');history.setAttribute('aria-live','polite');history.style.cssText='min-height:180px;max-height:min(42vh,420px);overflow:auto;display:grid;gap:9px;margin:12px 0;padding:4px 2px';
+    const input=document.createElement('textarea');input.id='mosesChatMessage';input.className='input';input.rows=2;input.placeholder='Tell Moses what you need done…';input.setAttribute('aria-label','Message Moses');input.style.width='100%';
+    const send=document.createElement('button');send.className='btn';send.textContent='Send message ↗';send.classList.add('moses-send');send.style.margin='8px 0';
     const quoteTriageBtn=document.createElement('button');quoteTriageBtn.type='button';quoteTriageBtn.className='btn';quoteTriageBtn.textContent='Review PDS quotes';quoteTriageBtn.title='Scan saved jobs and recommendation forms without changing records';quoteTriageBtn.hidden=true;
 
     // Moses Voice (opt-in). Browser-local speech synthesis and recognition.
@@ -148,7 +173,7 @@
     const Recognition=window.SpeechRecognition||window.webkitSpeechRecognition;
     let voiceReplies=false,recognizer=null,listening=false;
     const stopSpeaking=()=>{try{synth?.cancel()}catch(_e){}};
-    const stopListening=()=>{if(recognizer){try{recognizer.stop()}catch(_e){}recognizer=null}listening=false;micButton.textContent='🎙 Talk to Moses'};
+    const stopListening=()=>{setMosesMode('idle');if(recognizer){try{recognizer.stop()}catch(_e){}recognizer=null}listening=false;micButton.textContent='🎙 Talk to Moses'};
     const say=(message)=>{
       if(!voiceReplies||!synth||!message||panel.hidden)return;
       stopSpeaking();
@@ -182,10 +207,15 @@
           const transcript=Array.from(event.results).map(result=>result[0]?.transcript||'').join(' ').trim();
           if(transcript){input.value=[input.value.trim(),transcript].filter(Boolean).join(' ');input.focus();voiceStatus.textContent='Dictation ready. Review and press Send to Moses.'}
         };
-        r.onerror=(event)=>{voiceStatus.textContent='Microphone unavailable: '+(event.error||'recognition error');stopListening()};
-        r.onend=()=>{listening=false;recognizer=null;micButton.textContent='🎙 Talk to Moses'};
+        r.onerror=(event)=>{const kind=String(event.error||'error');const guidance={
+          'not-allowed':'Allow microphone access in the Samsung browser/site settings.',
+          'service-not-allowed':'Speech recognition service is unavailable in this browser. Use the Android keyboard microphone or type.',
+          'network':'Speech recognition requires a reliable network connection.',
+          'no-speech':'No speech detected. Tap Talk to Moses again and speak clearly.'
+        };voiceStatus.textContent=guidance[kind]||('Voice recognition error: '+kind+'. Your existing text was preserved.');stopListening()};
+        r.onend=()=>{listening=false;recognizer=null;micButton.textContent='🎙 Talk to Moses';if(orb.dataset.mode==='listening')setMosesMode('idle')};
         r.start();listening=true;micButton.textContent='■ Stop listening';
-        voiceStatus.textContent='Listening… speech is transcribed into the message box.';
+        voiceStatus.textContent='Listening… speech is transcribed into the message box.';setMosesMode('listening');
       }catch(e){voiceStatus.textContent='Unable to start microphone: '+e.message;stopListening()}
     };
     stopVoice.onclick=()=>{stopSpeaking();stopListening();voiceStatus.textContent='Voice stopped.'};
@@ -195,7 +225,7 @@
     });
     voiceControls.append(speakToggle,micButton,stopVoice,voiceStatus);
 
-    const add=(who,content)=>{const line=document.createElement('div');line.style.cssText='padding:10px;border-radius:10px;background:'+(who==='You'?'#eef3eb':'#f2f4f7');line.textContent=who+': '+content;history.append(line);history.scrollTop=history.scrollHeight};
+    const add=(who,content)=>{const line=document.createElement('div');line.className='moses-chat-line';line.dataset.author=who==='You'?'you':'moses';line.textContent=String(content||'');line.setAttribute('aria-label',who+': '+String(content||''));history.append(line);history.scrollTop=history.scrollHeight};
 
     // Workspace-scoped action approvals; backend verifies role, workspace, record version and flag.
     const actionPanel=document.createElement('section');actionPanel.style.cssText='display:grid;gap:8px;margin:10px 0';
@@ -457,8 +487,7 @@
               const card=followCard(item.title||'Job review',
                 [item.customer,item.job_number?'Job #'+item.job_number:'',item.status].filter(Boolean).join(' · '));
               const button=document.createElement('button');button.className='btn';button.type='button';button.textContent='Open PDS Jobs';
-              button.onclick=()=>{panel.hidden=true;renderAllJobsView();const search=document.getElementById('all_jobs_search');
-                if(search){search.value=item.job_number||item.customer||'';document.getElementById('all_jobs_refresh')?.click();}};
+              button.onclick=()=>{panel.hidden=true;renderAllJobsView(item.job_number||item.customer||'');};
               card.append(button);
             }
           }
@@ -479,9 +508,7 @@
       const results=document.createElement('section');results.className='moses-job-results';
       results.style.cssText='display:grid;gap:10px;margin:10px 0';
       const openJob=async row=>{
-        panel.hidden=true;renderAllJobsView();
-        const field=document.getElementById('all_jobs_search');
-        if(field){field.value=row.job_number||row.customer||row.name||'';document.getElementById('all_jobs_refresh')?.click();}
+        panel.hidden=true;renderAllJobsView(row.job_number||row.customer||row.name||'');
       };
       const addCard=(row, groupName)=>{
         const card=document.createElement('article');card.style.cssText='border:1px solid #d8e3dc;background:#fff;border-radius:12px;padding:12px;display:grid;gap:7px';
@@ -523,7 +550,7 @@
       }else for(const row of fallback)addCard(row,'');
       history.append(results);history.scrollTop=history.scrollHeight;
     };
-    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];mosesLastAction=null;history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10),action_context:mosesLastAction||{}})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[]){
+    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];mosesLastAction=null;history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;setMosesMode('thinking');try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10),action_context:mosesLastAction||{}})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[]){
           showAction(proposal);
           if(proposal?.butler_action && /^[a-f0-9]{32}$/.test(String(proposal.id||'')))
             mosesLastAction={kind:proposal.butler_action,proposal_id:proposal.id,workspace};
@@ -549,7 +576,7 @@
           }
         }
         if((r.queue_cards&&r.queue_cards.length)||(r.matches&&r.matches.length))mosesJobCards(r.queue_cards,r.matches||[]);
-        for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
+        for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false;setMosesMode('idle')}};
     // SDC command center: persistent approval queue. No automatic task execution.
     const commandBtn=document.createElement('button');commandBtn.type='button';commandBtn.className='btn';commandBtn.textContent='Command Center';
     header.insertBefore(commandBtn,close);
@@ -597,6 +624,7 @@
     const refreshTasks=async()=>{await refreshPulse();taskList.replaceChildren();try{const data=await fetchJSON('/moses-command/tasks');for(const task of data.tasks||[]){const card=document.createElement('div');card.style.cssText='border:1px solid #dce1e6;border-radius:10px;padding:10px;display:grid;gap:7px';const name=document.createElement('strong');name.textContent=task.title;card.append(name);const info=document.createElement('small');info.textContent=task.capability+' · '+task.status.replaceAll('_',' ')+(task.due_at?' · Target: '+new Date(task.due_at).toLocaleString():'');card.append(info);if(task.status!=='rejected'&&task.status!=='filed_internal'){const scheduling=document.createElement('div');scheduling.style.cssText='display:flex;gap:6px;flex-wrap:wrap;align-items:center';const target=document.createElement('input');target.type='datetime-local';target.className='input';target.title='Target date (planning only)';if(task.due_at){const dt=new Date(task.due_at);const local=new Date(dt.getTime()-dt.getTimezoneOffset()*60000);target.value=local.toISOString().slice(0,16)}const update=document.createElement('button');update.type='button';update.className='btn';update.textContent='Update target';update.onclick=async()=>{update.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/reschedule',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({due_at:target.value?new Date(target.value).toISOString():null})});taskStatus.textContent='Target date updated. No automatic action scheduled.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;update.disabled=false}};scheduling.append(target,update);card.append(scheduling)}if(task.instructions){const details=document.createElement('p');details.style.whiteSpace='pre-wrap';details.textContent=task.instructions;card.append(details)}if(task.status==='draft'||task.status==='ready_for_review'){const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';const prepare=document.createElement('button');prepare.className='btn';prepare.textContent=task.draft_output?'Regenerate draft':'Prepare with Moses';prepare.onclick=async()=>{prepare.disabled=true;taskStatus.textContent='Preparing draft…';try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/prepare',{method:'POST'});taskStatus.textContent='Draft prepared for review. No external action taken.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;prepare.disabled=false}};buttons.append(prepare);if(task.draft_output){const draft=document.createElement('textarea');draft.className='input';draft.rows=8;draft.style.width='100%';draft.value=task.draft_output;card.append(draft);const saveDraft=document.createElement('button');saveDraft.className='btn';saveDraft.textContent='Save edited draft';saveDraft.onclick=async()=>{saveDraft.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/draft',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({draft:draft.value,expected_draft_version:task.draft_version??0})});taskStatus.textContent='Edited draft saved. Review before approval.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;saveDraft.disabled=false}};buttons.append(saveDraft);for(const [label,decision] of [['Approve draft','approve'],['Reject','reject']]){const button=document.createElement('button');button.type='button';button.className='btn';button.textContent=label;button.onclick=async()=>{if(draft.value!==task.draft_output){taskStatus.textContent='Save your edited draft before deciding.';return}button.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision,expected_draft_version:task.draft_version??0})});taskStatus.textContent=decision==='approve'?'Draft approved. No action was executed.':'Draft rejected.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;button.disabled=false}};buttons.append(button)}}card.append(buttons)}else if(task.status==='approved_pending_execution'){const file=document.createElement('button');file.className='btn';file.textContent='File approved draft internally';file.onclick=async()=>{file.disabled=true;try{await fetchJSON('/moses-command/tasks/'+encodeURIComponent(task.id)+'/file-deliverable',{method:'POST'});taskStatus.textContent='Approved draft filed in SDC internal deliverables. Nothing was sent or published.';await refreshTasks()}catch(e){taskStatus.textContent=e.message;file.disabled=false}};card.append(file)}if(task.status!=='draft'&&task.status!=='ready_for_review'&&task.draft_output){const draft=document.createElement('p');draft.style.whiteSpace='pre-wrap';draft.textContent=task.draft_output;card.append(draft)}taskList.append(card)}if(!(data.tasks||[]).length)taskList.textContent='No tasks yet.'}catch(e){taskStatus.textContent='Unable to load tasks: '+e.message}};
     createTask.onclick=async()=>{if(taskTitle.value.trim().length<3){taskStatus.textContent='Enter a task title (at least 3 characters).';return}createTask.disabled=true;try{await fetchJSON('/moses-command/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({capability:capability.value,title:taskTitle.value,instructions:instructions.value,due_at:dueAt.value?new Date(dueAt.value).toISOString():null})});taskTitle.value='';instructions.value='';dueAt.value='';taskStatus.textContent='Task saved as draft. No action has been executed.';await refreshTasks()}catch(e){taskStatus.textContent='Could not save task: '+e.message}finally{createTask.disabled=false}};
     const syncMosesWorkspace=()=>{
+      draftsButton.hidden=document.body.dataset.platform!=='pds';
       const isSDC=document.body.dataset.platform==='sdc';
       commandBtn.style.display=isSDC?'':'none';
       if(!isSDC){command.hidden=true;command.style.display='none';}
@@ -616,10 +644,34 @@
     voiceDetails.append(voiceSummary,voiceControls);
     quoteTriageBtn.onclick=()=>{if((document.body.dataset.platform||'')!=='pds')return;input.value='Review quote readiness for jobs needing quotes';send.click();};
     quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';
-    panel.append(header,help,history,input,send,quoteTriageBtn,voiceDetails,command);
-    panel.insertBefore(agentStatus,history);
-    panel.insertBefore(priorityPreview,history);
-    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';checkAgentReadiness();refreshMosesPriorities(true);input.focus()}};
+    const suggestions=document.createElement('div');suggestions.className='moses-suggestions';
+    for(const [label,prompt] of [
+      ['Plan my week','Review this week’s PDS dispatch schedule and flag anything that needs scheduling or a follow-up.'],
+      ['Quotes to prepare','Review PDS jobs needing quotes and prepare draft reviews where records are sufficient.'],
+      ['Follow up','What PDS work needs office attention next?']]){
+      const b=document.createElement('button');b.type='button';b.textContent=label;
+      b.onclick=()=>{input.value=prompt;input.focus()};suggestions.append(b);
+    }
+    const compose=document.createElement('div');compose.className='moses-compose';
+    const composeLabel=document.createElement('label');composeLabel.className='moses-compose-label';composeLabel.htmlFor=input.id;composeLabel.textContent='YOUR MESSAGE';
+    const composeRow=document.createElement('div');composeRow.className='moses-compose-row';
+    const composeNote=document.createElement('span');composeNote.className='moses-compose-note';composeNote.textContent='Enter to send · Shift+Enter for a new line';
+    composeRow.append(composeNote,send);
+    const newChat=document.createElement('button');newChat.type='button';newChat.className='btn';newChat.textContent='New chat';newChat.title='Start a fresh conversation without changing any records';
+    newChat.onclick=()=>{if(send.disabled)return;if(mosesTurns.length||history.childElementCount){if(!confirm('Start a new Moses conversation? Any unsent text stays in the message box.'))return;}
+      mosesTurns=[];mosesLastAction=null;history.replaceChildren();setMosesMode('idle');input.focus();};
+    headerActions.insertBefore(newChat,draftsButton);
+    const extra=document.createElement('details');extra.className='moses-extra';
+    const extraSummary=document.createElement('summary');extraSummary.textContent='Voice & advanced tools';
+    extra.append(extraSummary,voiceDetails,command);
+    panel.append(header,orbRow,agentStatus,help,history,compose);
+    compose.append(suggestions,composeLabel,input,composeRow,quoteTriageBtn);
+    panel.append(extra);
+    const tools=document.createElement('details');tools.className='moses-extra';const toolsSummary=document.createElement('summary');toolsSummary.textContent='Approvals & follow-ups';toolsSummary.style.cssText='cursor:pointer;font-size:12px;color:#52645a;font-weight:700;margin-top:12px';tools.append(toolsSummary,actionPanel);panel.append(tools);
+    panel.setAttribute('aria-label','Moses AI assistant');
+
+    panel.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden){event.stopPropagation();close.click()}});
+    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';checkAgentReadiness();input.focus()}};
     syncMosesWorkspace();document.body.append(launch,panel);
 
   }
@@ -1635,7 +1687,7 @@
     const preview=document.createElement('pre');preview.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere;font:12px/1.6 inherit;max-height:260px;overflow:auto';details.append(preview);
     let draft=null;const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;
     if(!Speech){speak.disabled=true;speak.title='Dictation not available in this browser';}
-    else{let recognition=null,active=false;speak.onclick=()=>{if(active){recognition.stop();return;}recognition=new Speech();recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;let base=notes.value.trim(),final='';recognition.onresult=e=>{let interim='';for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';else interim+=e.results[i][0].transcript;}notes.value=[base,final,interim].filter(Boolean).join(' ');};recognition.onend=()=>{active=false;speak.textContent='🎙 Dictate';};recognition.onerror=e=>{status.textContent='Microphone: '+e.error+'. You can type notes instead.';};try{recognition.start();active=true;speak.textContent='Stop Dictation';}catch(e){status.textContent=e.message;}};}
+    else{let recognition=null,active=false;speak.onclick=()=>{if(active){recognition.stop();return;}recognition=new Speech();recognition.lang='en-US';recognition.continuous=false;recognition.interimResults=true;let base=notes.value.trim(),final='';recognition.onresult=e=>{let interim='';for(let i=0;i<e.results.length;i++){if(e.results[i].isFinal)final+=e.results[i][0].transcript+' ';else interim+=e.results[i][0].transcript;}notes.value=[base,final,interim].filter(Boolean).join(' ');};recognition.onend=()=>{active=false;speak.textContent='🎙 Dictate';};recognition.onerror=e=>{status.textContent='Microphone unavailable ('+e.error+'). Check Samsung tablet site microphone permission or use the Android keyboard microphone; your notes are preserved.';};try{recognition.start();active=true;speak.textContent='Stop Dictation';}catch(e){status.textContent=e.message;}};}
     prepare.onclick=async()=>{const transcript=notes.value.trim();if(!transcript){status.textContent='Enter or dictate a description first.';return;}prepare.disabled=true;apply.disabled=true;draft=null;status.textContent='Preparing a draft…';try{const result=await fetchJSON('/moses/document-assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript,document_type:kind})});draft=result.fields||null;if(!draft)throw new Error('No draft returned');preview.textContent=JSON.stringify(draft,null,2);apply.disabled=false;status.textContent='Review every field, price, quantity and taxable selection, then choose Apply Reviewed Draft.';}catch(e){status.textContent='Moses unavailable: '+(e.message||e)+'. Your notes remain here.';}finally{prepare.disabled=false;}};
     apply.onclick=()=>{if(!draft)return;applyDraft(draft);status.textContent='Draft applied to editable fields. Check all amounts, tax and addresses before saving.';};
     host.prepend(details);return details;
@@ -2147,7 +2199,7 @@
             const mosesControls=document.createElement('div');mosesControls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:8px';const record=document.createElement('button');record.type='button';record.className='btn';record.textContent='Start Recording';const fill=document.createElement('button');fill.type='button';fill.className='btn';fill.textContent='Fill Form with OpenAI';mosesControls.append(record,fill);moses.append(mosesControls);
             const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;let recognition=null,recording=false;
             if(!Speech){record.disabled=true;record.title='Voice recognition unavailable in this browser';}
-            record.onclick=()=>{if(recording){recognition.stop();return;}recognition=new Speech();recognition.lang='en-US';recognition.continuous=true;recognition.interimResults=true;let finalText=transcript.value.trim();recognition.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const part=e.results[i][0]?.transcript||'';if(e.results[i].isFinal)finalText=[finalText,part].filter(Boolean).join(' ');else interim+=part;}transcript.value=[finalText,interim].filter(Boolean).join(' ');};recognition.onend=()=>{recording=false;record.textContent='Start Recording';};recognition.onerror=e=>{mosesHint.textContent='Recording error: '+e.error;};try{recognition.start();recording=true;record.textContent='Stop Recording';}catch(e){mosesHint.textContent='Recording unavailable: '+e.message;}};
+            record.onclick=()=>{if(recording){recognition.stop();return;}recognition=new Speech();recognition.lang='en-US';recognition.continuous=false;recognition.interimResults=true;let finalText=transcript.value.trim();recognition.onresult=e=>{let interim='';for(let i=e.resultIndex;i<e.results.length;i++){const part=e.results[i][0]?.transcript||'';if(e.results[i].isFinal)finalText=[finalText,part].filter(Boolean).join(' ');else interim+=part;}transcript.value=[finalText,interim].filter(Boolean).join(' ');};recognition.onend=()=>{recording=false;record.textContent='Start Recording';};recognition.onerror=e=>{mosesHint.textContent='Voice recording unavailable ('+e.error+'). On Samsung tablets allow site microphone access, or use the Android keyboard microphone. Your text is preserved.';};try{recognition.start();recording=true;record.textContent='Stop Recording';}catch(e){mosesHint.textContent='Recording unavailable: '+e.message;}};
             fill.onclick=async()=>{if(!transcript.value.trim()){mosesHint.textContent='Enter or record notes first.';return;}fill.disabled=true;try{const result=await fetchJSON('/moses/form-assist',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({transcript:transcript.value,form_type:'completion'})});const f=result.fields||{};for(const [key,target] of [['work_performed','completion_work_performed'],['parts_used','completion_parts_used'],['recommendations','completion_recommendations'],['job_type','completion_door_type'],['door_type','completion_door_type'],['job_location','completion_door_location'],['door_location','completion_door_location']]){if(f[key]&&completionInputs[target]){completionInputs[target].value=String(f[key]);completionInputs[target].dispatchEvent(new Event('input',{bubbles:true}));}}mosesHint.textContent='AI suggestions added. Review all details before saving.';}catch(e){mosesHint.textContent='AI assistance unavailable: '+e.message+'. Your transcript is preserved.';}finally{fill.disabled=false;}};
             completionForm.prepend(moses);
             // One continuous form; no page wizard.
@@ -3820,6 +3872,7 @@
       supplier: payload.supplier || payload.Supplier || "",
       image_url: payload.image_url || "",
       product_url: payload.product_url || "",
+      supplier_rate: payload.supplier_rate ?? "",
     };
     const url = body.id ? `/data/parts/${encodeURIComponent(body.id)}` : "/data/parts";
     const method = body.id ? "PUT" : "POST";
@@ -5881,156 +5934,6 @@ function renderAttachmentSection(titleText, items, options = {}) {
     header.appendChild(right);
     card.appendChild(header);
 
-    // Optional assignment is independent of status, date and shared visibility.
-    if (job.id && !String(job.source || '').toUpperCase().startsWith('LEGACY') && ['office','office_admin'].includes(String(currentUser?.role || ''))) {
-      const assignment = document.createElement('section');
-      assignment.className = 'card';
-      assignment.style.cssText = 'margin:12px 0;padding:12px;border:1px solid #d9dee7;border-radius:12px';
-      const title = document.createElement('strong');
-      title.textContent = 'Tentative staff assignment';
-      assignment.append(title);
-      const info = document.createElement('p');
-      info.className = 'hint';
-      info.textContent = 'Optional. Staff will see this job on their personal To-Do Lists; the shared calendar remains unchanged.';
-      assignment.append(info);
-      const field = document.createElement('div');
-      field.style.cssText = 'display:grid;gap:5px;max-height:170px;overflow:auto';
-      assignment.append(field);
-      const feedback = document.createElement('p');
-      feedback.className = 'hint';
-      feedback.setAttribute('role', 'status');
-      assignment.append(feedback);
-      const save = document.createElement('button');
-      save.className = 'btn btn-orange';
-      save.type = 'button';
-      save.textContent = 'Save assignments';
-      save.disabled = true;
-      assignment.append(save);
-      card.append(assignment);
-      fetchJSON('/pds-scheduling/assignable-staff').then(data => {
-        const assigned = new Set([...(job.assigned_employee_ids || []), ...(job.assigned_technician_ids || []), job.assigned_lead_id || ''].filter(Boolean));
-        const staff = data.staff || [];
-        if (!staff.length) { feedback.textContent = 'No active PDS staff found.'; return; }
-        for (const person of staff) {
-          const label = document.createElement('label');
-          label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px';
-          const checkbox = document.createElement('input');
-          checkbox.type = 'checkbox';
-          checkbox.value = person.id;
-          checkbox.checked = assigned.has(person.id);
-          const name = document.createElement('span');
-          name.textContent = person.name + ' (' + person.role.replaceAll('_', ' ') + ')';
-          label.append(checkbox, name);
-          if (person.role === 'tech' || person.role === 'lead') {
-            const skills = document.createElement('button');
-            skills.type = 'button';
-            skills.className = 'btn';
-            skills.textContent = 'Skills';
-            skills.style.cssText = 'margin-left:auto;font-size:12px;padding:3px 9px';
-            skills.onclick = async () => {
-              const editor = document.createElement('div');
-              editor.style.cssText = 'position:fixed;inset:0;z-index:15000;background:#172133aa;display:flex;align-items:center;justify-content:center;padding:15px';
-              const modal = document.createElement('section');
-              modal.className = 'card';
-              modal.style.cssText = 'background:#fff;width:min(480px,100%);max-height:90vh;overflow:auto;padding:20px;display:grid;gap:8px';
-              const heading = document.createElement('h3');
-              heading.textContent = person.name + ' — Technician skills';
-              const message = document.createElement('p');
-              message.className = 'hint';
-              message.textContent = 'Unrated means unknown. Ratings help Moses suggest work; they do not determine assignments.';
-              modal.append(heading,message);
-              const close = document.createElement('button');
-              close.type = 'button';
-              close.className = 'btn';
-              close.textContent = 'Close';
-              close.onclick = () => editor.remove();
-              try {
-                const result = await fetchJSON('/pds-scheduling/technicians/' + encodeURIComponent(person.id) + '/skills');
-                const profile = result.profile || {};
-                const ratingControls = [];
-                const types = ['Automatic Door','Man Door','Storefront Door','Herculite Door','Roll Up','Glass','Roll/Swing Gate','Other'];
-                for (const type of types) {
-                  const row = document.createElement('label');
-                  row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px';
-                  const text = document.createElement('span');
-                  text.textContent = type;
-                  const select = document.createElement('select');
-                  select.className = 'input';
-                  select.style.maxWidth = '110px';
-                  const options = [['','Unrated'],...Array.from({length:10},(_,i)=>[String(i+1),String(i+1)+' / 10'])];
-                  for (const [value,label] of options) {
-                    const option = document.createElement('option');
-                    option.value = value;
-                    option.textContent = label;
-                    select.append(option);
-                  }
-                  select.value = String(profile.ratings?.[type] || '');
-                  ratingControls.push([type,select]);
-                  row.append(text,select);
-                  modal.append(row);
-                }
-                const prefs = document.createElement('input');
-                prefs.className = 'input';
-                prefs.placeholder = 'Preferences, separated by commas';
-                prefs.value = (profile.preferences || []).join(', ');
-                const prefLabel = document.createElement('label');
-                prefLabel.textContent = 'Work preferences';
-                prefLabel.append(prefs);
-                modal.append(prefLabel);
-                const leadLabel = document.createElement('label');
-                const lead = document.createElement('input');
-                lead.type = 'checkbox';
-                lead.checked = Boolean(profile.can_lead_crew);
-                leadLabel.append(lead,document.createTextNode(' Can lead a crew'));
-                modal.append(leadLabel);
-                const saveSkills = document.createElement('button');
-                saveSkills.className = 'btn btn-orange';
-                saveSkills.type = 'button';
-                saveSkills.textContent = 'Save skill profile';
-                saveSkills.onclick = async () => {
-                  const ratings = Object.fromEntries(ratingControls.filter(([,ctrl])=>ctrl.value).map(([type,ctrl])=>[type,Number(ctrl.value)]));
-                  const preferences = prefs.value.split(',').map(x=>x.trim()).filter(Boolean).slice(0,20);
-                  saveSkills.disabled = true;
-                  try {
-                    await fetchJSON('/pds-scheduling/technicians/' + encodeURIComponent(person.id) + '/skills',{
-                      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ratings,preferences,can_lead_crew:lead.checked})
-                    });
-                    message.textContent = 'Skill profile saved.';
-                  } catch (e) { message.textContent = 'Not saved: '+(e.message||e); }
-                  finally { saveSkills.disabled = false; }
-                };
-                modal.append(saveSkills);
-              } catch (e) { message.textContent = 'Cannot load skill profile: '+(e.message||e); }
-              modal.append(close);
-              editor.append(modal);
-              editor.ondblclick = e => { if(e.target === editor) editor.remove(); };
-              document.body.append(editor);
-            };
-            label.append(skills);
-          }
-          field.append(label);
-        }
-        save.disabled = false;
-      }).catch(e => { feedback.textContent = 'Staff list unavailable: ' + (e.message || e); });
-      save.onclick = async () => {
-        const ids = [...field.querySelectorAll('input:checked')].map(x => x.value);
-        save.disabled = true;
-        feedback.textContent = 'Saving…';
-        try {
-          const result = await fetchJSON('/pds-scheduling/jobs/' + encodeURIComponent(job.id) + '/assignment', {
-            method: 'PUT', headers: {'Content-Type':'application/json'},
-            body: JSON.stringify({employee_ids: ids, lead_id: '', tentative: true})
-          });
-          if (!result.ok || !result.shared_calendar_unchanged || !result.status_unchanged || !result.job_date_unchanged)
-            throw Error('Assignment could not be verified');
-          feedback.textContent = 'Assignments saved. Shared calendar and status unchanged.';
-          job.assigned_employee_ids = ids;
-          job.assigned_lead_id = '';
-        } catch (e) { feedback.textContent = 'Not saved: ' + (e.message || e); }
-        finally { save.disabled = false; }
-      };
-    }
-
     // Match Doorks' quick status workflow: change PDS ticket status without
     // entering Edit. Uses the existing CalendarStore update endpoint.
     if (job.id && !String(job.source || '').toUpperCase().startsWith('LEGACY')) {
@@ -6339,6 +6242,61 @@ function renderAttachmentSection(titleText, items, options = {}) {
     const ticketHeading=document.createElement('h3');ticketHeading.textContent='Job & contact information';
     ticketInfo.append(ticketHeading,fields);
     card.appendChild(ticketInfo);
+    // Compact office scheduling plan: intentionally separate from the job date.
+    // An unfinished visit plan does not move the calendar or assign a To-Do.
+    if (job.id && !String(job.source||'').toUpperCase().startsWith('LEGACY') &&
+        ['office','office_admin'].includes(String(currentUser?.role||''))) {
+      const plan=document.createElement('section');plan.className='pds-office-group';
+      plan.style.cssText='margin:12px 0;padding:12px;border:1px solid #d9dee7;border-radius:12px';
+      const heading=document.createElement('strong');heading.textContent='Staff & scheduling';
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:10px';
+      const employeeLabel=document.createElement('label');employeeLabel.textContent='Employee (optional)';
+      const employee=document.createElement('select');employee.className='input';employee.style.width='100%';
+      employee.append(new Option('— Select employee —',''));
+      const knownId=String(job.planned_employee_id||'');
+      employeeLabel.append(employee);row.append(employeeLabel);
+      const dateLabel=document.createElement('label');dateLabel.textContent='Scheduled date (optional)';
+      const dateInput=document.createElement('input');dateInput.type='date';dateInput.className='input';
+      dateInput.value=String(job.scheduled_date||'');dateLabel.append(dateInput);row.append(dateLabel);
+      const timeLabel=document.createElement('label');timeLabel.textContent='Scheduled time (optional)';
+      const timeInput=document.createElement('input');timeInput.type='time';timeInput.className='input';
+      timeInput.value=String(job.scheduled_time||'');timeLabel.append(timeInput);row.append(timeLabel);
+      const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:10px';
+      const savePlan=document.createElement('button');savePlan.type='button';savePlan.className='btn';savePlan.textContent='Save plan';
+      const update=document.createElement('button');update.type='button';update.className='btn btn-orange';update.textContent='Update to Schedule';
+      const note=document.createElement('small');note.className='hint';note.setAttribute('role','status');
+      note.textContent='Planning fields are optional. Only Update to Schedule changes the job date, status and assigned To-Do.';
+      buttons.append(savePlan,update);plan.append(heading,row,buttons,note);card.appendChild(plan);
+      fetchJSON('/pds-scheduling/assignable-staff').then(result=>{
+        const staff=[...(result.staff||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
+        for(const person of staff)employee.append(new Option(String(person.name||''),String(person.id||'')));
+        if(knownId&&staff.some(person=>String(person.id)===knownId))employee.value=knownId;
+      }).catch(err=>{note.textContent='Staff roster unavailable: '+(err.message||err);});
+      const submit=async(schedule)=>{
+        const body={employee_id:employee.value,scheduled_date:dateInput.value,
+                    scheduled_time:timeInput.value,update_to_schedule:schedule};
+        if(schedule&&(!body.employee_id||!body.scheduled_date||!body.scheduled_time)){
+          note.textContent='Choose an employee, scheduled date and time first.';return;
+        }
+        savePlan.disabled=update.disabled=true;note.textContent=schedule?'Updating calendar & To-Do…':'Saving visit plan…';
+        try{
+          const confirmed=await fetchJSON('/pds-scheduling/jobs/'+encodeURIComponent(job.id)+'/visit-plan',{
+            method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+          if(!confirmed.ok||confirmed.updated_to_schedule!==schedule||confirmed.scheduled_date!==body.scheduled_date||
+             confirmed.scheduled_time!==body.scheduled_time||confirmed.planned_employee_id!==body.employee_id)
+            throw Error('Visit plan not confirmed by server');
+          if(schedule){
+            const actual=await apiGetJob(job.id);
+            if(actual.date!==body.scheduled_date||actual.status!=='Scheduled')throw Error('New schedule not verified');
+            renderJobDetails(container,actual,ctx);refreshBadges();
+            if(ctx?.afterSave)try{await ctx.afterSave()}catch(e){console.warn('Schedule saved; refresh unavailable',e)}
+          }else{job.planned_employee_id=body.employee_id;job.scheduled_date=body.scheduled_date;
+                job.scheduled_time=body.scheduled_time;note.textContent='Visit plan saved. Original job date and status unchanged.';}
+        }catch(err){note.textContent='Not confirmed: '+(err.message||err)}
+        finally{savePlan.disabled=update.disabled=false;}
+      };
+      savePlan.onclick=()=>submit(false);update.onclick=()=>submit(true);
+    }
     const noteHeading=document.createElement('h3');noteHeading.className='pds-office-section-label';noteHeading.textContent='Notes & history';
     card.appendChild(noteHeading);
     card.appendChild(officeNotes);
@@ -7901,6 +7859,86 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
 
+  // PDS office dispatch board. Dragging only stages a proposed change;
+  // explicit Update to Schedule is required to persist any change.
+  async function renderPdsWeekScheduler(){
+    if(!isOfficeUser() || (document.body.dataset.platform||'')!=='pds'){
+      showLoggedOutSplash('PDS office access required for scheduling');return;
+    }
+    setNavActive(navToDoList);setActiveChip('Work Flow');setWorkspace('Weekly Dispatch Scheduler');clearWorkspaceActions();
+    const root=document.createElement('section');root.className='card';root.style.cssText='display:grid;gap:12px';
+    const head=document.createElement('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap';
+    const title=document.createElement('h3');title.textContent='Weekly Dispatch Scheduler';title.style.margin='0';
+    const controls=document.createElement('div');controls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;align-items:center';
+    const prev=document.createElement('button');prev.className='btn';prev.textContent='← Previous';
+    const next=document.createElement('button');next.className='btn';next.textContent='Next →';
+    const today=document.createElement('button');today.className='btn';today.textContent='This week';
+    const scope=document.createElement('select');scope.className='input';scope.setAttribute('aria-label','Schedule view');
+    for(const [name,value] of [['Week view','week'],['Single day','day']])scope.add(new Option(name,value));
+    const dayField=document.createElement('input');dayField.className='input';dayField.type='date';dayField.setAttribute('aria-label','Choose schedule day');
+    controls.append(prev,today,next,scope,dayField);head.append(title,controls);root.append(head);
+    const explanation=document.createElement('p');explanation.className='hint';explanation.textContent='Drag a dispatch to another date to propose a move. No job changes until you select an employee and time and click Update to Schedule. Existing job dates are kept until then.';root.append(explanation);
+    const assistant=document.createElement('button');assistant.type='button';assistant.className='btn';assistant.textContent='✦ Ask Moses about this schedule';
+    assistant.onclick=()=>{document.getElementById('workspaceMosesBubble')?.click();const field=document.querySelector('#workspaceMosesPanel textarea');if(field){field.value='Review my PDS dispatch schedule this week, identify unassigned jobs and scheduling conflicts, and propose an action plan. Do not save changes without approval.';field.focus()}};
+    root.append(assistant);
+    const notice=document.createElement('div');notice.setAttribute('role','status');notice.className='hint';root.append(notice);
+    const board=document.createElement('div');root.append(board);
+    const toMonday=(value)=>{const d=new Date(value+'T12:00:00');d.setDate(d.getDate()-((d.getDay()+6)%7));return d.toISOString().slice(0,10)};
+    const isoDate=(d)=>{const local=new Date(d.getTime()-d.getTimezoneOffset()*60000);return local.toISOString().slice(0,10)};
+    let start=toMonday(isoDate(new Date())), selectedDay=isoDate(new Date());dayField.value=selectedDay;
+    const move=(n)=>{const d=new Date(start+'T12:00:00');d.setDate(d.getDate()+n*7);start=isoDate(d);const pick=new Date(selectedDay+'T12:00:00');pick.setDate(pick.getDate()+n*7);selectedDay=isoDate(pick);dayField.value=selectedDay;refresh()};
+    prev.onclick=()=>move(-1);next.onclick=()=>move(1);today.onclick=()=>{selectedDay=isoDate(new Date());dayField.value=selectedDay;start=toMonday(selectedDay);refresh()};
+    scope.onchange=()=>refresh();dayField.onchange=()=>{if(!dayField.value)return;selectedDay=dayField.value;start=toMonday(selectedDay);refresh()};
+    const openTicket=(job)=>{renderAllJobsView(job.job_number||job.customer||'')};
+    const editVisit=(job,chosenDate,staff,afterSave)=>{
+      const popup=document.createElement('div');popup.style.cssText='position:fixed;inset:0;z-index:13000;background:#1524369c;display:flex;align-items:center;justify-content:center;padding:12px';
+      const form=document.createElement('form');form.className='card';form.style.cssText='width:min(460px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px';
+      const h=document.createElement('h3');h.textContent='Schedule · '+(job.customer||job.job_number);h.style.margin='0';form.append(h);
+      const label=document.createElement('p');label.className='hint';label.textContent='Changing the visit here updates the shared job date and status only after confirmation. For multi-day work, create or use a separate visit record where supported.';form.append(label);
+      const select=document.createElement('select');select.className='input';select.required=true;select.add(new Option('Choose employee',''));
+      for(const p of staff)select.add(new Option(p.name,p.id));select.value=job.planned_employee_id||job.assigned_employee_ids?.[0]||'';
+      const date=document.createElement('input');date.className='input';date.type='date';date.required=true;date.value=chosenDate||job.scheduled_date||job.date||'';
+      const time=document.createElement('input');time.className='input';time.type='time';time.required=true;time.value=job.scheduled_time||'';
+      for(const [name,control] of [['Employee',select],['Scheduled date',date],['Scheduled time',time]]){const label=document.createElement('label');label.textContent=name;label.style.cssText='display:grid;gap:4px';label.append(control);form.append(label)}
+      const status=document.createElement('small');status.setAttribute('role','status');form.append(status);
+      const actions=document.createElement('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:8px';
+      const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';cancel.onclick=()=>popup.remove();
+      const save=document.createElement('button');save.type='submit';save.className='btn btn-orange';save.textContent='Update to Schedule';actions.append(cancel,save);form.append(actions);popup.append(form);document.body.append(popup);
+      form.onsubmit=async(e)=>{e.preventDefault();if(!select.value||!date.value||!time.value)return;
+        if(!confirm('Update '+(job.job_number||job.customer)+' to '+date.value+' at '+time.value+' and assign '+select.options[select.selectedIndex].text+'?'))return;
+        save.disabled=true;status.textContent='Saving verified schedule…';
+        try{const payload={employee_id:select.value,scheduled_date:date.value,scheduled_time:time.value,update_to_schedule:true};
+          const result=await fetchJSON('/pds-scheduling/jobs/'+encodeURIComponent(job.id)+'/visit-plan',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+          if(!result.ok||!result.assignment_confirmed||result.job_date!==date.value||result.status!=='Scheduled')throw Error('Saved schedule could not be confirmed');
+          popup.remove();notice.textContent='Schedule confirmed for '+(job.job_number||job.customer)+'.';await afterSave();
+        }catch(err){status.textContent='Not saved: '+(err.message||err);save.disabled=false}
+      };
+    };
+    async function refresh(){notice.textContent='Loading current PDS dispatches…';board.replaceChildren();
+      try{const [result,people]=await Promise.all([fetchJSON('/pds-scheduling/week?start='+encodeURIComponent(start)),fetchJSON('/pds-scheduling/assignable-staff')]);
+        const jobs=result.jobs||[],staff=(people.staff||[]).slice().sort((a,b)=>a.name.localeCompare(b.name));
+        notice.textContent='Week of '+start+' · '+jobs.length+' saved dispatches · Drag to propose a date change';
+        const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px';
+        const days=Array.from({length:7},(_,i)=>{const d=new Date(start+'T12:00:00');d.setDate(d.getDate()+i);return isoDate(d)}).filter(day=>scope.value==='week'||day===selectedDay);
+        for(const day of days){const column=document.createElement('section');column.className='card';column.style.cssText='min-height:170px;padding:10px;display:grid;align-content:start;gap:9px;border:1px solid #dbe3e8;background:#fafcfd';
+          const heading=document.createElement('strong');heading.textContent=new Date(day+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});column.append(heading);
+          column.ondragover=e=>{if(e.dataTransfer?.types.includes('text/plain'))e.preventDefault()};
+          column.ondrop=e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/plain');const job=jobs.find(j=>j.id===id);if(job&&day!==job.date)editVisit(job,day,staff,refresh)};
+          for(const job of jobs.filter(j=>j.date===day || (j.scheduled_date===day&&j.date!==day))){const card=document.createElement('article');card.draggable=!!job.id;card.style.cssText='padding:10px;border-radius:10px;background:white;border:1px solid #dce3e8;display:grid;gap:5px;cursor:grab';
+            card.ondragstart=e=>{e.dataTransfer.setData('text/plain',job.id);e.dataTransfer.effectAllowed='move'};
+            const name=document.createElement('strong');name.textContent=job.customer||'Dispatch';const detail=document.createElement('small');detail.textContent=[job.job_number,job.scheduled_time,job.status].filter(Boolean).join(' · ');
+            const person=document.createElement('small');person.textContent=job.assigned_names?.join(', ')||'Unassigned';
+            const actions=document.createElement('div');actions.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+            const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='Open ticket';open.onclick=()=>openTicket(job);
+            const edit=document.createElement('button');edit.type='button';edit.className='btn';edit.textContent='Quick edit';edit.onclick=()=>editVisit(job,day,staff,refresh);
+            actions.append(open,edit);card.append(name,detail,person,actions);column.append(card)}
+          if(column.children.length===1){const empty=document.createElement('small');empty.className='hint';empty.textContent='No dispatches scheduled';column.append(empty)}grid.append(column)}board.append(grid);
+        currentView={refresh};
+      }catch(error){notice.textContent='Scheduling board unavailable: '+(error.message||error)}
+    }
+    workspaceBody.replaceChildren(root);await refresh();
+  }
+
   function renderToDoListView() {
     if (!isOfficeUser()) {
       showLoggedOutSplash("You do not have access to the To-Do List.");
@@ -7919,6 +7957,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       <div class="hint" style="margin-top:6px;">Assigned jobs and sales leads currently in Quote or Complete/Quote status.</div>
     `;
     root.appendChild(header);
+    if((document.body.dataset.platform||'')==='pds'){
+      const planning=document.createElement('button');planning.type='button';planning.className='btn btn-orange';
+      planning.textContent='▦ Weekly Dispatch Scheduler';planning.style.margin='8px 0 2px';
+      planning.onclick=()=>renderPdsWeekScheduler();root.append(planning);
+    }
 
     const list = document.createElement("div");
     list.style.marginTop = "12px";
@@ -8281,6 +8324,24 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       refreshBadges();
     }
  
+    // Office-only bulk Moses entry point; opens verified saved REVIEW tickets only.
+    // Preparing these does not create numbered estimates or send emails.
+    if(activePlatform==='pds'&&String(currentUser?.role||'')==='office_admin') {
+      const batchBar=document.createElement('div');batchBar.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 14px';
+      const batchBtn=document.createElement('button');batchBtn.type='button';batchBtn.className='btn btn-orange';
+      batchBtn.textContent='✨ Moses — Prepare eligible quote reviews';
+      const batchInfo=document.createElement('small');batchInfo.setAttribute('role','status');batchInfo.className='hint';
+      batchInfo.textContent='Prepares saved quote-review tickets from eligible jobs. Estimates still require review in the existing editor.';
+      batchBtn.onclick=async()=>{
+        if(!confirm('Prepare saved review tickets for eligible PDS quotes? No estimates or emails will be issued.'))return;
+        batchBtn.disabled=true;batchInfo.textContent='Reviewing saved PDS completion forms…';
+        try{const r=await fetchJSON('/moses-drafts/prepare',{method:'POST'});
+          batchInfo.textContent=String(r.created||0)+' new quote review(s) prepared. Existing drafts preserved.';
+          if(typeof window.openMosesDrafts==='function')window.openMosesDrafts();
+        }catch(e){batchInfo.textContent='Could not prepare quote reviews: '+(e.message||e)}finally{batchBtn.disabled=false;}
+      };
+      batchBar.append(batchBtn,batchInfo);root.appendChild(batchBar);
+    }
     root.appendChild(tabsRow);
     root.appendChild(searchWrap);
     root.appendChild(list);
@@ -8304,7 +8365,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
  
-  function renderAllJobsView() {
+  function renderAllJobsView(searchTerm = "") {
  
     setNavActive(navAllJobs);
     setActiveChip("Work Flow");
@@ -8320,7 +8381,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     searchWrap.innerHTML = `<input class="input" id="all_jobs_search" placeholder="Search by customer, contact, address, job #, estimate #, invoice #, or PO #" /><button class="btn" id="all_jobs_refresh">Search</button>`;
  
     const list = document.createElement("div");
-    let allJobsQuery = "";
+    let allJobsQuery = String(searchTerm || "").trim();
  
     function openAnyJobCard(job) {
       if (!job) return;
@@ -8450,7 +8511,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
-    card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 style="margin:0">Parts List</h3><div class="hint">Manage manufacturer, part #, description, supplier, pricing, product links, and photos.</div></div><button class="btn" type="button" id="parts_back_hub">← Business Hub</button></div>`;
+    card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3 style="margin:0">Parts List</h3><div class="hint">Manage parts, supplier rates, customer pricing, stock quantities, product links and photos.</div></div><button class="btn" type="button" id="parts_back_hub">← Business Hub</button></div>`;
     card.querySelector("#parts_back_hub").onclick = () => renderEstimatePage();
 
     const controls = document.createElement("div");
@@ -8476,7 +8537,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           </div>
           <div style="margin-top:10px;"><div class="label">Description</div><textarea id="part_desc">${escapeHtml(part.Description || part.description || "")}</textarea></div>
           <div style="margin-top:10px;"><div class="label">Supplier</div><input class="input" id="part_supplier" placeholder="Preferred supplier" value="${escapeHtml(part.supplier || part.Supplier || "")}" /></div>
-          <div style="margin-top:10px;"><div class="label">Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Customer Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Supplier Rate (optional)</div><input class="input" id="part_supplier_rate" type="number" step="0.01" min="0" value="${escapeHtml(String(part.supplier_rate??''))}" /></div>
           <div style="margin-top:10px;"><div class="label">Product Website URL</div><input class="input" id="part_product_url" type="url" placeholder="https://supplier.com/product" value="${escapeHtml(part.product_url || "")}" /></div>
           <div style="margin-top:10px;"><div class="label">Photo URL</div><input class="input" id="part_image_url" placeholder="https://... or uploaded photo" value="${escapeHtml(part.image_url || "")}" /></div>
           <img id="part_photo_preview" alt="Part image preview" style="max-width:200px;max-height:140px;object-fit:contain;display:none" />
@@ -8506,6 +8568,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             description: wrap.querySelector("#part_desc").value.trim(),
             price: Number(wrap.querySelector("#part_price").value || 0),
             supplier: wrap.querySelector("#part_supplier").value.trim(),
+            supplier_rate: wrap.querySelector("#part_supplier_rate").value.trim(),
             product_url: wrap.querySelector("#part_product_url").value.trim(),
             image_url: wrap.querySelector("#part_image_url").value.trim(),
           });
@@ -8524,10 +8587,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row = document.createElement("div");
         row.className = "jobrow";
         row.style.cursor = "pointer";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}</div><div class="hint">$${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}</div>`;
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}</div><div class="hint">${p.stock_recorded?Number(p.stock_on_hand||0)+" in Stock":"Stock not counted"} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
         if(p.image_url&&(/^https:\/\//i.test(p.image_url)||p.image_url.startsWith('/moses/part-image/pds/'))){const img=document.createElement('img');img.src=p.image_url;img.alt='Part photo';img.style.cssText='width:64px;height:64px;object-fit:contain;border-radius:8px;float:left;margin-right:12px';img.onerror=()=>img.remove();row.prepend(img);}
         if(p.product_url&&/^https:\/\//i.test(p.product_url)){const link=document.createElement('a');link.href=p.product_url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Product Website';link.onclick=e=>e.stopPropagation();row.append(link);}
-        row.addEventListener("click", ()=> openPartEditor(p));
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;margin:8px 0;flex-wrap:wrap';
+        const edit=document.createElement('button');edit.className='btn';edit.textContent='View / Edit Part';
+        edit.onclick=()=>openPartEditor(p);
+        const stock=document.createElement('button');stock.className='btn';stock.textContent='Adjust Stock';
+        stock.onclick=async()=>{
+          const deltaText=prompt('Stock adjustment (positive quantity to receive, negative to remove):','');
+          if(deltaText===null)return;
+          if(!/^[+-]?\d+$/.test(deltaText.trim())||Number(deltaText)===0){alert('Enter a nonzero whole number');return;}
+          const reason=prompt('Reason for inventory adjustment (required):','');
+          if(reason===null)return;
+          if(reason.trim().length<3){alert('Enter an adjustment reason');return;}
+          try{const result=await fetchJSON('/data/parts/'+encodeURIComponent(p.id)+'/adjust-stock',{
+            method:'POST',headers:{'Content-Type':'application/json'},
+            body:JSON.stringify({delta:Number(deltaText),reason:reason.trim()})});
+            if(!result.verified)throw Error('Stock quantity not confirmed');
+            await refresh();
+          }catch(err){alert('Stock adjustment failed: '+(err.message||err));}
+        };
+        actions.append(edit,stock);row.append(actions);
         list.appendChild(row);
       });
     }
@@ -11430,6 +11511,39 @@ function renderEmployeesView() {
       return phone;
     }
 
+    // PDS technician skills belong ONLY in Employees, not in dispatch tickets.
+    async function editPdsSkills(person) {
+      if(activePlatform!=='pds'||currentUser?.role!=='office_admin'||!['tech','lead'].includes(person.role))return;
+      const veil=document.createElement('div');veil.style.cssText='position:fixed;inset:0;z-index:15000;background:#172133aa;display:flex;align-items:center;justify-content:center;padding:14px';
+      const form=document.createElement('section');form.className='card';form.style.cssText='background:#fff;width:min(560px,100%);max-height:92vh;overflow:auto;padding:20px;display:grid;gap:12px';
+      const title=document.createElement('h3');title.textContent='Technician skills · '+person.name;
+      const message=document.createElement('p');message.className='hint';message.setAttribute('role','status');message.textContent='Only office administrators can edit skill ratings. Unrated means unknown.';
+      const close=document.createElement('button');close.type='button';close.className='btn';close.textContent='Close';close.onclick=()=>veil.remove();
+      form.append(title,message);
+      try{
+        const result=await fetchJSON('/pds-scheduling/technicians/'+encodeURIComponent(person.id)+'/skills');
+        const profile=result.profile||{},rows=[];
+        for(const kind of ['Automatic Door','Man Door','Storefront Door','Herculite Door','Roll Up','Glass','Roll/Swing Gate','Other']){
+          const label=document.createElement('label');label.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:10px';
+          label.append(document.createTextNode(kind));const select=document.createElement('select');select.className='input';select.style.maxWidth='125px';select.append(new Option('Unrated',''));
+          for(let n=1;n<=10;n++)select.append(new Option(n+' / 10',String(n)));
+          select.value=String(profile.ratings?.[kind]||'');rows.push([kind,select]);label.append(select);form.append(label);
+        }
+        const prefs=document.createElement('label');prefs.textContent='Work preferences';const prefInput=document.createElement('input');prefInput.className='input';prefInput.value=(profile.preferences||[]).join(', ');prefs.append(prefInput);form.append(prefs);
+        const lead=document.createElement('label');const canLead=document.createElement('input');canLead.type='checkbox';canLead.checked=!!profile.can_lead_crew;lead.append(canLead,document.createTextNode(' Can lead a crew'));form.append(lead);
+        const save=document.createElement('button');save.type='button';save.className='btn btn-orange';save.textContent='Save skills';form.append(save);
+        save.onclick=async()=>{
+          save.disabled=true;message.textContent='Saving skill profile…';
+          try{const ratings=Object.fromEntries(rows.filter(([,c])=>c.value).map(([name,c])=>[name,Number(c.value)]));
+            const preferences=prefInput.value.split(',').map(x=>x.trim()).filter(Boolean).slice(0,20);
+            const saved=await fetchJSON('/pds-scheduling/technicians/'+encodeURIComponent(person.id)+'/skills',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ratings,preferences,can_lead_crew:canLead.checked})});
+            if(!saved.ok)throw Error('Save not confirmed');message.textContent='Skill profile saved.';
+          }catch(e){message.textContent='Skills not saved: '+(e.message||e)}finally{save.disabled=false;}
+        };
+      }catch(e){message.textContent='Unable to open skills: '+(e.message||e)}
+      form.append(close);veil.append(form);document.body.append(veil);
+    }
+
     async function refresh() {
       const [users, employees] = await Promise.all([
         apiListAuthUsers().catch(() => []),
@@ -11656,6 +11770,10 @@ function renderEmployeesView() {
           });
           a.appendChild(edit);
           a.appendChild(ptoAccrual);
+          if(activePlatform==='pds' && currentUser?.role==='office_admin' && ['tech','lead'].includes(e.role)){
+            const skills=document.createElement('button');skills.type='button';skills.className='btn';skills.textContent='Skills';
+            skills.onclick=()=>editPdsSkills(e);a.appendChild(skills);
+          }
           a.appendChild(del);
           row.appendChild(top);
           row.appendChild(meta);
@@ -14204,7 +14322,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navJobFlow) navJobFlow.addEventListener("click", () => renderJobFlowView("Dispatch"));
   if (navToDoList) navToDoList.addEventListener("click", renderToDoListView);
   navMyAssignments.addEventListener('click',renderMyAssignments);
-  if (navAllJobs) navAllJobs.addEventListener("click", renderAllJobsView);
+  if (navAllJobs) navAllJobs.addEventListener("click", () => renderAllJobsView());
   if (navEstimateInvoice) navEstimateInvoice.addEventListener("click", renderEstimatePage);
   if (navEstimatePage && !navEstimateInvoice) navEstimatePage.addEventListener("click", renderEstimatePage);
   if (navInvoicePage && !navEstimateInvoice) navInvoicePage.addEventListener("click", renderInvoicePage);

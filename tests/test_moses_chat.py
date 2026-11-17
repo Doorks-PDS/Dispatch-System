@@ -384,7 +384,7 @@ def test_agent_sdk_tools_are_read_only_or_proposal_only(monkeypatch):
                        RunConfig=FakeRunConfig, function_tool=lambda fn: fn))
     result = moses_agent.answer(request(platform='sdc'), 'What is open?', [{'role':'user','content':'Earlier'}])
     assert result == 'Done, no records changed'
-    assert captured['run_kwargs']['max_turns'] == 5
+    assert captured['run_kwargs']['max_turns'] == 16
     assert captured['config']['tracing_disabled'] is True
     assert len(captured['tools']) == 26
     assert len({tool.__name__ for tool in captured['tools']}) == len(captured['tools'])
@@ -420,7 +420,7 @@ def test_sdc_agent_failure_does_not_fall_back_to_legacy(monkeypatch):
     monkeypatch.setattr(moses_agent, 'answer', lambda *_: (_ for _ in ()).throw(RuntimeError('offline')))
     monkeypatch.setattr(assistant, '_request_model', lambda *_: pytest.fail('legacy model called'))
     result = assistant.chat(assistant.Message(message='Analyze business trends'), request('sdc'))
-    assert 'could not complete the live AI request' in result['answer']
+    assert 'could not finish the live AI request' in result['answer']
 
 
 def test_agent_service_rejects_unknown_workspace_and_non_admin():

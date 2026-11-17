@@ -135,5 +135,5 @@ def test_corrupt_parts_catalog_never_overwritten(tmp_path,monkeypatch):
 
 def test_dispatch_email_template_describes_actual_office_approved_status():
     assert "Our technician is on the way." in DELIVERY
-    assert "Our estimated arrival time is " in DELIVERY
+    assert "Our expected arrival time is " in DELIVERY
     assert "Our technician is preparing to head your way." not in DELIVERY

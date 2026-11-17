@@ -12,8 +12,10 @@ let panel,body,feedback;
 function mount(){
  if(document.getElementById('mosesDraftsLaunch'))return;
  const launch=h('button','Moses Drafts','btn');launch.type='button';launch.id='mosesDraftsLaunch';
- launch.style.cssText='position:fixed;right:24px;bottom:83px;z-index:10995;border:1px solid #618b74;background:#fff;color:#254f38;font-weight:800;padding:10px 14px;border-radius:12px;box-shadow:0 6px 22px #0002';
- launch.onclick=()=>{panel.hidden=false;panel.style.display='flex';render()};
+ launch.hidden=true;launch.style.display='none';
+ const openDrafts=()=>{if(document.body.dataset.platform!=='pds')return;panel.hidden=false;panel.style.display='flex';render()};
+ launch.onclick=openDrafts;
+ window.openMosesDrafts=openDrafts;
  panel=h('section');panel.id='mosesDraftsPanel';panel.hidden=true;panel.style.cssText='position:fixed;inset:6vh max(14px,calc((100vw - 1100px)/2));z-index:11100;display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 15px 70px #0006;border:1px solid #dce5dd;overflow:hidden';
  const heading=h('div');heading.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #e4e9e6';
  const title=h('strong','Moses Drafts · PDS Quote Review');const close=h('button','Close ×','btn');close.onclick=()=>{panel.hidden=true;panel.style.display='none'};heading.append(title,close);

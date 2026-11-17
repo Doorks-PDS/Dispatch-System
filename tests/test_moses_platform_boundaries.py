@@ -56,7 +56,7 @@ def test_pds_agent_has_search_and_proposal_only(monkeypatch):
         'get_moses_pending_actions', 'get_moses_action_center', 'get_business_briefing',
         'review_purchase_order_receiving', 'propose_purchase_order_receipt',
         'search_pds_jobs', 'get_pds_job_details', 'get_pds_work_queue',
-        'get_verified_pds_draft', 'get_verified_pds_job_context', 'prepare_pds_job_quote_review',
+        'get_verified_pds_draft', 'get_verified_pds_job_context', 'prepare_pds_job_quote_review', 'prepare_pds_quote_review_batch',
         'review_pds_document_delivery', 'prepare_pds_document_delivery',
         'get_pending_pds_document_emails', 'prepare_customer_dispatch_update',
         'get_pds_estimate_context', 'get_pds_estimate_preview', 'propose_pds_job_status',

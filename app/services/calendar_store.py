@@ -615,7 +615,8 @@ class CalendarStore:
             "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
             "followup_job_id", "followup_job_number", "source_job_id", "source_job_number", "approved", "approved_at",
             "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order",
-            "assigned_lead_id", "assigned_employee_ids", "assigned_technician_ids", "assignment_tentative"
+            "assigned_lead_id", "assigned_employee_ids", "assigned_technician_ids", "assignment_tentative",
+            "planned_employee_id", "scheduled_date", "scheduled_time"
         ]:
             if k in payload:
                 if k == "completion_forms":

@@ -166,6 +166,66 @@ def assign(job_id: str, payload: Assignment, request: Request):
             'shared_calendar_unchanged': True}
 
 
+class VisitPlan(BaseModel):
+    employee_id: str = Field(default='', max_length=80)
+    scheduled_date: str = Field(default='', max_length=10)
+    scheduled_time: str = Field(default='', max_length=5)
+    update_to_schedule: bool = False
+
+
+@router.put('/jobs/{job_id}/visit-plan')
+def visit_plan(job_id: str, payload: VisitPlan, request: Request):
+    """Store an optional future visit without changing the historical job date.
+
+    The explicit Update to Schedule action atomically copies the planned date
+    to the shared calendar, marks Scheduled and assigns the selected employee.
+    No notifications or external messages are sent by this endpoint.
+    """
+    import re
+    _dispatcher(request)
+    store = request.app.state.calendar_store
+    job = store.get_job(job_id)
+    if not isinstance(job, dict) or str(job.get('id') or '') != job_id:
+        raise HTTPException(404, 'PDS job not found')
+    if str(job.get('source') or '').upper().startswith('LEGACY'):
+        raise HTTPException(409, 'Historical jobs cannot be rescheduled here')
+    employee_id = payload.employee_id.strip()
+    visit_date = payload.scheduled_date.strip()
+    visit_time = payload.scheduled_time.strip()
+    if employee_id:
+        _person(request, employee_id)
+    if visit_date:
+        try:
+            if date.fromisoformat(visit_date).isoformat() != visit_date:
+                raise ValueError('Invalid date')
+        except ValueError as exc:
+            raise HTTPException(422, 'Scheduled date must be YYYY-MM-DD') from exc
+    if visit_time and not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', visit_time):
+        raise HTTPException(422, 'Scheduled time must be HH:MM')
+    if payload.update_to_schedule and not (employee_id and visit_date and visit_time):
+        raise HTTPException(422, 'Choose an employee, date and time before Update to Schedule')
+    updates = {'planned_employee_id': employee_id,
+               'scheduled_date': visit_date, 'scheduled_time': visit_time}
+    if payload.update_to_schedule:
+        updates.update({'date': visit_date, 'status': 'Scheduled',
+                        'assigned_employee_ids': [employee_id],
+                        'assigned_lead_id': '', 'assignment_tentative': False})
+    saved = store.update_job(job_id, updates)
+    if (not isinstance(saved, dict) or
+        any(str(saved.get(key) or '') != value for key, value in (
+            ('planned_employee_id', employee_id), ('scheduled_date', visit_date),
+            ('scheduled_time', visit_time)))):
+        raise HTTPException(503, 'Visit plan not confirmed by saved job')
+    if payload.update_to_schedule and (
+        saved.get('status') != 'Scheduled' or saved.get('date') != visit_date or
+        saved.get('assigned_employee_ids') != [employee_id]):
+        raise HTTPException(503, 'Schedule update not confirmed by saved job')
+    return {'ok': True, 'job_id': job_id, 'updated_to_schedule': payload.update_to_schedule,
+            'job_date': str(saved.get('date') or ''), 'status': saved.get('status'),
+            'planned_employee_id': employee_id, 'scheduled_date': visit_date,
+            'scheduled_time': visit_time, 'assignment_confirmed': bool(payload.update_to_schedule)}
+
+
 class Skills(BaseModel):
     ratings: dict[str, int] = Field(default_factory=dict)
     preferences: list[str] = Field(default_factory=list, max_length=20)
@@ -196,6 +256,48 @@ def read_skills(technician_id: str, request: Request):
     return {'technician_id': technician_id, 'profile': row.get('scheduling_profile') or
             {'ratings': {}, 'preferences': [], 'can_lead_crew': False},
             'unrated_means_unknown': True}
+
+
+@router.get('/week')
+def office_week(request: Request, start: str):
+    """Authorized PDS office board, with a bounded seven-day, read-only record view."""
+    from datetime import timedelta
+    _dispatcher(request)
+    try:
+        monday = date.fromisoformat(start)
+        if monday.weekday() != 0 or monday.isoformat() != start:
+            raise ValueError('Expected Monday')
+    except ValueError as exc:
+        raise HTTPException(422, 'Week start must be a Monday in YYYY-MM-DD format') from exc
+    end = monday + timedelta(days=7)
+    staff = _people(request)
+    names = {str(p['id']): str(p['name']) for p in staff}
+    jobs = request.app.state.calendar_store.list_jobs()
+    if not isinstance(jobs, list):
+        raise HTTPException(503, 'PDS dispatch data unavailable')
+    output=[]
+    for job in jobs:
+        if not isinstance(job, dict) or not job.get('id'):
+            continue
+        if str(job.get('source') or '').upper().startswith('LEGACY'):
+            continue
+        day = str(job.get('date') or '')
+        planned = str(job.get('scheduled_date') or '')
+        if not any(monday.isoformat() <= value < end.isoformat() for value in (day, planned)):
+            continue
+        ids = job.get('assigned_employee_ids') or []
+        if not isinstance(ids, list): ids=[]
+        output.append({
+            'id':str(job['id']), 'job_number':str(job.get('job_number') or ''),
+            'customer':str(job.get('customer') or '')[:160],
+            'date':day, 'status':str(job.get('status') or ''),
+            'scheduled_date':planned, 'scheduled_time':str(job.get('scheduled_time') or ''),
+            'planned_employee_id':str(job.get('planned_employee_id') or ''),
+            'assigned_employee_ids':[str(v) for v in ids],
+            'assigned_names':[names[str(i)] for i in ids if str(i) in names],
+        })
+    output.sort(key=lambda row:(row['date'],row['scheduled_time'],row['job_number']))
+    return {'ok':True,'week_start':start,'jobs':output,'count':len(output),'read_only':True}
 
 
 @router.get('/my-jobs')

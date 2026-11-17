@@ -8,7 +8,7 @@ import uuid
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.services.storage import bootstrap_data_file
 
@@ -250,6 +250,98 @@ def promote_legacy_job(
     return {"ok": True, "job": job}
 
 
+# Separate append-only PDS inventory ledger. Existing master parts remain untouched;
+# missing stock history means no verified stock rather than an invented balance.
+def _pds_stock_path(request: Request) -> Path:
+    import os
+    root = getattr(request.app.state, "data_dir", None)
+    if not root:
+        raise HTTPException(503, "Durable PDS data storage is not configured")
+    return Path(root) / "pds_parts_stock_events.json"
+
+
+def _stock_records(path: Path) -> list[dict]:
+    if not path.exists():
+        return []
+    try:
+        rows = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
+            raise ValueError('Invalid inventory ledger')
+        return rows
+    except (OSError, ValueError, TypeError) as exc:
+        raise HTTPException(503, "PDS inventory ledger unavailable; stock changes disabled") from exc
+
+
+def _pds_stock_balances(request: Request) -> dict[str, int]:
+    balances: dict[str, int] = {}
+    for item in _stock_records(_pds_stock_path(request)):
+        try:
+            part_id = str(item['part_id'])
+            delta = int(item['delta'])
+            if not part_id or isinstance(item['delta'], bool):
+                raise ValueError('invalid entry')
+        except (TypeError, ValueError, KeyError) as exc:
+            raise HTTPException(503, 'PDS inventory ledger requires review') from exc
+        balances[part_id] = balances.get(part_id, 0) + delta
+        if balances[part_id] < 0:
+            raise HTTPException(503, 'PDS inventory ledger contains negative stock')
+    return balances
+
+
+def _pds_stock_office(request: Request) -> str:
+    user = getattr(request.state, 'auth_user', None)
+    role = getattr(request.state, 'auth_role', None)
+    if not isinstance(user, dict) or role not in ('office_admin', 'office') or request.session.get('active_platform') != 'pds':
+        raise HTTPException(403, 'PDS office permission required for inventory changes')
+    return str(user.get('name') or user.get('id') or 'office')[:100]
+
+
+class PdsStockAdjustment(BaseModel):
+    delta: int = Field(ge=-100000, le=100000)
+    reason: str = Field(min_length=3, max_length=300)
+
+
+@router.post('/parts/{part_id}/adjust-stock')
+def adjust_pds_part_stock(part_id: str, payload: PdsStockAdjustment, request: Request):
+    """Explicit office-only, audited stock adjustment with cross-worker lock."""
+    import os
+    import fcntl
+    from datetime import datetime, timezone
+    actor = _pds_stock_office(request)
+    catalog = _read_json_file(_parts_path(request), {'items': []})
+    if not any(isinstance(p, dict) and _norm(p.get('id')) == part_id for p in catalog.get('items', [])):
+        raise HTTPException(404, 'PDS part not found')
+    path = _pds_stock_path(request)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(path.name + '.lock')
+    with lock_path.open('a+') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        try:
+            events = _stock_records(path)
+            balance = _pds_stock_balances(request).get(part_id, 0)
+            if balance + payload.delta < 0:
+                raise HTTPException(409, 'Cannot reduce stock below zero')
+            if payload.delta == 0:
+                raise HTTPException(422, 'Stock adjustment must change the quantity')
+            event = {'id': uuid.uuid4().hex, 'part_id': part_id, 'delta': payload.delta,
+                     'reason': payload.reason.strip(), 'actor': actor,
+                     'created_at': datetime.now(timezone.utc).isoformat()}
+            events.append(event)
+            tmp = path.with_name('.' + path.name + '.' + uuid.uuid4().hex + '.tmp')
+            try:
+                with tmp.open('x', encoding='utf-8') as stream:
+                    json.dump(events, stream, ensure_ascii=False, indent=2)
+                    stream.flush()
+                    os.fsync(stream.fileno())
+                os.replace(tmp, path)
+            finally:
+                tmp.unlink(missing_ok=True)
+            return {'ok': True, 'part_id': part_id, 'stock_on_hand': balance + payload.delta,
+                    'event_id': event['id'], 'verified': True}
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+
+
 class PartPayload(BaseModel):
     id: str = ""
     manufacturer: str = ""
@@ -259,6 +351,7 @@ class PartPayload(BaseModel):
     supplier: str = ""
     image_url: str = ""
     product_url: str = ""
+    supplier_rate: float | str = ""  # new optional field; legacy catalog prices retained
 
 
 def _part_https_url(value: str) -> str:
@@ -286,6 +379,7 @@ def list_parts(
     data = _read_json_file(_parts_path(request), {"items": []})
     items = data.get("items", []) if isinstance(data, dict) else []
     qn = _norm(q).lower()
+    balances = _pds_stock_balances(request)
     out = []
     for item in items:
         if not isinstance(item, dict):
@@ -299,6 +393,9 @@ def list_parts(
             "product_url": _norm(item.get("product_url")),
             "description": _norm(item.get("description")),
             "price": item.get("price", ""),
+            "supplier_rate": item.get("supplier_rate", ""),
+            "stock_on_hand": balances.get(_norm(item.get("id"))),
+            "stock_recorded": _norm(item.get("id")) in balances,
             # compatibility with existing estimate lookup
             "Item": _norm(item.get("part_number")),
             "Description": _norm(item.get("description")),
@@ -327,6 +424,7 @@ def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str]
         "supplier": _norm(payload.supplier),
         "description": _norm(payload.description),
         "price": payload.price,
+        "supplier_rate": payload.supplier_rate,
         "image_url": _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url,
         "product_url": _part_https_url(payload.product_url),
     }
@@ -349,6 +447,7 @@ def update_part(request: Request, part_id: str, payload: PartPayload, x_api_key:
             item["supplier"] = _norm(payload.supplier)
             item["description"] = _norm(payload.description)
             item["price"] = payload.price
+            item["supplier_rate"] = payload.supplier_rate
             item["image_url"] = _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url
             item["product_url"] = _part_https_url(payload.product_url)
             items[i] = item
@@ -363,6 +462,8 @@ def delete_part(request: Request, part_id: str, x_api_key: Optional[str] = Heade
     path = _parts_path(request)
     data = _read_json_file(path, {"items": []})
     items = data.get("items", []) if isinstance(data, dict) else []
+    if _norm(part_id) in _pds_stock_balances(request):
+        raise HTTPException(409, "Cannot delete a part with inventory history; retain the master record")
     items = [x for x in items if _norm(x.get("id")) != _norm(part_id)]
     _write_json_file(path, {"items": items})
     return {"ok": True}

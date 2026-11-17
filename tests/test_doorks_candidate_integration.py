@@ -56,7 +56,7 @@ def test_moses_voice_requires_explicit_microphone_action_and_manual_send():
     assert "r.start();listening=true;micButton.textContent='■ Stop listening'" in APP
     assert 'Review and press Send to Moses.' in APP
     assert "send.onclick=async()=>" in APP
-    assert "close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true}" in APP
+    assert "close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true;launch.focus()}" in APP
     assert "document.addEventListener('visibilitychange'" in APP
     assert 'say(r.answer' in APP
 
