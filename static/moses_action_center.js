@@ -29,35 +29,39 @@
     const area = document.createElement('section');
     area.id = 'mosesActionCenterArea';
     area.hidden = true;
-    area.style.cssText = 'display:grid;gap:10px;padding:12px 0;margin:12px 0;border-top:1px solid #e1e5e9';
-    const status = text('small', 'Select Action Center to check verified saved work.');
+    area.style.cssText = 'display:none;gap:10px;padding:12px 18px;margin:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;border-top:1px solid #e1e5e9';
+    const status = text('small', '');
     status.setAttribute('role', 'status');
     area.append(status);
-    const refresh = text('button', 'Refresh saved priorities', 'btn');
+    const refresh = text('button', '↻ Refresh', 'btn');
     refresh.type = 'button';
     const contents = document.createElement('div');
     contents.style.cssText = 'display:grid;gap:10px';
     area.append(refresh, contents);
     const renderCards = (source, title, actionType) => {
-      const section = document.createElement('section');
-      section.style.cssText = 'border:1px solid #e1e5e9;border-radius:10px;padding:10px;display:grid;gap:8px';
+      const section = document.createElement('details');
+      const tones={draft:['#eaf2ff','#3b64a0'],approval:['#fff1de','#aa6813'],work:['#ebf4ed','#397b50'],delivery:['#fff0ef','#af4a42']};
+      const [surface,accent]=tones[actionType]||['#f4f5f7','#536273'];
+      section.style.cssText='border:1px solid #dfe6e9;border-left:3px solid '+accent+';border-radius:11px;padding:0;overflow:hidden;background:#fff';
       const available = source && source.available === true;
       const total = available ? source.count : null;
-      const name = text('strong', title + ' · ' + (total == null ? 'Unavailable' : total));
+      const name = text('summary', title + ' (' + (total == null ? '—' : total) + ')');
+      name.style.cssText='padding:12px 13px;cursor:pointer;font-weight:700;background:'+surface+';color:'+accent;
       section.append(name);
+      const inside=document.createElement('div');inside.style.cssText='display:grid;gap:8px;padding:9px 12px';section.append(inside);
       if (!available) {
-        section.append(text('small', String(source?.note || 'Saved source unavailable; not counted as zero.')));
+        inside.append(text('small', String(source?.note || 'Unavailable.')));
       } else if (!total) {
-        section.append(text('small', 'Nothing recorded in this queue.'));
+        inside.append(text('small', 'No items.'));
       }
       for (const item of (Array.isArray(source?.items) ? source.items : []).slice(0, 12)) {
         const card = document.createElement('article');
         card.style.cssText = 'display:grid;gap:5px;border-top:1px solid #eef1f5;padding-top:8px';
-        card.append(text('strong', item.title || item.kind || 'Saved action'));
+        card.append(text('strong', item.title || item.customer || item.kind || 'Saved action'));
         card.append(text('small', [item.customer, item.job_number && `Job #${item.job_number}`,
           item.status || item.state].filter(Boolean).join(' · ')));
         if (actionType === 'draft' && item.draft_id) {
-          const inspect = text('button', 'View verified draft', 'btn');
+          const inspect = text('button', 'Review draft', 'btn');
           inspect.type = 'button';
           inspect.onclick = async () => {
             inspect.disabled = true;
@@ -83,7 +87,7 @@
           card.append(inspect);
         }
         if (actionType === 'work' && item.record_id && (document.body.dataset.platform || '') === 'pds') {
-          const inspect = text('button', 'Inspect saved PDS job', 'btn');
+          const inspect = text('button', 'View details', 'btn');
           inspect.type = 'button';
           inspect.onclick = async () => {
             inspect.disabled = true;
@@ -105,6 +109,19 @@
             } finally { inspect.disabled = false; }
           };
           card.append(inspect);
+          const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+          const view=text('button','View Job','btn');view.type='button';
+          view.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.record_id}}));
+          buttons.append(view);
+          const statusLabel=String(item.status||'').toLowerCase();
+          const isInvoice=/invoice|complete|done/.test(statusLabel)&&!/quote/.test(statusLabel);
+          const task=text('button',isInvoice?'Prepare invoice':'Prepare estimate','btn');task.type='button';
+          task.onclick=()=>{
+            const prompt='Review PDS job '+(item.job_number||item.record_id)+' and '+(isInvoice?'prepare a draft invoice':'prepare an estimate draft')+' from verified saved job records and forms. Show anything missing and request approval before consequential changes.';
+            const input=q('#mosesChatMessage',panel);if(!input){status.textContent='Moses message input unavailable.';return;}
+            input.value=prompt;area.hidden=true;area.style.display='none';panel.classList.remove('moses-action-view');input.focus();
+            // User explicitly chose an action; never auto-execute financial changes.
+          };buttons.append(task);card.append(buttons);
         }
         if (actionType === 'approval') {
           const open = text('button', 'Review existing approvals', 'btn');
@@ -116,7 +133,7 @@
           };
           card.append(open);
         }
-        section.append(card);
+        inside.append(card);
       }
       contents.append(section);
     };
@@ -137,7 +154,7 @@
         renderCards(data.approvals, 'Awaiting your approval', 'approval');
         if (workspace === 'pds') renderCards(data.work, 'PDS job follow-ups', 'work');
         renderCards(data.delivery, 'Verified delivery exceptions', 'delivery');
-        status.textContent = 'Verified read-only from ' + workspace.toUpperCase() + ' saved records. No work was executed.';
+        status.textContent = '';
       } catch (err) {
         contents.replaceChildren();
         status.textContent = 'Could not verify action center: ' + err.message + '. No records were changed.';
@@ -147,6 +164,8 @@
     button.onclick = async () => {
       area.hidden = !area.hidden;
       area.style.display = area.hidden ? 'none' : 'grid';
+      panel.classList.toggle('moses-action-view', !area.hidden);
+      button.textContent = area.hidden ? 'Action Center' : 'Back to chat';
       if (!area.hidden) await load();
     };
     header.insertBefore(button, header.lastElementChild);
@@ -154,7 +173,7 @@
     // Always refresh when reopening after switching business platforms.
     const onClick = (ev) => {
       if (ev.target?.id === 'workspaceMosesBubble' && lastWorkspace !== (document.body.dataset.platform || '')) {
-        area.hidden = true; area.style.display = 'none'; contents.replaceChildren();
+        area.hidden = true; area.style.display = 'none'; panel.classList.remove('moses-action-view'); button.textContent='Action Center';contents.replaceChildren();
       }
     };
     document.addEventListener('click', onClick);

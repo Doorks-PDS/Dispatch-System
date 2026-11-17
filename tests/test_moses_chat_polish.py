@@ -7,7 +7,7 @@ def test_moses_keeps_accessible_composer_and_history():
     assert "history.setAttribute('role','log')" in APP
     assert "input.setAttribute('aria-label','Message Moses')" in APP
     assert "const compose=document.createElement('div')" in APP
-    assert "compose.append(suggestions,composeLabel,input,composeRow,quoteTriageBtn)" in APP
+    assert "compose.append(suggestions,composeLabel,input,voiceControls,composeRow)" in APP
     assert "moses-chat-shell[hidden]" in APP
 
 def test_moses_new_chat_does_not_write_records_or_wipe_unsent_text():

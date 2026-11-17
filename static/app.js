@@ -1,6 +1,6 @@
 (() => {
   const el = (id) => document.getElementById(id);
- 
+
   const usernameInput = el("usernameInput");
   const passwordInput = el("passwordInput");
   const pinInput = el("pinInput");
@@ -11,15 +11,15 @@
   const loginStatus = el("loginStatus");
   const activeModeChip = el("activeModeChip");
   const headerCalendarBtn = el("headerCalendarBtn");
- 
+
   const loginToggle = el("loginToggle");
   const loginBody = el("loginBody");
   const loginChev = el("loginChev");
- 
+
   const formsToggle = el("formsToggle");
   const formsBody = el("formsBody");
   const formsChev = el("formsChev");
- 
+
   const navFormsTimeCard = el("navFormsTimeCard");
   let navFormsTimeOff = el("navFormsTimeOff");
   const navTakeoffs = el("navTakeoffs");
@@ -54,7 +54,7 @@
   let navAllJobs = el("navAllJobs");
   let navPartsList = el("navPartsList");
   let navDoorLogs = el("navDoorLogs");
- 
+
   const navDataCenter = el("navDataCenter");
   const navAccounting = el("navAccounting");
   const navPayroll = el("navPayroll");
@@ -62,7 +62,7 @@
   const navDataUpload = el("navDataUpload");
   let navPricingSettings = el("navPricingSettings");
   let navSaddleback = el("navSaddleback");
- 
+
   const navNotifications = el("navNotifications");
   const navAtlas = el("navAtlas");
   const navMoses = el("navMoses");
@@ -70,7 +70,10 @@
     if(document.getElementById('workspaceMosesBubble'))return;
     const launch=document.createElement('button');launch.id='workspaceMosesBubble';launch.type='button';launch.innerHTML='<span aria-hidden="true" class="moses-launch-glow"></span><span> Moses</span>';launch.setAttribute('aria-label','Open Moses assistant');launch.style.cssText='position:fixed;right:24px;bottom:22px;z-index:11000;background:#395c3e;color:white;border:0;border-radius:28px;padding:14px 18px;box-shadow:0 5px 24px #0004;font-weight:800;cursor:pointer';
     const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.className='moses-chat-shell';panel.hidden=true;panel.style.cssText='position:fixed;right:20px;bottom:85px;z-index:11001;width:min(560px,calc(100vw - 24px));background:white;border:1px solid #d9dee7;border-radius:22px;padding:18px;box-shadow:0 18px 52px #0003;max-height:min(83vh,820px);overflow-y:auto';
-    const header=document.createElement('div');header.className='moses-chat-header';header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='Moses';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.title='Close Moses';close.setAttribute('aria-label','Close Moses');close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true;launch.focus()};const draftsButton=document.createElement('button');draftsButton.type='button';draftsButton.className='btn';draftsButton.textContent='Drafts';draftsButton.title='Open saved Moses PDS quote-review drafts';draftsButton.onclick=()=>{if(typeof window.openMosesDrafts==='function')window.openMosesDrafts();else input.value='Show my saved quote drafts';};const headerActions=document.createElement('div');headerActions.className='moses-header-actions';headerActions.append(draftsButton,close);header.append(title,headerActions);
+    const header=document.createElement('div');header.className='moses-chat-header';header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='Moses';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.title='Close Moses';close.setAttribute('aria-label','Close Moses');close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true;launch.focus()};const draftsButton=document.createElement('button');draftsButton.type='button';draftsButton.className='btn';draftsButton.textContent='Drafts';draftsButton.title='Open saved Moses PDS quote-review drafts';draftsButton.onclick=()=>{if(typeof window.openMosesDrafts==='function')window.openMosesDrafts();else input.value='Show my saved quote drafts';};const headerActions=document.createElement('div');headerActions.className='moses-header-actions';
+    const expandChat=document.createElement('button');expandChat.type='button';expandChat.className='btn moses-expand-btn';expandChat.textContent='⛶';expandChat.title='Expand Moses chat';expandChat.setAttribute('aria-label','Expand Moses chat');expandChat.setAttribute('aria-pressed','false');
+    expandChat.onclick=()=>{const full=panel.classList.toggle('moses-chat-expanded');expandChat.textContent=full?'▣':'⛶';expandChat.title=full?'Restore compact chat':'Expand Moses chat';expandChat.setAttribute('aria-label',expandChat.title);expandChat.setAttribute('aria-pressed',String(full));};
+    headerActions.append(expandChat,draftsButton,close);header.append(title,headerActions);
     // Lightweight Jarvis-inspired state orb: UI only, no hidden audio recording or claim of live AI.
     if(!document.getElementById('mosesOrbStyle')){
       const css=document.createElement('style');css.id='mosesOrbStyle';css.textContent=`
@@ -88,7 +91,7 @@
         .moses-suggestions{display:flex;gap:6px;flex-wrap:wrap;margin:6px 0 10px}
         .moses-suggestions button{font-size:12px;padding:8px 10px;border:1px solid #d8e3e1;border-radius:18px;background:#f8fbfa;color:#23493e;cursor:pointer}
         .moses-suggestions button:focus-visible{outline:2px solid #317e8e}
-        .moses-chat-shell{display:flex!important;flex-direction:column;gap:0;padding:0!important;overflow:hidden!important;
+        .moses-chat-shell{display:flex!important;flex-direction:column;gap:0;padding:0!important;overflow:hidden!important;min-height:0;height:min(83vh,820px)!important;box-sizing:border-box;
           background:linear-gradient(155deg,#f5faf9 0%,#fff 34%,#fff 100%)!important;color:#1b2933;
           border:1px solid #bfd4d2!important;box-shadow:0 22px 70px #071b2940!important}
         .moses-chat-shell[hidden]{display:none!important}
@@ -98,7 +101,7 @@
         .moses-chat-shell .moses-orb-row{padding:4px 18px 0;margin:8px 0 3px!important}
         .moses-chat-shell .moses-agent-status{margin:2px 18px 4px!important;padding:7px 10px;background:#ecf5f2;border-radius:9px;line-height:1.4}
         .moses-chat-shell .moses-help{margin:4px 18px 6px;font-size:12px;color:#586b69}
-        .moses-chat-history{flex:1;min-height:110px!important;max-height:none!important;overflow-y:auto;overflow-x:hidden;
+        .moses-chat-history{flex:1 1 0;min-height:0!important;max-height:none!important;overflow-y:auto!important;overflow-x:hidden;-webkit-overflow-scrolling:touch;
           align-content:start;overscroll-behavior:contain;padding:14px 18px!important;margin:0!important;background:#fafcfc}
         .moses-chat-line{max-width:93%;min-width:0;white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.55;
           padding:10px 13px!important;border-radius:16px!important;font-size:14px;box-shadow:0 1px 3px #172c3812}
@@ -114,12 +117,22 @@
         .moses-compose-row button.moses-send:disabled{opacity:.55;cursor:wait}
         .moses-chat-shell .moses-suggestions{margin:0;gap:7px}
         .moses-chat-shell details.moses-extra{padding:0 18px 5px;background:#fff}
+        .moses-chat-shell .moses-voice-inline{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:0!important;padding:3px 0}
+        .moses-chat-shell .moses-voice-inline .btn{border:1px solid #d4e5e2;background:#f9fbfa;color:#30544d;font-size:12px;font-weight:500;padding:6px 9px;border-radius:9px;min-height:32px}
+        .moses-chat-shell .moses-voice-inline small{flex-basis:100%;font-size:11px}
+        .moses-chat-shell.moses-chat-expanded{inset:16px!important;width:auto!important;height:calc(100dvh - 32px)!important;max-height:none!important;max-width:none!important;border-radius:16px!important}
+        .moses-chat-shell.moses-chat-expanded .moses-chat-line{max-width:min(90%,900px)}
+        .moses-chat-shell #mosesActionCenterArea{min-height:0;flex:1 1 0;overflow-y:auto!important;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px 18px!important;margin:0!important;background:#f9fbfa}
+        .moses-chat-shell #mosesActionCenterArea[hidden]{display:none!important}
+        .moses-chat-shell.moses-action-view .moses-chat-history,.moses-chat-shell.moses-action-view .moses-compose,.moses-chat-shell.moses-action-view .moses-orb-row{display:none!important}
+        .moses-launch-glow{margin-right:9px;flex:none}
+        #workspaceMosesBubble{display:inline-flex;align-items:center;gap:2px}
         .moses-chat-shell details.moses-extra>summary{padding:9px 0;font-size:12px;cursor:pointer;color:#46675e}
         .moses-chat-shell button:focus-visible,.moses-chat-shell textarea:focus-visible{outline:3px solid #3caaa3;outline-offset:2px}
         .moses-launch-glow{display:inline-block;vertical-align:middle;width:13px;height:13px;border-radius:50%;
           background:radial-gradient(circle at 35% 30%,#e9fff8,#7fdec4 35%,#1f84a2 70%,#163955);box-shadow:0 0 0 2px #ffffff6e,0 0 14px #8edfd0}
         @media(max-width:640px){#workspaceMosesBubble{position:fixed!important;right:calc(12px + env(safe-area-inset-right))!important;bottom:calc(12px + env(safe-area-inset-bottom))!important;z-index:11000!important;min-height:48px!important;visibility:visible!important} .moses-chat-shell{right:8px!important;bottom:8px!important;left:8px!important;width:auto!important;
-          max-height:calc(100dvh - 16px)!important;border-radius:17px!important}.moses-chat-history{padding:10px 12px!important}
+          height:calc(100dvh - 16px)!important;max-height:calc(100dvh - 16px)!important;border-radius:17px!important}.moses-chat-history{padding:10px 12px!important}
           .moses-compose{padding:10px 12px 12px}.moses-chat-header{padding:11px 12px}}
         @media(prefers-reduced-motion:reduce){.moses-launch-glow{animation:none!important}}
 
@@ -151,12 +164,11 @@
     const history=document.createElement('div');history.className='moses-chat-history';history.setAttribute('role','log');history.setAttribute('aria-label','Moses conversation');history.setAttribute('aria-live','polite');history.style.cssText='min-height:180px;max-height:min(42vh,420px);overflow:auto;display:grid;gap:9px;margin:12px 0;padding:4px 2px';
     const input=document.createElement('textarea');input.id='mosesChatMessage';input.className='input';input.rows=2;input.placeholder='Tell Moses what you need done…';input.setAttribute('aria-label','Message Moses');input.style.width='100%';
     const send=document.createElement('button');send.className='btn';send.textContent='Send message ↗';send.classList.add('moses-send');send.style.margin='8px 0';
-    const quoteTriageBtn=document.createElement('button');quoteTriageBtn.type='button';quoteTriageBtn.className='btn';quoteTriageBtn.textContent='Review PDS quotes';quoteTriageBtn.title='Scan saved jobs and recommendation forms without changing records';quoteTriageBtn.hidden=true;
 
     // Moses Voice (opt-in). Browser-local speech synthesis and recognition.
     // Browser speech recognition may use the browser vendor's cloud service.
     // Only recognized text is sent to Moses when the user presses Send.
-    const voiceControls=document.createElement('div');
+    const voiceControls=document.createElement('div');voiceControls.className='moses-voice-inline';
     voiceControls.style.cssText='display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0';
     const speakToggle=document.createElement('button');
     speakToggle.type='button';speakToggle.className='btn';speakToggle.textContent='🔈 Voice replies: Off';
@@ -636,12 +648,7 @@
       if(opening)refreshTasks();
     };
     input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send.click()}});
-    const voiceDetails=document.createElement('details');
-    const voiceSummary=document.createElement('summary');voiceSummary.textContent='Voice controls (optional)';
-    voiceSummary.style.cssText='font-size:12px;font-weight:700;color:#53665a;cursor:pointer';
-    voiceDetails.append(voiceSummary,voiceControls);
-    quoteTriageBtn.onclick=()=>{if((document.body.dataset.platform||'')!=='pds')return;input.value='Review quote readiness for jobs needing quotes';send.click();};
-    quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';
+    // Voice controls are always visible. No second hidden menu or duplicate controls.
     const suggestions=document.createElement('div');suggestions.className='moses-suggestions';
     for(const [label,prompt] of [
       ['Plan my week','Review this week’s PDS dispatch schedule and flag anything that needs scheduling or a follow-up.'],
@@ -659,26 +666,24 @@
     newChat.onclick=()=>{if(send.disabled)return;if(mosesTurns.length||history.childElementCount){if(!confirm('Start a new Moses conversation? Any unsent text stays in the message box.'))return;}
       mosesTurns=[];mosesLastAction=null;history.replaceChildren();setMosesMode('idle');input.focus();};
     headerActions.insertBefore(newChat,draftsButton);
-    const extra=document.createElement('details');extra.className='moses-extra';
-    const extraSummary=document.createElement('summary');extraSummary.textContent='Voice & advanced tools';
-    extra.append(extraSummary,voiceDetails,command);
     panel.append(header,orbRow,agentStatus,help,history,compose);
-    compose.append(suggestions,composeLabel,input,composeRow,quoteTriageBtn);
-    panel.append(extra);
+    compose.append(suggestions,composeLabel,input,voiceControls,composeRow);
+    // Keep the SDC command center accessible through its dedicated header control.
+    panel.append(command);
     const tools=document.createElement('details');tools.className='moses-extra';const toolsSummary=document.createElement('summary');toolsSummary.textContent='Approvals & follow-ups';toolsSummary.style.cssText='cursor:pointer;font-size:12px;color:#52645a;font-weight:700;margin-top:12px';tools.append(toolsSummary,actionPanel);panel.append(tools);
     panel.setAttribute('aria-label','Moses AI assistant');
 
     panel.addEventListener('keydown',event=>{if(event.key==='Escape'&&!panel.hidden){event.stopPropagation();close.click()}});
-    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';checkAgentReadiness();input.focus()}};
+    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{checkAgentReadiness();input.focus()}};
     syncMosesWorkspace();document.body.append(launch,panel);
 
   }
   document.addEventListener('DOMContentLoaded',installWorkspaceMoses,{once:true});
   if(document.readyState!=='loading')installWorkspaceMoses();
- 
+
   const badgeNotifications = el("badgeNotifications");
   const badgeJobFlow = el("badgeJobFlow");
- 
+
   const primaryEstimateNav = navEstimateInvoice || navEstimatePage;
   if (!navFormsTimeOff) {
     const formsNavCol = document.querySelector("#formsBody .navcol");
@@ -692,7 +697,7 @@
       navFormsTimeOff = btn;
     }
   }
- 
+
   // Keep Forms in the requested order, including dynamically created Time Off Request.
   // Moving existing DOM nodes preserves their event handlers and form behavior.
   const formsOrder = document.querySelector("#formsBody .navcol");
@@ -743,7 +748,7 @@
       navAllJobs = btn;
     }
   }
- 
+
   if (!navFormsSignOff) {
     const formsNavCol = document.querySelector("#formsBody .navcol");
     if (formsNavCol) {
@@ -812,7 +817,7 @@
     badge.textContent = '0';
     navFormsTimeOff.appendChild(badge);
   }
- 
+
   if (navEstimateInvoice) {
     if (navEstimatePage) navEstimatePage.style.display = "none";
     if (navInvoicePage) navInvoicePage.style.display = "none";
@@ -837,7 +842,7 @@
       if (node && node.parentElement === jobsNavCol) jobsNavCol.appendChild(node);
     });
   }
- 
+
   // PDS navigation cleanup: move existing controls without replacing their listeners.
   const pdsJobCol=navJobFlow?.parentElement;
   const pdsOfficeCol=navDataCenter?.parentElement;
@@ -877,7 +882,7 @@
   let apiKey = "";
   let currentUser = null;
   let pendingPinUser = null;
- 
+
   const STATUSES = ["Sales Lead", "Dispatch", "Scheduled", "Quote", "Quote Sent", "Parts on Order", "Complete/Quote", "Complete", "Done"];
   const JOB_STATUS_OPTIONS = ["Dispatch", "Scheduled", "Quote", "Parts on Order", "Complete/Quote", "Complete"];
   const STATUS_META = {
@@ -891,19 +896,19 @@
     "Complete": { cls: "s-green", dot: "#22c55e" },
     "Done": { cls: "s-gray", dot: "#9ca3af" },
   };
- 
+
   const DOOR_TYPES = [
     "Automatic Door", "Man Door", "Storefront Door", "Herculite Door",
     "Roll Up", "Glass", "Roll/Swing Gate", "Other"
   ];
- 
+
   const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
   let currentView = null;
- 
+
   function setActiveChip(label) { activeModeChip.textContent = label; }
   function setWorkspace(title) { document.body.dataset.platform=activePlatform; workspaceTitle.textContent = title; const brand=document.querySelector('.topbar .brand');if(brand)brand.textContent=activePlatform==='pds'?'Priority Door Systems':activePlatform==='sdc'?'Saddleback Design Co.':'Doorks'; }
   function clearWorkspaceActions() { workspaceActions.innerHTML = ""; }
- 
+
   function setNavActive(btn) {
     [
       navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff, navFormsReceipts,
@@ -912,17 +917,17 @@
       navNotifications, navAtlas, navMoses
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
   }
- 
+
   async function fetchJSON(url, opts = {}) {
     const headers = opts.headers || {};
     opts.headers = headers;
     opts.credentials = "same-origin";
- 
+
     const res = await fetch(url, opts);
     const txt = await res.text();
     let data = null;
     try { data = JSON.parse(txt); } catch {}
- 
+
     if (!res.ok) {
       const msg = (data && (data.detail || data.error)) ? (data.detail || data.error) : (txt || `HTTP ${res.status}`);
       if (res.status === 401) {
@@ -935,7 +940,7 @@
     }
     return data;
   }
- 
+
 
   // Doorks 2.0 Phase 1: PIN-locked, admin-only platform shells.
   // Non-PDS screens intentionally do not invoke PDS data APIs.
@@ -1763,7 +1768,7 @@
     function syncPayment(){if(f('document_type').value!=='Invoice')return;const paid=Number(f('paid').value)||0,total=calculate().total;if(paid>0&&paid>=total)f('status').value='Paid';else if(paid>0)f('status').value='Partially Paid';}
     f('paid').onchange=syncPayment;
     f('terms').onchange=()=>{f('custom_terms').hidden=f('terms').value!=='Other';};
-    
+
     q('wedBack').onclick=()=>backAction?backAction():renderBusinessHub(platform);
     q('wedFilter').value=filterType;
     if(filterType){
@@ -2158,7 +2163,7 @@
               }catch(err){output.textContent='Unable to preview: '+(err.message||err);}finally{previewBtn.disabled=false;}};
               actions.after(host);etaShortcut.disabled=true;
             };actions.append(etaShortcut);
-            const poShortcut=document.createElement('button');poShortcut.type='button';poShortcut.className='btn';poShortcut.textContent='Purchase Order';poShortcut.onclick=()=>{if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderUnifiedPurchaseOrders('doorks',true));};actions.append(poShortcut,editPanel); 
+            const poShortcut=document.createElement('button');poShortcut.type='button';poShortcut.className='btn';poShortcut.textContent='Purchase Order';poShortcut.onclick=()=>{if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderUnifiedPurchaseOrders('doorks',true));};actions.append(poShortcut,editPanel);
             for(const button of [estimateShortcut,invoiceShortcut,poShortcut]){
               button.style.cssText='border:2px solid #4d7041;background:#fff;color:#315d35;font-weight:800;border-radius:10px;padding:10px 16px';
             }
@@ -2310,7 +2315,7 @@
             const fmtAudit=value=>{if(!value)return 'Not recorded';const d=new Date(value);return Number.isNaN(d.getTime())?String(value):d.toLocaleString();};
             audit.textContent='Created '+fmtAudit(item.created_at)+(item.created_by?' by '+item.created_by:'')+'  ·  Last updated '+fmtAudit(item.updated_at)+(item.last_modified_by?' by '+item.last_modified_by:'');panel.append(audit);
             overlay.append(panel);document.body.append(overlay);
-          
+
   }
 
   async function renderBusinessCollection(platform,kind,openNew=false,backAction=null) {
@@ -3063,8 +3068,8 @@
       }
       addSdc('sdcJobNav','Dashboard',()=>showPlatformShell('sdc'));
       addSdc('sdcJobNav','Orders & Production',()=>renderBusinessCollection('sdc','orders'));
-      
-      
+
+
       addSdc('sdcJobNav','Products',()=>renderBusinessCollection('sdc','products'));
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
@@ -3229,17 +3234,17 @@
     bodyEl.style.display = isHidden ? "block" : "none";
     chevEl.innerHTML = isHidden ? "&#9662;" : "&#9656;";
   }
- 
+
   if (loginToggle) loginToggle.addEventListener("click", () => togglePanel(loginBody, loginChev));
 
- 
+
   function yyyyMmDd(d) {
     const y = d.getFullYear();
     const m = String(d.getMonth() + 1).padStart(2, "0");
     const day = String(d.getDate()).padStart(2, "0");
     return `${y}-${m}-${day}`;
   }
- 
+
   function mmDdYy(yyyy_mm_dd) {
     const [y, m, d] = (yyyy_mm_dd || "").split("-");
     if (!y || !m || !d) return yyyy_mm_dd;
@@ -3282,7 +3287,7 @@
     const range = formatTimeRange12(item.lunch_start, item.lunch_end);
     return range ? `Lunch: Yes (${range})` : "Lunch: Yes";
   }
- 
+
   function monthLabel(d) {
     return d.toLocaleString(undefined, { month: "long", year: "numeric" });
   }
@@ -3362,7 +3367,7 @@
     const text = String(address || "").toLowerCase();
     return SALES_TAX_OPTIONS.find(opt => opt.city && !/^no sales tax/i.test(opt.city) && text.includes(String(opt.city).toLowerCase().replace(/ \(alt\)$/i, ""))) || null;
   }
- 
+
 
   function showDoorksToast(message, kind = "success") {
     const toast = document.createElement("div");
@@ -3407,7 +3412,7 @@
     pill.style.color = color;
     return pill;
   }
- 
+
   function dotEl(status) {
     const meta = STATUS_META[status] || STATUS_META["Dispatch"];
     const d = document.createElement("span");
@@ -3415,7 +3420,7 @@
     d.style.background = meta.dot || "#111827";
     return d;
   }
- 
+
   function styleActionButton(btn, tone = "default", compact = false) {
     btn.className = "btn";
     btn.style.fontWeight = "1000";
@@ -3449,7 +3454,7 @@
     }
     return btn;
   }
- 
+
   function makeUploadLabel(text, tone = "ghost", compact = false) {
     const label = document.createElement("label");
     label.style.display = "inline-flex";
@@ -3460,38 +3465,38 @@
     label.textContent = text;
     return label;
   }
- 
+
   function openDrawer(titleText, renderFn) {
     document.querySelectorAll(".overlay").forEach(o => o.remove());
- 
+
     const overlay = document.createElement("div");
     overlay.className = "overlay";
- 
+
     const drawer = document.createElement("div");
     drawer.className = "drawer";
- 
+
     const hd = document.createElement("div");
     hd.className = "drawer-hd";
- 
+
     const title = document.createElement("div");
     title.className = "drawer-title";
     title.textContent = titleText;
- 
+
     const close = document.createElement("button");
     close.className = "drawer-close";
     close.innerHTML = "&times;";
- 
+
     hd.appendChild(title);
     hd.appendChild(close);
- 
+
     const bd = document.createElement("div");
     bd.className = "drawer-bd";
- 
+
     drawer.appendChild(hd);
     drawer.appendChild(bd);
     overlay.appendChild(drawer);
     document.body.appendChild(overlay);
- 
+
     // A single stray click never dismisses a dispatch drawer.
     overlay.addEventListener("dblclick", (e) => {
       if (e.target !== overlay) return;
@@ -3507,7 +3512,7 @@
         input.dataset.doorksInitialValue=input.value;
     });
     close.addEventListener("click", () => overlay.remove());
- 
+
     // A rejected async renderer must be visible instead of silently leaving a blank drawer.
     try {
       Promise.resolve(renderFn(bd, overlay)).catch(error => {
@@ -3526,7 +3531,7 @@
     }
     return overlay;
   }
- 
+
   async function apiListJobs(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/calendar/jobs?${qs.toString()}`);
@@ -3548,7 +3553,7 @@
     openDrawer("Import Legacy Job", async (drawerBody, overlay) => {
       const card = document.createElement("div");
       card.className = "card";
- 
+
       const dateRow = document.createElement("div");
       dateRow.style.marginTop = "0";
       dateRow.innerHTML = `
@@ -3599,19 +3604,19 @@
     });
   }
 
- 
+
   async function apiListAllJobs(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/data/all-jobs?${qs.toString()}`);
     if (Array.isArray(data)) return data;
     return Array.isArray(data.jobs) ? data.jobs : [];
   }
- 
+
   async function apiGetJob(jobId) {
     const data = await fetchJSON(`/calendar/jobs/${jobId}`);
     return data.job;
   }
- 
+
   function currentAuditUserName() {
     if (!currentUser) return "";
     return String(currentUser.name || currentUser.full_name || currentUser.username || "").trim();
@@ -3631,7 +3636,7 @@
     });
     return data.job;
   }
- 
+
   async function apiUpdateJob(jobId, payload) {
     const actor = currentAuditUserName();
     const body = { ...(payload || {}) };
@@ -3643,11 +3648,11 @@
     });
     return data.job;
   }
- 
+
   async function apiDeleteJob(jobId) {
     await fetchJSON(`/calendar/jobs/${jobId}`, { method: "DELETE" });
   }
- 
+
   async function apiAddCompletion(jobId, payload) {
     const data = await fetchJSON(`/calendar/jobs/${jobId}/completion`, {
       method: "POST",
@@ -3656,7 +3661,7 @@
     });
     return data.form;
   }
- 
+
   async function apiReplaceCompletionForms(jobId, completionForms) {
     const data = await fetchJSON(`/calendar/jobs/${jobId}`, {
       method: "PUT",
@@ -3665,7 +3670,7 @@
     });
     return data.job;
   }
- 
+
   async function apiUploadJobAttachments(jobId, files) {
     const formData = new FormData();
     Array.from(files || []).forEach(f => formData.append("files", f));
@@ -3689,7 +3694,7 @@
     }
     return data.files || [];
   }
- 
+
   async function apiUploadCompletionAttachments(jobId, formId, files) {
     const formData = new FormData();
     Array.from(files || []).forEach(f => formData.append("files", f));
@@ -3713,12 +3718,12 @@
     }
     return data.files || [];
   }
- 
+
   async function apiListEmployees() {
     const data = await fetchJSON("/employees");
     return data.items || [];
   }
- 
+
   async function apiCreateEmployee(payload) {
     const data = await fetchJSON("/employees", {
       method: "POST",
@@ -3727,7 +3732,7 @@
     });
     return data.item;
   }
- 
+
   async function apiDeleteEmployee(id) {
     await fetchJSON(`/employees/${id}`, { method: "DELETE" });
   }
@@ -3794,12 +3799,12 @@
   async function apiDeleteAuthUser(userId) {
     await fetchJSON(`/auth/users/${userId}`, { method: "DELETE" });
   }
- 
+
   async function apiListCustomers() {
     const data = await fetchJSON("/crm/customers");
     return data.items || [];
   }
- 
+
   async function apiCreateCustomer(payload) {
     const data = await fetchJSON("/crm/customers", {
       method: "POST",
@@ -3848,13 +3853,13 @@
     });
     return data.ok;
   }
- 
+
   async function apiListContacts(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/crm/contacts?${qs.toString()}`);
     return data.items || [];
   }
- 
+
   async function apiListParts(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/data/parts?${qs.toString()}`);
@@ -3895,7 +3900,7 @@
     });
     return data;
   }
- 
+
   async function apiCreateContact(payload) {
     const data = await fetchJSON("/crm/contacts", {
       method: "POST",
@@ -3913,7 +3918,7 @@
     });
     return data.item;
   }
- 
+
   async function apiCreateEstimate(payload) {
     const data = await fetchJSON("/documents/estimate", {
       method: "POST",
@@ -3922,7 +3927,7 @@
     });
     return data;
   }
- 
+
   async function apiCreateInvoice(payload) {
     const data = await fetchJSON("/documents/invoice", {
       method: "POST",
@@ -3931,13 +3936,13 @@
     });
     return data;
   }
- 
+
   async function apiListDocuments(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/documents?${qs.toString()}`);
     return data.items || [];
   }
- 
+
   async function apiUpdateDocument(filename, payload) {
     const data = await fetchJSON(`/documents/${encodeURIComponent(filename)}`, {
       method: "PUT",
@@ -3946,7 +3951,7 @@
     });
     return data.doc || data;
   }
- 
+
   async function apiDeleteDocument(filename) {
     await fetchJSON(`/documents/${encodeURIComponent(filename)}`, { method: "DELETE" });
   }
@@ -4027,13 +4032,13 @@
       body: JSON.stringify(payload),
     });
   }
- 
+
   async function apiListTimeOff(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/timeoff?${qs.toString()}`);
     return data.items || [];
   }
- 
+
   async function apiCreateTimeOff(payload) {
     const data = await fetchJSON("/timeoff", {
       method: "POST",
@@ -4042,7 +4047,7 @@
     });
     return data.item || data;
   }
- 
+
   async function apiUpdateTimeOff(id, payload) {
     const data = await fetchJSON(`/timeoff/${id}`, {
       method: "PUT",
@@ -4051,17 +4056,17 @@
     });
     return data.item || data;
   }
- 
+
   async function apiDeleteTimeOff(id) {
     await fetchJSON(`/timeoff/${id}`, { method: "DELETE" });
   }
- 
+
   async function apiListTimecards(params = {}) {
     const qs = new URLSearchParams(params);
     const data = await fetchJSON(`/timecards?${qs.toString()}`);
     return data.items || [];
   }
- 
+
   async function apiCreateTimecard(payload) {
     const data = await fetchJSON("/timecards", {
       method: "POST",
@@ -4079,7 +4084,7 @@
     });
     return data.item || data;
   }
- 
+
   async function apiDeleteTimecard(itemId) {
     await fetchJSON(`/timecards/${itemId}`, { method: "DELETE" });
   }
@@ -4102,7 +4107,7 @@
   }
 
 
-  
+
   function getPtoBankMap() {
     const map = SHARED_SETTINGS_CACHE && SHARED_SETTINGS_CACHE.pto_bank;
     return map && typeof map === "object" ? map : {};
@@ -4250,15 +4255,15 @@ function ptoHoursFromItem(item) {
   function itemDateOf(item) {
     return item.date || item.start_date || item.created_at || "";
   }
- 
-  
+
+
   let SHARED_SETTINGS_CACHE = {
     rollup_profiles: {},
     pto_bank: {},
     ot_bank: {},
   };
 
-  
+
   async function apiGetSaddlebackData() {
     const data = await fetchJSON("/saddleback");
     return data.data || { orders: [], expenses: [], purchases: [] };
@@ -4297,7 +4302,7 @@ async function apiListForms() {
     const data = await fetchJSON("/forms");
     return data.forms || [];
   }
- 
+
   async function downloadFile(url, filename) {
     if (!url) throw new Error("Missing download URL");
     const r = await fetch(url, { credentials: "same-origin" });
@@ -4324,7 +4329,7 @@ async function apiListForms() {
       window.location.href = url;
     }
   }
- 
+
   async function apiAuthMe() {
     const res = await fetch("/auth/me", { credentials: "same-origin" });
     const txt = await res.text();
@@ -4530,7 +4535,7 @@ async function apiListForms() {
       const items = await fetchJSON("/notifications").then(d => d.items || []);
       const unread = items.filter(x => !x.read && !x.is_mine).length;
       if (badgeNotifications) { badgeNotifications.style.display = unread ? "inline-flex" : "none"; badgeNotifications.textContent = String(unread); }
- 
+
       const statuses = ["Sales Lead", "Dispatch", "Quote", "Parts on Order", "Complete/Quote", "Complete"];
       let total = 0;
       for (const s of statuses) total += (await apiListJobs({ status: s, limit: 5000 })).length;
@@ -4548,15 +4553,15 @@ async function apiListForms() {
       }
     } catch {}
   }
- 
+
   function formsOf(job) {
     return Array.isArray(job.completion_forms) ? job.completion_forms : [];
   }
- 
+
   function hasLeadRecommendation(job) {
     return formsOf(job).some(f => String(f.recommendations || "").trim().length > 0 || f.ready_to_quote === true);
   }
- 
+
   function hasJobCompletion(job) {
     return formsOf(job).some(f =>
       String(f.tech_notes || "").trim().length > 0 ||
@@ -4565,7 +4570,7 @@ async function apiListForms() {
       typeof f.time_onsite_hours === "number"
     );
   }
- 
+
   function shouldShowEstimate(job) {
     if (job.kind === "sales_lead") return true;
     if (job.kind === "dispatch") {
@@ -4574,7 +4579,7 @@ async function apiListForms() {
     }
     return false;
   }
- 
+
   function shouldShowInvoice(job) {
     if (job.kind !== "dispatch") return false;
     return ["Complete/Quote", "Complete", "Done"].includes(String(job.status || ""));
@@ -4652,7 +4657,7 @@ async function apiListForms() {
     return escapeHtml(cleanDocRef(value));
   }
 
-  
+
 function isApprovedEstimateJob(job, monthPrefix = "") {
     const estimateNumber = String(job?.estimate_number || job?.sent_quote_number || "").trim();
     if (!estimateNumber) return false;
@@ -4672,22 +4677,22 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       || String(job?.updated_at || "").startsWith(monthPrefix)
       || String(job?.date || "").startsWith(monthPrefix);
   }
- 
+
   async function promptDispatchStatus() {
     return new Promise((resolve) => {
       openDrawer("Select New Job Status", (bd, overlay) => {
         const card = document.createElement("div");
         card.className = "card";
- 
+
         const label = document.createElement("div");
         label.className = "label";
         label.textContent = "Select the updated job status before opening the completion form";
         card.appendChild(label);
- 
+
         const wrap = document.createElement("div");
         wrap.className = "navcol";
         wrap.style.marginTop = "10px";
- 
+
         JOB_STATUS_OPTIONS.forEach(status => {
           const b = document.createElement("button");
           b.className = "navbtn";
@@ -4698,7 +4703,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
           });
           wrap.appendChild(b);
         });
- 
+
         const cancel = document.createElement("button");
         cancel.className = "btn";
         cancel.style.marginTop = "12px";
@@ -4707,14 +4712,14 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
           overlay.remove();
           resolve(null);
         });
- 
+
         card.appendChild(wrap);
         card.appendChild(cancel);
         bd.appendChild(card);
       });
     });
   }
- 
+
   function buildCustomerDatalist(id, customers) {
     const dl = document.createElement("datalist");
     dl.id = id;
@@ -4725,7 +4730,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     });
     return dl;
   }
- 
+
   function buildContactDatalist(id, contacts) {
     const dl = document.createElement("datalist");
     dl.id = id;
@@ -4736,22 +4741,22 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     });
     return dl;
   }
- 
+
   function normalizeText(v) {
     return String(v || "").trim().toLowerCase();
   }
- 
+
   function pickContactPhone(contact) {
     return contact?.phone_number || contact?.cell_phone || "";
   }
- 
+
   function companyMatches(contactCompany, selectedCompany) {
     const a = normalizeText(contactCompany);
     const b = normalizeText(selectedCompany);
     if (!a || !b) return false;
     return a === b || a.includes(b) || b.includes(a);
   }
- 
+
   function findMatchingContact(contacts, name, companyName = "") {
     const n = normalizeText(name);
     if (!n) return null;
@@ -4763,17 +4768,17 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     if (!byName.length) return null;
     return byName.find(c => company && companyMatches(c.company_name, company)) || byName[0] || null;
   }
- 
+
   function wireContactAutofill({ contacts, contactInput, phoneInput, emailInput, customerInput, contactListId }) {
     if (!contactInput) return;
     const source = Array.isArray(contacts) ? contacts : [];
     const dl = contactListId ? document.getElementById(contactListId) : null;
- 
+
     const filteredContacts = () => {
       const company = normalizeText(customerInput ? customerInput.value : "");
       return company ? source.filter(c => companyMatches(c.company_name, company)) : source;
     };
- 
+
     const renderOptions = () => {
       if (!dl) return;
       dl.innerHTML = "";
@@ -4784,7 +4789,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
         dl.appendChild(o);
       });
     };
- 
+
     const applyFromContact = (force = false) => {
       const match = findMatchingContact(filteredContacts(), contactInput.value, customerInput ? customerInput.value : "");
       if (!match) return;
@@ -4792,7 +4797,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       if (emailInput && (force || !String(emailInput.value || "").trim())) emailInput.value = match.email || "";
       if (customerInput && !customerInput.value.trim() && match.company_name) customerInput.value = match.company_name;
     };
- 
+
     const onCustomerChange = () => {
       renderOptions();
       const match = findMatchingContact(filteredContacts(), contactInput.value, customerInput ? customerInput.value : "");
@@ -4801,16 +4806,16 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       }
       // Preserve manually entered contact/phone/email if this is not a saved CRM contact.
     };
- 
+
     renderOptions();
     ["change", "blur"].forEach(evt => contactInput.addEventListener(evt, () => applyFromContact(true)));
     if (customerInput) ["change", "blur", "input"].forEach(evt => customerInput.addEventListener(evt, onCustomerChange));
   }
- 
+
   function uid(prefix = "id") {
     return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
   }
- 
+
   function buildAddressDatalist(id, addresses) {
     const dl = document.createElement("datalist");
     dl.id = id;
@@ -4821,20 +4826,20 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     });
     return dl;
   }
- 
+
   function wireGoogleAddressAutocomplete(input) {
     return false;
   }
- 
+
   function wireAddressSuggestions(input, addresses = []) {
     if (!input) return;
     if (wireGoogleAddressAutocomplete(input)) return;
- 
+
     const listId = uid("addrlist");
     input.setAttribute("list", listId);
     const dl = buildAddressDatalist(listId, addresses);
     if (input.parentElement) input.parentElement.appendChild(dl);
- 
+
     const retryBind = () => {
       if (wireGoogleAddressAutocomplete(input)) {
         input.removeEventListener("focus", retryBind);
@@ -4842,7 +4847,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
         window.removeEventListener("doorks:google-ready", retryBind);
       }
     };
- 
+
     input.addEventListener("focus", retryBind);
     input.addEventListener("click", retryBind);
     window.addEventListener("doorks:google-ready", retryBind);
@@ -4936,7 +4941,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     // can overwrite manually typed addresses that are not yet saved.
     input.addEventListener("change", apply);
   }
- 
+
   function collectJobTechSummary(job) {
     const forms = formsOf(job);
     const rollupForms = forms.filter(f => String(f.door_type || "").toLowerCase() === "roll up");
@@ -4957,18 +4962,18 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     });
     return out;
   }
- 
+
   function getTaxableSubtotal(items) {
     return (items || []).reduce((sum, item) => {
       if (item.taxable === false) return sum;
       return sum + (Number(item.qty || 0) * Number(item.rate || 0));
     }, 0);
   }
- 
+
   function formatDocNumber(prefix, num) {
     return `${prefix}${String(Math.max(1, Number(num || 1))).padStart(5, "0")}`;
   }
- 
+
   function nextDocNumberFromStorage(kind) {
     const key = kind === "estimate" ? "doorks_estimate_next" : "doorks_invoice_next";
     const prefix = kind === "estimate" ? "RE" : "JS";
@@ -4978,7 +4983,7 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     localStorage.setItem(key, String(cur + 1));
     return formatDocNumber(prefix, cur);
   }
- 
+
   function formatBytes(bytes) {
     const n = Number(bytes || 0);
     if (!Number.isFinite(n) || n <= 0) return "0 B";
@@ -4986,14 +4991,14 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
     if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
     return `${(n / (1024 * 1024)).toFixed(1)} MB`;
   }
- 
+
   function formatStamp(iso) {
     if (!iso) return "";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return iso;
     return d.toLocaleString();
   }
- 
+
   function fixMojibake(v) {
     return String(v || "")
       .replace(/ÃƒÂ¢Ã¢â€šÂ¬Ã¢â‚¬Â/g, "Ã¢â‚¬â€")
@@ -5005,23 +5010,23 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       .replace(/Ãƒâ€š/g, "")
       .replace(/Ã‚ /g, " ");
   }
- 
+
   function escapeHtml(v) {
     return fixMojibake(v).replace(/[&<>"]/g, ch => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[ch] || ch));
   }
- 
+
   function isImageFilename(name) {
     return /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(String(name || ""));
   }
- 
+
   function buildJobAttachmentUrl(jobId, filename) {
     return `/calendar/jobs/${encodeURIComponent(jobId)}/attachments/${encodeURIComponent(filename || "")}`;
   }
- 
+
   function buildCompletionAttachmentUrl(jobId, formId, filename) {
     return `/calendar/jobs/${encodeURIComponent(jobId)}/completion/${encodeURIComponent(formId)}/attachments/${encodeURIComponent(filename || "")}`;
   }
- 
+
   function openImagePreview(title, url) {
     openDrawer(title || "Preview", async (drawerBody) => {
       const img = document.createElement("img");
@@ -5032,8 +5037,8 @@ function isApprovedEstimateJob(job, monthPrefix = "") {
       drawerBody.appendChild(img);
     });
   }
- 
-  
+
+
   function formatFormDate(value) {
     if (!value) return "";
     const s = String(value || "").slice(0, 10);
@@ -5207,13 +5212,13 @@ function renderAttachmentSection(titleText, items, options = {}) {
   function openEditSavedForm(job, formIndex, container, ctx) {
     const f = formsOf(job)[formIndex];
     if (!f) return;
- 
+
     const isSalesLead = job.kind === "sales_lead";
     let employeesPromise = apiListEmployees().catch(() => []);
- 
+
     openDrawer(`Edit ${isSalesLead ? "Recommendation" : "Completion"} Form`, async (drawerBody, overlay) => {
       const employees = await employeesPromise;
- 
+
       const card = document.createElement("div");
       card.className = "card";
 
@@ -5225,7 +5230,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       `;
       dateRow.querySelector("#ef_date").value = String(f.date || f.created_at || new Date().toISOString()).slice(0, 10);
       card.appendChild(dateRow);
- 
+
       let stSel = null;
       if (!isSalesLead) {
         const statusWrap = document.createElement("div");
@@ -5242,7 +5247,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         statusWrap.appendChild(stSel);
         card.appendChild(statusWrap);
       }
- 
+
       const techRow = document.createElement("div");
       techRow.className = "grid2";
       techRow.style.marginTop = "10px";
@@ -5250,7 +5255,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         <div><div class="label">Technician Name</div><select class="input" id="ef_tech"></select></div>
         <div><div class="label">Door Type</div><select class="input" id="ef_door_type"></select></div>
       `;
- 
+
       const techSel = techRow.querySelector("#ef_tech");
       const empty = document.createElement("option");
       empty.value = "";
@@ -5263,7 +5268,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         techSel.appendChild(opt);
       });
       techSel.value = f.technician_name || "";
- 
+
       const doorSel = techRow.querySelector("#ef_door_type");
       const doorBlank = document.createElement("option");
       doorBlank.value = "";
@@ -5276,7 +5281,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         doorSel.appendChild(opt);
       });
       doorSel.value = f.door_type || "";
- 
+
       const locRow = document.createElement("div");
       locRow.style.marginTop = "10px";
       locRow.innerHTML = `
@@ -5284,7 +5289,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         <input class="input" id="ef_door_loc" />
       `;
       locRow.querySelector("#ef_door_loc").value = f.door_location || "";
- 
+
       card.appendChild(techRow);
       card.appendChild(locRow);
 
@@ -5326,7 +5331,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         }
       };
       doorSel.addEventListener("change", updateRollupLunchVisibility);
- 
+
       let techNotes = null;
       let partsUsed = null;
       let addRecs = null;
@@ -5335,7 +5340,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       let partsReq = null;
       let timeReq = null;
       let ready = null;
- 
+
       if (isSalesLead) {
         const block = document.createElement("div");
         block.style.marginTop = "10px";
@@ -5354,12 +5359,12 @@ function renderAttachmentSection(titleText, items, options = {}) {
         partsReq = block.querySelector("#ef_parts_req");
         timeReq = block.querySelector("#ef_time_req");
         ready = block.querySelector("#ef_ready");
- 
+
         recs.value = f.recommendations || "";
         partsReq.value = f.parts_required || "";
         timeReq.value = f.time_required || "";
         ready.checked = !!f.ready_to_quote;
- 
+
         card.appendChild(block);
       } else {
         const block = document.createElement("div");
@@ -5382,7 +5387,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         partsUsed = block.querySelector("#ef_parts");
         addRecs = block.querySelector("#ef_add_recs");
         const lunchSelect = block.querySelector("#ef_rollup_lunch");
- 
+
         timeInput.value = typeof f.time_onsite_hours === "number" ? String(f.time_onsite_hours) : "";
         techNotes.value = f.tech_notes || "";
         partsUsed.value = f.parts_used || "";
@@ -5392,7 +5397,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
           else if (f.rollup_includes_lunch === false) lunchSelect.value = "no";
           else lunchSelect.value = "";
         }
- 
+
         card.appendChild(block);
       }
       const syncEditTimeOnsite = () => {
@@ -5407,7 +5412,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       card.querySelector("#ef_time_out")?.addEventListener("change", syncEditTimeOnsite);
       syncEditTimeOnsite();
       updateRollupLunchVisibility();
- 
+
       // Existing saved forms use a separate editor from new forms.
       // Give both workflows the same attachment and save-review controls.
       const editExtras = document.createElement("div");
@@ -5425,30 +5430,30 @@ function renderAttachmentSection(titleText, items, options = {}) {
       actions.style.display = "flex";
       actions.style.gap = "8px";
       actions.style.marginTop = "12px";
- 
+
       const save = document.createElement("button");
       save.className = "btn btn-orange";
       save.textContent = "Save Changes";
- 
+
       const cancel = document.createElement("button");
       cancel.className = "btn";
       cancel.textContent = "Cancel";
- 
+
       const del = document.createElement("button");
       del.className = "btn";
       del.textContent = "Delete Form";
       del.style.borderColor = "#fecaca";
       del.style.color = "#b91c1c";
- 
+
       actions.appendChild(save);
       actions.appendChild(cancel);
       actions.appendChild(del);
       card.appendChild(actions);
- 
+
       drawerBody.appendChild(card);
- 
+
       cancel.addEventListener("click", () => overlay.remove());
- 
+
       del.addEventListener("click", async () => {
         if (!confirm("Delete this saved form?")) return;
         try {
@@ -5463,12 +5468,12 @@ function renderAttachmentSection(titleText, items, options = {}) {
           alert(e.message || String(e));
         }
       });
- 
+
       save.addEventListener("click", async () => {
         try {
           const updatedForms = [...formsOf(job)];
           const next = { ...updatedForms[formIndex] };
- 
+
           next.date = card.querySelector("#ef_date")?.value || next.date || new Date().toISOString().slice(0,10);
           next.technician_name = techSel.value;
           if (!doorSel.value.trim()) { alert("Door type is required"); return; }
@@ -5481,7 +5486,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
             next.time_in = editTimeIn;
             next.time_out = editTimeOut;
           }
- 
+
           if (!doorSel.value) throw new Error("Door type is required.");
 
           if (stSel && stSel.value === "Parts on Order") {
@@ -5513,7 +5518,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
             next.parts_used = partsUsed.value.trim();
             next.additional_recommendations = addRecs.value.trim();
           }
- 
+
           if (!["ef_confirm_review", "ef_confirm_signoff", "ef_confirm_checkin"].every(id => card.querySelector(`#${id}`)?.checked)) {
             alert("Please complete the save confirmation checklist.");
             return;
@@ -5531,7 +5536,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
               catch (uploadError) { alert(`Form saved, but attachment upload failed: ${uploadError.message || uploadError}`); }
             }
           }
- 
+
           overlay.remove();
           if (ctx && ctx.afterSave) await ctx.afterSave();
           renderJobDetails(container, updatedJob, ctx);
@@ -5541,22 +5546,22 @@ function renderAttachmentSection(titleText, items, options = {}) {
       });
     });
   }
- 
+
   function renderDocumentsSection(job) {
     const wrap = document.createElement("div");
     wrap.style.marginTop = "10px";
- 
+
     const title = document.createElement("div");
     title.className = "label";
     title.textContent = "Saved Estimate / Invoice Documents";
     wrap.appendChild(title);
- 
+
     const loading = document.createElement("div");
     loading.className = "hint";
     loading.style.marginTop = "6px";
     loading.textContent = "Loading documents...";
     wrap.appendChild(loading);
- 
+
     apiListDocuments({ job_id: job.id }).then(items => {
       wrap.innerHTML = "";
       wrap.appendChild(title);
@@ -5620,19 +5625,19 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }).catch(() => {
       loading.textContent = "Unable to load saved documents.";
     });
- 
+
     return wrap;
   }
- 
+
   function renderSavedForms(job, container, ctx) {
     const wrap = document.createElement("div");
     wrap.className = "form-summary";
- 
+
     const title = document.createElement("div");
     title.className = "label";
     title.textContent = "Saved Forms";
     wrap.appendChild(title);
- 
+
     const forms = formsOf(job);
     if (!forms.length) {
       const empty = document.createElement("div");
@@ -5641,25 +5646,25 @@ function renderAttachmentSection(titleText, items, options = {}) {
       wrap.appendChild(empty);
       return wrap;
     }
- 
+
     forms.forEach((f, idx) => {
       const item = document.createElement("div");
       item.className = "form-summary-item";
- 
+
       const top = document.createElement("div");
       top.className = "jobrow-top";
- 
+
       const left = document.createElement("div");
       left.className = "jobrow-name";
       left.textContent = `${job.kind === "sales_lead" ? "Recommendation" : "Completion"} Form #${idx + 1}`;
- 
+
       top.appendChild(left);
       if (f.status_update) top.appendChild(statusPill(f.status_update));
- 
+
       const body = document.createElement("div");
       body.className = "jobrow-addr";
       body.style.whiteSpace = "pre-wrap";
- 
+
       const lines = [];
       if (f.date || f.created_at) lines.push(`Date: ${formatFormDate(f.date || f.created_at)}`);
       if (f.technician_name) lines.push(`Tech: ${f.technician_name}`);
@@ -5676,18 +5681,18 @@ function renderAttachmentSection(titleText, items, options = {}) {
       if (f.time_required) lines.push(`Time Required: ${f.time_required}`);
       if (f.ready_to_quote) lines.push(`Ready to Quote: Yes`);
       body.textContent = lines.join("\n");
- 
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
       actions.style.marginTop = "8px";
       actions.style.flexWrap = "wrap";
- 
+
       const editBtn = document.createElement("button");
       editBtn.className = "btn";
       editBtn.textContent = "Edit Form";
       editBtn.addEventListener("click", () => openEditSavedForm(job, idx, container, ctx));
- 
+
       const uploadLabel = makeUploadLabel("Upload", "ghost", false);
       const uploadInput = document.createElement("input");
       uploadInput.type = "file";
@@ -5708,10 +5713,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
           uploadInput.value = "";
         }
       });
- 
+
       actions.appendChild(editBtn);
       actions.appendChild(uploadLabel);
- 
+
       item.appendChild(top);
       item.appendChild(body);
       item.appendChild(actions);
@@ -5720,10 +5725,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
       }));
       wrap.appendChild(item);
     });
- 
+
     return wrap;
   }
- 
+
 
   async function promptUpdateQuoteTracking(job, refreshFn) {
     const assigned = prompt("Who is working on this quote?", job.quote_assigned_to || "");
@@ -5909,26 +5914,26 @@ function renderAttachmentSection(titleText, items, options = {}) {
   function renderJobDetails(container, job, ctx) {
     container.innerHTML = "";
     pdsLoadOfficePolish();
- 
+
     const card = document.createElement("div");
     card.className = "card pds-office-ticket";
- 
+
     const header = document.createElement("div");
     header.style.display = "flex";
     header.style.justifyContent = "space-between";
     header.style.alignItems = "center";
     header.style.gap = "10px";
- 
+
     const left = document.createElement("div");
     const idLabel = job.kind === "sales_lead" ? "Sales Lead #" : "Job #";
     left.innerHTML = `
       <h3 style="margin:0;">${job.customer || `${idLabel}${job.job_number || ""}`}</h3>
       <div class="hint" style="margin-top:4px;"><b>${idLabel}${job.job_number || ""}</b> - ${mmDdYy(job.date)}</div>
     `;
- 
+
     const right = document.createElement("div");
     right.appendChild(statusPill(job.status));
- 
+
     header.appendChild(left);
     header.appendChild(right);
     card.appendChild(header);
@@ -6042,7 +6047,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       // Display these simple controls directly beneath the ticket heading.
       card.appendChild(statusRow);
     }
- 
+
     const fields = document.createElement("div");
     fields.className = "grid2";
     fields.style.marginTop = "10px";
@@ -6060,7 +6065,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       <div><div class="label">Quote Assigned To</div><div class="field">${job.quote_assigned_to || ""}</div></div>
       <div><div class="label">Invoice #</div><div class="field">${job.invoice_number || ""}</div></div>
     `;
- 
+
     // Show editable reference values immediately, including before optional
     // shared-ticket rendering resolves. No additional Edit button is needed.
     attachInlineJobReferences(fields, job, ctx);
@@ -6079,7 +6084,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     const officeNotes = document.createElement("div");
     officeNotes.style.marginTop = "10px";
     officeNotes.className="pds-highlight-notes";officeNotes.style.cssText="padding:13px 15px;border:1.5px solid #f58220;border-left:4px solid #f58220;border-radius:12px;background:#fffaf5;margin:12px 0";officeNotes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Office Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.office_notes || "—")}</div>`;
- 
+
     const notes = document.createElement("div");
     notes.style.marginTop = "10px";
     notes.className="pds-highlight-notes";notes.style.cssText="padding:13px 15px;border:1.5px solid #f58220;border-left:4px solid #f58220;border-radius:12px;background:#fffaf5;margin:12px 0";notes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Job Description</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.description || job.job_notes || "—")}</div>`;
@@ -6100,24 +6105,24 @@ function renderAttachmentSection(titleText, items, options = {}) {
           <div><div class="label">Last Modified</div><div class="field">${escapeHtml(modifiedStamp || createdStamp || "—")}</div></div>
         </div>`;
     }
- 
+
     const actions = document.createElement("div");
     actions.style.display = "flex";
     actions.style.flexDirection = "column";
     actions.style.alignItems = "flex-start";
     actions.style.gap = "8px";
     actions.style.marginTop = "12px";
- 
+
     const primaryActions = document.createElement("div");
     primaryActions.style.display = "flex";
     primaryActions.style.gap = "8px";
     primaryActions.style.flexWrap = "wrap";
- 
+
     const secondaryActions = document.createElement("div");
     secondaryActions.style.display = "flex";
     secondaryActions.style.gap = "8px";
     secondaryActions.style.flexWrap = "wrap";
- 
+
     const btnEdit = document.createElement("button");
     btnEdit.className = "btn btn-orange";
     btnEdit.textContent = "Edit";
@@ -6127,7 +6132,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     styleActionButton(btnForm, "green", false);
     btnForm.textContent = (job.kind === "sales_lead") ? "Recommendation Form" : "Completion Form";
     primaryActions.appendChild(btnForm);
- 
+
     const jobUploadLabel = makeUploadLabel("Upload", "blue", true);
     const jobUploadInput = document.createElement("input");
     jobUploadInput.type = "file";
@@ -6149,7 +6154,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       }
     });
     secondaryActions.appendChild(jobUploadLabel);
- 
+
     if (job.kind === "sales_lead") {
       const canTurnToJob = !!(currentUser && ["office", "office_admin", "admin"].includes(String(currentUser.role || "")));
       if (canTurnToJob) {
@@ -6201,7 +6206,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
         primaryActions.appendChild(btnPartsOnOrder);
       }
     }
- 
+
     if (shouldShowEstimate(job)) {
       const b = document.createElement("button");
       styleActionButton(b, "blue", true);
@@ -6209,7 +6214,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       b.addEventListener("click", () => openEstimateDrawer(job, container, ctx));
       secondaryActions.appendChild(b);
     }
- 
+
     if (shouldShowInvoice(job)) {
       const b = document.createElement("button");
       styleActionButton(b, "blue", true);
@@ -6217,10 +6222,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
       b.addEventListener("click", () => openInvoiceDrawer(job, container, ctx));
       secondaryActions.appendChild(b);
     }
- 
+
 
     if (job.kind === "dispatch" && job.id && ['office','office_admin','admin'].includes(String(currentUser?.role||''))) {
-      const poButton=document.createElement('button');poButton.type='button';poButton.className='btn';poButton.textContent='Purchase Order';
+      const poButton=document.createElement('button');poButton.type='button';styleActionButton(poButton,'blue',true);poButton.textContent='Purchase Order';
       poButton.onclick=()=>{
         window.__pdsJobPODraft={customer:String(job.customer||''),job_number:String(job.job_number||''),description:String(job.job_notes||job.description||'')};
         renderUnifiedPurchaseOrders('pds',true,()=>renderAllJobsView());
@@ -6242,8 +6247,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
     actions.appendChild(primaryActions);
     if (secondaryActions.childNodes.length) actions.appendChild(secondaryActions);
- 
-    
+
+
     // Preserve original field controls (including five existing inline editors).
     // This is a visual wrapper only; it never writes or copies ticket data.
     const ticketInfo=document.createElement('section');ticketInfo.className='pds-office-group';
@@ -6351,9 +6356,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     card.appendChild(renderSavedForms(job, container, ctx));
      // Read-only links from legacy receipts. No job, inventory, or accounting record is changed.
      if (job.kind === "dispatch" && window.PDSOfficeTickets) window.PDSOfficeTickets.jobReceipts(card,job);
- 
+
     container.appendChild(card);
- 
+
     btnEdit.addEventListener("click", () => openEditJob(job, container, ctx));
     btnForm.addEventListener("click", async () => {
       if (job.kind === "dispatch") {
@@ -6367,27 +6372,27 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }
     });
   }
- 
+
   function openEditJob(job, container, ctx) {
     openDrawer("Edit Job", async (drawerBody, overlay) => {
       const customers = await apiListCustomers().catch(() => []);
       const contacts = await apiListContacts().catch(() => []);
       const knownAddresses = await apiListAddresses({ limit: 1500 }).catch(() => []);
- 
+
       const customerListId = `cust-${Math.random().toString(36).slice(2)}`;
       const contactListId = `cont-${Math.random().toString(36).slice(2)}`;
- 
+
       drawerBody.innerHTML = "";
       const card = document.createElement("div");
       card.className = "card";
- 
+
       const row0 = document.createElement("div");
       row0.className = "grid2";
       row0.innerHTML = `
         <div><div class="label">Status</div><select class="input" id="ej_status"></select></div>
         <div><div class="label">Date</div><input class="input" id="ej_date" type="date" /></div>
       `;
- 
+
       const stSel = row0.querySelector("#ej_status");
       STATUSES.forEach(s => {
         const opt = document.createElement("option");
@@ -6397,7 +6402,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
       stSel.value = job.status || (job.kind === "sales_lead" ? "Sales Lead" : "Dispatch");
       row0.querySelector("#ej_date").value = job.date;
- 
+
       const rowJob = document.createElement("div");
       rowJob.className = "grid2";
       rowJob.innerHTML = `
@@ -6406,7 +6411,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       rowJob.querySelector("#ej_job_number").value = job.job_number || "";
       rowJob.querySelector("#ej_customer").value = job.customer || "";
- 
+
       const row1 = document.createElement("div");
       row1.className = "grid2";
       row1.innerHTML = `
@@ -6415,7 +6420,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       row1.querySelector("#ej_address").value = job.address || "";
       row1.querySelector("#ej_contact").value = job.contact || "";
- 
+
       const row2 = document.createElement("div");
       row2.className = "grid2";
       row2.innerHTML = `
@@ -6424,7 +6429,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       row2.querySelector("#ej_phone").value = job.phone || "";
       row2.querySelector("#ej_email").value = job.email || "";
- 
+
       const row3 = document.createElement("div");
       row3.className = "grid2";
       row3.innerHTML = `
@@ -6433,7 +6438,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       row3.querySelector("#ej_po").value = job.po_number || "";
       row3.querySelector("#ej_est").value = job.estimate_number || "";
- 
+
       // Shared ticket input controls: preserve the existing office form IDs,
       // autocomplete and save handler, while reusing the portal input factory.
       const sharedTicketEditor = await doorksLoadSharedTicket().catch(() => null);
@@ -6496,7 +6501,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const ta = document.createElement("textarea");
       ta.value = job.job_notes || "";
       notes.appendChild(ta);
- 
+
       const addWrap = document.createElement("div");
       addWrap.className = "grid3";
       addWrap.style.marginTop = "12px";
@@ -6508,31 +6513,31 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         <div><button class="btn" id="ej_add_address">Add Address</button></div>
         <div><button class="btn" id="ej_add_contact">Add Contact</button></div>
       `;
- 
+
       const actions = document.createElement("div");
       actions.style.display = "flex";
       actions.style.gap = "8px";
       actions.style.marginTop = "10px";
       actions.style.flexWrap = "wrap";
- 
+
       const btnSave = document.createElement("button");
       btnSave.className = "btn btn-orange";
       btnSave.textContent = "Save";
- 
+
       const btnCancel = document.createElement("button");
       btnCancel.className = "btn";
       btnCancel.textContent = "Cancel";
- 
+
       const btnDelete = document.createElement("button");
       btnDelete.className = "btn";
       btnDelete.textContent = "Delete";
       btnDelete.style.borderColor = "#fecaca";
       btnDelete.style.color = "#b91c1c";
- 
+
       actions.appendChild(btnSave);
       actions.appendChild(btnCancel);
       actions.appendChild(btnDelete);
- 
+
       card.appendChild(buildCustomerDatalist(customerListId, customers));
       card.appendChild(buildContactDatalist(contactListId, contacts));
       const editCustomerInput = rowJob.querySelector("#ej_customer");
@@ -6587,7 +6592,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.appendChild(addWrap);
       card.appendChild(actions);
       drawerBody.appendChild(card);
- 
+
       addWrap.querySelector("#ej_add_customer").addEventListener("click", async () => {
         const name = prompt("New customer company name:");
         if (!name) return;
@@ -6598,7 +6603,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           alert(e.message || String(e));
         }
       });
- 
+
       const editAddAddressBtn = addWrap.querySelector("#ej_add_address");
       if (editAddAddressBtn) {
         editAddAddressBtn.addEventListener("click", async () => {
@@ -6640,9 +6645,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           alert(e.message || String(e));
         }
       });
- 
+
       btnCancel.addEventListener("click", () => overlay.remove());
- 
+
       btnSave.addEventListener("click", async () => {
         try {
           const payload = {
@@ -6671,7 +6676,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           alert(e.message || String(e));
         }
       });
- 
+
       btnDelete.addEventListener("click", async () => {
         if (!confirm("Delete this job?")) return;
         try {
@@ -6686,12 +6691,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
     });
   }
- 
+
   async function openCompletionOrRecommendation(job, container, ctx) {
     const isSalesLead = job.kind === "sales_lead";
     let employees = [];
     try { employees = await apiListEmployees(); } catch { employees = []; }
- 
+
     openDrawer(isSalesLead ? "Recommendation Form" : "Completion Form", async (drawerBody, overlay) => {
       drawerBody.innerHTML = "";
       const card = document.createElement("div");
@@ -6705,7 +6710,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       `;
       formDateRow.querySelector("#cf_form_date").value = new Date().toISOString().slice(0, 10);
       card.appendChild(formDateRow);
- 
+
       let stSel = null;
       if (!isSalesLead) {
         const statusWrap = document.createElement("div");
@@ -6722,7 +6727,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         statusWrap.appendChild(stSel);
         card.appendChild(statusWrap);
       }
- 
+
       const techRow = document.createElement("div");
       techRow.className = "grid2";
       techRow.style.marginTop = "10px";
@@ -6730,7 +6735,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         <div><div class="label">Technician Name</div><select class="input" id="cf_tech"></select></div>
         <div><div class="label">Door Type</div><select class="input" id="cf_door_type"></select></div>
       `;
- 
+
       const techSel = techRow.querySelector("#cf_tech");
       const opt0 = document.createElement("option");
       opt0.value = "";
@@ -6742,7 +6747,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         opt.textContent = e.name;
         techSel.appendChild(opt);
       });
- 
+
       const doorSel = techRow.querySelector("#cf_door_type");
       const doorBlank = document.createElement("option");
       doorBlank.value = "";
@@ -6755,14 +6760,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         doorSel.appendChild(opt);
       });
       doorSel.value = "";
- 
+
       const locRow = document.createElement("div");
       locRow.style.marginTop = "10px";
       locRow.innerHTML = `
         <div class="label">Door Location</div>
         <input class="input" id="cf_door_loc" placeholder="e.g., Front Entry / Back Roll-Up" />
       `;
- 
+
       card.appendChild(techRow);
       card.appendChild(locRow);
 
@@ -6791,7 +6796,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const rawHours = (end - start) / 60;
         return Math.max(0, Math.round(rawHours * 2) / 2);
       };
- 
+
       const updateRollupLunchVisibility = () => {
         const wrap = card.querySelector("#cf_rollup_lunch_wrap");
         if (!wrap) return;
@@ -6834,11 +6839,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             <div class="hint">Required for roll-up completion forms.</div>
           </div>
         `;
- 
+
         const techNotes = document.createElement("div");
         techNotes.style.marginTop = "10px";
         techNotes.innerHTML = `<div class="label">Tech Notes</div><textarea id="cf_tech_notes"></textarea>`;
- 
+
         const partsRecs = document.createElement("div");
         partsRecs.className = "grid2";
         partsRecs.style.marginTop = "10px";
@@ -6846,7 +6851,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Parts Used</div><textarea id="cf_parts" placeholder="Parts used"></textarea></div>
           <div><div class="label">Additional Recommendations</div><textarea id="cf_add_recs" placeholder="Additional recommendations"></textarea></div>
         `;
- 
+
         card.appendChild(timeRow);
         card.appendChild(techNotes);
         card.appendChild(partsRecs);
@@ -6947,7 +6952,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         }
         if (selected.door_location) locRow.querySelector("#cf_door_loc").value = selected.door_location;
       });
- 
+
       // Moses: one transcript, then OpenAI proposes structured form fields for review.
       const speechCtor = window.SpeechRecognition || window.webkitSpeechRecognition;
       const speechPanel=document.createElement("details");speechPanel.className="card";
@@ -7050,23 +7055,23 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       actions.style.display = "flex";
       actions.style.gap = "8px";
       actions.style.marginTop = "10px";
- 
+
       const btnSave = document.createElement("button");
       btnSave.className = "btn btn-orange";
       btnSave.textContent = "Save Form";
- 
+
       const btnClose = document.createElement("button");
       btnClose.className = "btn";
       btnClose.textContent = "Close";
- 
+
       actions.appendChild(btnSave);
       actions.appendChild(btnClose);
       card.appendChild(actions);
- 
+
       drawerBody.appendChild(card);
- 
+
       btnClose.addEventListener("click", () => overlay.remove());
- 
+
       btnSave.addEventListener("click", async () => {
         try {
           const selectedDate = (card.querySelector("#cf_form_date")?.value || "").trim();
@@ -7088,7 +7093,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             time_in: timeIn,
             time_out: timeOut,
           };
- 
+
           if (isSalesLead) {
             payload.recommendations = card.querySelector("#cf_lead_recs").value.trim();
             payload.parts_required = card.querySelector("#cf_lead_parts").value.trim();
@@ -7108,7 +7113,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.parts_used = card.querySelector("#cf_parts").value.trim();
             payload.additional_recommendations = card.querySelector("#cf_add_recs").value.trim();
           }
- 
+
           if (!card.querySelector("#cf_confirm_review").checked || !card.querySelector("#cf_confirm_signoff").checked || !card.querySelector("#cf_confirm_checkin").checked) {
             alert("Please complete the save confirmation checklist."); return;
           }
@@ -7199,7 +7204,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               }
             }
           }
- 
+
           overlay.remove();
           const updatedJob = await apiGetJob(job.id);
           if (ctx && ctx.afterSave) await ctx.afterSave();
@@ -7211,7 +7216,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
     });
   }
- 
+
   function calcTimeHours(startTime, endTime, lunchTaken, lunchStart, lunchEnd) {
     if (!startTime || !endTime) return 0;
     const toMin = (t) => {
@@ -7220,7 +7225,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     };
     let total = toMin(endTime) - toMin(startTime);
     if (total < 0) total = 0;
- 
+
     if (lunchTaken && lunchStart && lunchEnd) {
       const lunch = toMin(lunchEnd) - toMin(lunchStart);
       if (lunch > 0) total -= lunch;
@@ -7228,28 +7233,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     if (total < 0) total = 0;
     return +(total / 60).toFixed(2);
   }
- 
+
   function renderCalendarView() {
     setNavActive(null);
     setActiveChip("Calendar");
     setWorkspace("Calendar");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const top = document.createElement("div");
     top.className = "calendar-top";
- 
+
     const left = document.createElement("div");
     left.className = "cal-left";
- 
+
     const btnPrev = document.createElement("button");
     btnPrev.className = "iconbtn";
     btnPrev.innerHTML = "&larr;";
- 
+
     const btnNext = document.createElement("button");
     btnNext.className = "iconbtn";
     btnNext.innerHTML = "&rarr;";
- 
+
     const label = document.createElement("div");
     label.className = "cal-month";
     left.style.display = "flex";
@@ -7260,48 +7265,48 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     label.style.flex = "0 0 auto";
     label.style.minWidth = "220px";
     label.style.textAlign = "center";
- 
+
     left.appendChild(btnPrev);
     left.appendChild(label);
     left.appendChild(btnNext);
- 
+
     const btnNew = document.createElement("button");
     btnNew.className = "btn btn-orange";
     btnNew.textContent = "New Dispatch";
- 
+
     top.appendChild(left);
     top.appendChild(btnNew);
- 
+
     const grid = document.createElement("div");
     grid.className = "cal-grid";
- 
+
     root.appendChild(top);
     root.appendChild(grid);
- 
+
     let cur = new Date();
     cur.setDate(1);
- 
+
     let calendarRequestId = 0;
     async function refresh() {
       const requestId = ++calendarRequestId;
       label.textContent = monthLabel(cur);
       grid.innerHTML = "";
- 
+
       for (const d of DAYS) {
         const h = document.createElement("div");
         h.className = "cal-dow";
         h.textContent = d;
         grid.appendChild(h);
       }
- 
+
       const start = new Date(cur);
       start.setDate(start.getDate() - start.getDay());
- 
+
       const end = new Date(cur);
       end.setMonth(end.getMonth() + 1);
       end.setDate(0);
       end.setDate(end.getDate() + (6 - end.getDay()));
- 
+
       let jobs;
       try {
         // Calendar-only request: never use the unfiltered, capped job list.
@@ -7323,96 +7328,132 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         grid.appendChild(msg);
         return;
       }
+      // Approved time off appears as a minimal calendar marker, not a dispatch.
+      // Existing time-off requests are the source of truth; never mutate jobs.
+      let approvedAbsences = [];
+      try {
+        const timeoff = await apiListTimeOff({limit: 500});
+        if (requestId !== calendarRequestId) return;
+        approvedAbsences = timeoff.filter(t =>
+          String(t.status || '').trim().toLowerCase() === 'approved' &&
+          /^\d{4}-\d{2}-\d{2}$/.test(String(t.start_date || '')) &&
+          /^\d{4}-\d{2}-\d{2}$/.test(String(t.end_date || t.start_date || ''))
+        );
+      } catch (err) {
+        // The calendar must keep working even when time-off isn't readable.
+        console.warn('[PDS Calendar] Approved time off unavailable:', err?.message || err);
+      }
       const byDate = {};
       for (const j of jobs) {
         const dt = j.date;
         if (!byDate[dt]) byDate[dt] = [];
         byDate[dt].push(j);
       }
- 
+
       const day = new Date(start);
       while (day <= end) {
         const cell = document.createElement("div");
         cell.className = "cal-cell";
- 
+
         const inMonth = day.getMonth() === cur.getMonth();
         if (!inMonth) cell.classList.add("cal-cell-muted");
- 
+
         const dayNum = document.createElement("div");
         dayNum.className = "cal-daynum";
         dayNum.textContent = String(day.getDate());
- 
+
         const items = document.createElement("div");
         items.className = "cal-items";
- 
+
         const dt = yyyyMmDd(day);
         const dayJobs = (byDate[dt] || []).slice();
- 
+
+        if (document.body.dataset.platform === 'pds') {
+          // Inclusive dates; one compact, clearly differentiated pill per employee.
+          const absentNames = new Set();
+          for (const request of approvedAbsences) {
+            const from = String(request.start_date || '');
+            const through = String(request.end_date || from);
+            if (from <= dt && dt <= through) {
+              const firstName = String(request.employee_name || '').trim().split(/\s+/)[0];
+              if (firstName) absentNames.add(firstName);
+            }
+          }
+          for (const name of [...absentNames].sort((a,b) => a.localeCompare(b))) {
+            const marker = document.createElement('div');
+            marker.className = 'pds-cal-timeoff';
+            marker.style.cssText = 'font-size:11px;line-height:1.35;background:#fff2e6;border:1px solid #f4cba6;border-radius:7px;color:#8b470d;padding:3px 6px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
+            marker.textContent = name + ' Out';
+            marker.title = name + ' — Approved time off';
+            items.appendChild(marker);
+          }
+        }
+
         dayJobs.slice(0, 5).forEach(j => {
           const it = document.createElement("div");
           it.className = "cal-item";
           it.appendChild(dotEl(j.status));
- 
+
           const txt = document.createElement("span");
           txt.textContent = j.customer || (j.kind === "sales_lead" ? `Sales Lead ${j.job_number}` : j.job_number);
           it.appendChild(txt);
- 
+
           items.appendChild(it);
         });
- 
+
         cell.appendChild(dayNum);
         cell.appendChild(items);
- 
+
         cell.addEventListener("click", () => openDailySchedule(dt, dayJobs));
         grid.appendChild(cell);
         day.setDate(day.getDate() + 1);
       }
- 
+
       refreshBadges();
     }
- 
+
     function openDailySchedule(dateStr, preloadedJobs = null) {
       openDrawer(`Daily Schedule (${mmDdYy(dateStr)})`, async (container) => {
         let jobs = preloadedJobs;
         if (!jobs) jobs = await apiListJobs({ date: dateStr, limit: 2000 });
- 
+
         if (!jobs.length) {
           container.innerHTML = `<div class="hint">No jobs scheduled for this day.</div>`;
           return;
         }
- 
+
         container.innerHTML = "";
         jobs.forEach(j => {
           const row = document.createElement("div");
           row.className = "jobrow";
- 
+
           const top = document.createElement("div");
           top.className = "jobrow-top";
- 
+
           const name = document.createElement("div");
           name.className = "jobrow-name";
           name.textContent = j.customer || (j.kind === "sales_lead" ? `Sales Lead ${j.job_number}` : j.job_number);
- 
+
           top.appendChild(name);
           top.appendChild(statusPill(j.status));
- 
+
           const addr = document.createElement("div");
           addr.className = "jobrow-addr";
           addr.textContent = j.address || "";
- 
+
           row.appendChild(top);
           row.appendChild(addr);
- 
+
           row.addEventListener("click", async () => {
             const full = await apiGetJob(j.id);
             renderJobDetails(container, full, { afterSave: refresh, afterDelete: refresh });
           });
- 
+
           container.appendChild(row);
         });
       });
     }
- 
+
     async function openNewDispatch(defaultDate) {
       let customers = [];
       let contacts = [];
@@ -7420,23 +7461,23 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       try { customers = await apiListCustomers(); } catch (e) { customers = []; }
       try { contacts = await apiListContacts(); } catch (e) { contacts = []; }
       try { knownAddresses = await apiListAddresses({ limit: 1500 }); } catch (e) { knownAddresses = []; }
- 
+
       openDrawer("New Dispatch", (container, overlay) => {
         const customerListId = `cust-${Math.random().toString(36).slice(2)}`;
         const contactListId = `cont-${Math.random().toString(36).slice(2)}`;
- 
+
         container.innerHTML = "";
         const card = document.createElement("div");
         card.className = "card pds-office-intake";
         pdsLoadOfficePolish();
- 
+
         const row0 = document.createElement("div");
         row0.className = "grid2";
         row0.innerHTML = `
           <div><div class="label">Status</div><select class="input" id="nj_status"></select></div>
           <div><div class="label">Date</div><input class="input" id="nj_date" type="date" /></div>
         `;
- 
+
         const stSel = row0.querySelector("#nj_status");
         ["Dispatch", "Sales Lead"].forEach(s => {
           const opt = document.createElement("option");
@@ -7445,35 +7486,35 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           stSel.appendChild(opt);
         });
         stSel.value = "Dispatch";
- 
+
         const row1 = document.createElement("div");
         row1.className = "grid2";
         row1.innerHTML = `
           <div><div class="label">Customer</div><input class="input" id="nj_customer" list="${customerListId}" placeholder="Customer name" /></div>
           <div><div class="label">Street Address</div><input class="input" id="nj_address" name="dispatch_street_address" placeholder="Start typing address" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" /></div>
         `;
- 
+
         const row1b = document.createElement("div");
         row1b.style.display = "grid";
         row1b.style.gridTemplateColumns = "1.4fr .6fr .7fr";
         row1b.style.gap = "10px";
         row1b.innerHTML = `
         `;
- 
+
         const row2 = document.createElement("div");
         row2.className = "grid2";
         row2.innerHTML = `
           <div><div class="label">Contact</div><input class="input" id="nj_contact" list="${contactListId}" placeholder="Contact name" /></div>
           <div><div class="label">Phone</div><input class="input" id="nj_phone" placeholder="Phone" /></div>
         `;
- 
+
         const row3 = document.createElement("div");
         row3.className = "grid2";
         row3.innerHTML = `
           <div><div class="label">Email</div><input class="input" id="nj_email" placeholder="Email" /></div>
           <div><div class="label">Office Notes</div><input class="input" id="nj_office_notes" placeholder="Office notes" /></div>
         `;
- 
+
         const row4 = document.createElement("div");
         row4.className = "grid2";
         row4.innerHTML = `
@@ -7483,12 +7524,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><div class="label">Invoice #</div><input class="input" id="nj_inv" placeholder="Invoice #" /></div>
           <div><div class="label">Upload</div><input class="input" id="nj_files" type="file" multiple /></div>
         `;
- 
+
         const notes = document.createElement("div");
         notes.innerHTML = `<div class="label">Job Notes</div>`;
         const ta = document.createElement("textarea");
         notes.appendChild(ta);
- 
+
         const addWrap = document.createElement("div");
         addWrap.className = "grid3";
         addWrap.style.marginTop = "12px";
@@ -7500,23 +7541,23 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div><button class="btn" id="nj_add_address">+ New Address</button></div>
           <div><button class="btn" id="nj_add_contact">+ New Contact</button></div>
         `;
- 
+
         const actions = document.createElement("div");
         actions.style.display = "flex";
         actions.style.gap = "8px";
         actions.style.marginTop = "10px";
- 
+
         const btnSave = document.createElement("button");
         btnSave.className = "btn btn-orange";
         btnSave.textContent = "Save";
- 
+
         const btnCancel = document.createElement("button");
         btnCancel.className = "btn";
         btnCancel.textContent = "Cancel";
- 
+
         actions.appendChild(btnSave);
         actions.appendChild(btnCancel);
- 
+
         card.appendChild(buildCustomerDatalist(customerListId, customers));
         card.appendChild(buildContactDatalist(contactListId, contacts));
         const newJobCustomerInput = row1.querySelector("#nj_customer");
@@ -7642,7 +7683,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.appendChild(section('Work details & references','Add the job number, customer reference numbers, notes and attachments.',row4,notes));
         actions.classList.add('pds-office-intake-actions');
         card.appendChild(actions);
- 
+
         container.appendChild(card);
 
         const addCustomerBtn = addWrap.querySelector("#nj_add_customer");
@@ -7734,13 +7775,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           });
         }
 
- 
+
         row0.querySelector("#nj_date").value = defaultDate;
         const newJobNumberInput = row4.querySelector("#nj_job_number");
         // Dispatch job numbers are manual now. No auto-fill is applied.
- 
+
         btnCancel.addEventListener("click", () => overlay.remove());
- 
+
         btnSave.addEventListener("click", async () => {
           try {
             const status = stSel.value;
@@ -7782,26 +7823,26 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         });
       });
     }
- 
+
     btnPrev.addEventListener("click", async () => {
       cur.setMonth(cur.getMonth() - 1);
       await refresh();
     });
- 
+
     btnNext.addEventListener("click", async () => {
       cur.setMonth(cur.getMonth() + 1);
       await refresh();
     });
- 
+
     btnNew.addEventListener("click", () => openNewDispatch(yyyyMmDd(new Date())));
- 
+
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     currentView = { refresh };
     refresh();
   }
- 
+
   // Personal work tickets; no fabricated mileage. The office can set a
   // specific visit order later; until then date and job number are authoritative.
   function renderMyAssignments() {
@@ -7862,10 +7903,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             for(const job of items){
               const card=document.createElement('div');card.className='jobrow';
               const name=document.createElement('strong');name.textContent=job.customer||'Job';
-              const info=document.createElement('p');info.className='hint';info.textContent=[job.job_number&&'Job #'+job.job_number,job.status,job.date].filter(Boolean).join(' · ');
-              const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='Open Ticket';
+              const info=document.createElement('p');info.className='hint';info.textContent=[job.job_number&&'Job #'+job.job_number,job.status,job.date,job.address,job.quote_assigned_to&&'Quote: '+job.quote_assigned_to].filter(Boolean).join(' · ');
+              const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='View Job';
               open.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',body=>{const local=document.createElement('div');body.append(local);renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh})})}catch(error){alert('Unable to open job: '+(error.message||error))}};
-              card.append(name,info,open);officeList.append(card);
+              const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
+              const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Ask Moses to review this saved job';
+              const isInvoice=heading==='Office Invoices To Review';
+              assist.onclick=()=>{const launch=document.getElementById('workspaceMosesBubble');const panel=document.getElementById('workspaceMosesPanel');if(panel?.hidden)launch?.click();const input=document.getElementById('mosesChatMessage');if(!input)return;input.value=(isInvoice?'Review this job for invoicing: ':'Review this job for an estimate: ')+(job.job_number||job.customer||'')+'. Check the saved work and identify the next steps. Prepare a draft if supported; do not issue or send anything without approval.';input.focus();};
+              buttons.append(open,assist);card.append(name,info,buttons);officeList.append(card);
             }
           }
         }catch(error){const msg=document.createElement('p');msg.className='hint';msg.textContent='Unable to load office tasks: '+(error.message||error);officeList.append(msg)}
@@ -7903,7 +7948,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const open = document.createElement('button');
           open.type = 'button';
           open.className = 'btn';
-          open.textContent = 'Open Ticket';
+          open.textContent = 'View Job';
           open.onclick = async () => {
             try {
               const full = await apiGetJob(job.id);
@@ -8141,19 +8186,58 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
 
+  // Ask structured quote questions before supplier RFQs or unknown-part pricing.
+  // This is a review handoff, never an automatic price or email.
+  function openPdsQuotePartsReview(job) {
+    if (document.body.dataset.platform !== 'pds') return;
+    const number=String(job.job_number||'').trim();
+    const customer=String(job.customer||job.customer_name||'').trim();
+    openDrawer('Quote Parts & Pricing', (body) => {
+      const root=document.createElement('div');root.className='card';root.style.cssText='display:grid;gap:12px;padding:16px';
+      const heading=document.createElement('strong');heading.textContent=[customer,number&&'Job #'+number].filter(Boolean).join(' · ');
+      const kind=document.createElement('select');kind.className='input';kind.setAttribute('aria-label','Type of quote');
+      for(const [value,label] of [['unknown','Determine what is needed'],['new_door','New door / complete opening'],['replacement_part','Replacement or automatic-door part'],['other_material','Other materials or equipment'],['labor','Labor / adjustment only']]){const option=document.createElement('option');option.value=value;option.textContent=label;kind.append(option)}
+      const details=document.createElement('textarea');details.className='input';details.rows=4;details.placeholder='Dimensions, door type, model, part number, quantity, photos, supplier, or missing information…';details.setAttribute('aria-label','Quote requirements and parts details');
+      const supplier=document.createElement('input');supplier.className='input';supplier.placeholder='Preferred supplier (optional)';supplier.setAttribute('aria-label','Preferred supplier');
+      const fields=document.createElement('small');fields.style.cssText='line-height:1.4;color:#50606d';
+      const changeHints=()=>{fields.textContent=({new_door:'Confirm opening dimensions, handing, material, finish, glass, hardware, installation and lead time before requesting supplier pricing.',replacement_part:'Check manufacturer, model, photos, compatibility, part number, availability, supplier price and lead time.',other_material:'Confirm exact item, model, quantity, availability, supplier cost and lead time.',labor:'Check saved scope, technician notes, expected hours and labor rate.',unknown:'Review saved forms and determine if supplier pricing, part research or just an estimate is needed.'})[kind.value]};kind.onchange=changeHints;changeHints();
+      const buttons=document.createElement('div');buttons.style.cssText='display:flex;flex-wrap:wrap;gap:8px';
+      const review=document.createElement('button');review.type='button';review.className='btn btn-orange';review.textContent='Review with Moses';
+      review.onclick=()=>{
+        const prompt=['Review PDS quote for job '+number+' ('+customer+').',
+          'Read the verified saved job and its completion/recommendation forms before advising.',
+          'Quote type: '+kind.selectedOptions[0].textContent+'.',
+          details.value.trim()?'Office notes: '+details.value.trim().slice(0,1800)+'.':'',
+          supplier.value.trim()?'Preferred supplier: '+supplier.value.trim().slice(0,160)+'.':'',
+          'Identify missing specifications, parts, vendor pricing, availability and lead times.',
+          'For a new door, prepare a supplier RFQ draft after identifying missing dimensions, handing, hardware and finish.',
+          'For a replacement or automatic-door part, research available catalog information and flag unverified compatibility or prices.',
+          'If supplier response is needed, label the quote Awaiting Supplier Pricing; do not invent a cost or imply a supplier was contacted.',
+          'Do not send emails, alter job records or issue an estimate without approval. Propose the next actions clearly.'
+        ].filter(Boolean).join(' ');
+        document.querySelectorAll('.overlay').forEach(el=>el.remove());
+        const launcher=document.getElementById('workspaceMosesBubble'),panel=document.getElementById('workspaceMosesPanel');
+        if(panel?.hidden)launcher?.click();
+        const field=document.getElementById('mosesChatMessage');
+        if(field){field.value=prompt;field.focus()}else alert('Moses chat unavailable. Please refresh and retry.');
+      };
+      buttons.append(review);root.append(heading,kind,fields,supplier,details,buttons);body.append(root);
+    });
+  }
+
   function renderJobFlowView(initialStatus = "Dispatch", standalone = false) {
     setNavActive(initialStatus === "__ALL__" ? navAllJobs : navJobFlow);
     setActiveChip("Work Flow");
     setWorkspace(initialStatus === "__ALL__" ? "All Jobs" : "Job Flow");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const tabsRow = document.createElement("div");
     tabsRow.style.display = "flex";
     tabsRow.style.gap = "8px";
     tabsRow.style.flexWrap = "wrap";
     tabsRow.style.marginBottom = "10px";
- 
+
     const tabDefs = [
       { name: "Sales Lead", status: "Sales Lead" },
       { name: "Dispatch", status: "Dispatch" },
@@ -8163,7 +8247,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       { name: "Complete/Quote", status: "Complete/Quote" },
       { name: "Complete", status: "Complete" },
     ];
- 
+
     let active = initialStatus;
     let allJobsQuery = "";
     const list = document.createElement("div");
@@ -8173,7 +8257,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     searchWrap.style.marginBottom = "10px";
     searchWrap.style.alignItems = "center";
     searchWrap.innerHTML = `<input class="input" id="all_jobs_search" placeholder="Search by customer, contact, address, job #, estimate #, invoice #, or PO #" /><button class="btn" id="all_jobs_refresh">Search</button>`;
- 
+
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
@@ -8233,7 +8317,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         });
       }).catch(e => alert(e.message || String(e)));
     }
- 
+
     function makeTab(def) {
       const b = document.createElement("button");
       b.className = "navbtn";
@@ -8243,32 +8327,32 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       b.style.alignItems = "center";
       b.style.gap = "10px";
       b.style.justifyContent = "space-between";
- 
+
       const left = document.createElement("div");
       left.innerHTML = `<span>${def.name}</span>`;
       const pill = def.status === "__ALL__" ? statusPill("Dispatch") : statusPill(def.status);
       if (def.status === "__ALL__") pill.textContent = "All";
- 
+
       const badge = document.createElement("span");
       badge.className = "badge";
       badge.style.display = (def.status === "Done" || def.status === "Quote Sent") ? "none" : "inline-flex";
       badge.textContent = "0";
- 
+
       b.appendChild(left);
       b.appendChild(pill);
       b.appendChild(badge);
- 
+
       b.addEventListener("click", async () => {
         active = def.status;
         await refresh();
       });
- 
+
       return { btn: b, badge, def };
     }
- 
+
     const tabEls = tabDefs.map(makeTab);
     tabEls.forEach(x => tabsRow.appendChild(x.btn));
- 
+
     function renderAllJobsRows(jobs) {
       list.innerHTML = "";
       if (!jobs.length) {
@@ -8297,7 +8381,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         list.appendChild(row);
       });
     }
- 
+
     async function refresh() {
       tabEls.forEach(x => x.btn.classList.toggle("navbtn-active", x.def.status === active));
       for (const t of tabEls) {
@@ -8310,16 +8394,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const js = await apiListJobs({ status: t.def.status, limit: 5000 });
         t.badge.textContent = String(js.length);
       }
- 
+
       searchWrap.style.display = active === "__ALL__" ? "flex" : "none";
- 
+
       if (active === "__ALL__") {
         const jobs = await apiListAllJobs({ q: allJobsQuery, limit: 5000 }).catch(() => []);
         renderAllJobsRows(jobs);
         refreshBadges();
         return;
       }
- 
+
       const jobs = await apiListJobs({ status: active, limit: 5000 });
       list.innerHTML = "";
       if (!jobs.length) {
@@ -8327,26 +8411,26 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         refreshBadges();
         return;
       }
- 
+
       jobs.forEach(j => {
         const row = document.createElement("div");
         row.className = "jobrow";
- 
+
         const top = document.createElement("div");
         top.className = "jobrow-top";
- 
+
         const name = document.createElement("div");
         name.className = "jobrow-name";
         const idLine = j.kind === "sales_lead" ? `Sales Lead #${j.job_number}` : `Job #${j.job_number}`;
         name.textContent = j.customer ? `${j.customer} (${idLine})` : idLine;
- 
+
         top.appendChild(name);
         top.appendChild(statusPill(j.status));
- 
+
         const addr = document.createElement("div");
         addr.className = "jobrow-addr";
         addr.textContent = `${mmDdYy(j.date)} - ${j.address || ""}`;
- 
+
         row.appendChild(top);
         row.appendChild(addr);
 
@@ -8367,8 +8451,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             await promptUpdateQuoteTracking(full, refresh);
           });
           row.appendChild(quoteBtn);
+          if (document.body.dataset.platform === 'pds') {
+            const partsBtn=document.createElement('button');partsBtn.type='button';partsBtn.className='btn';
+            partsBtn.textContent='Parts & Pricing';partsBtn.style.margin='8px 0 0 8px';
+            partsBtn.addEventListener('click',(event)=>{event.stopPropagation();openPdsQuotePartsReview(j)});
+            row.appendChild(partsBtn);
+          }
         }
- 
+
         const techSummary = collectJobTechSummary(j);
         if (techSummary.length && ["Complete/Quote", "Complete", "Done"].includes(j.status)) {
           const meta = document.createElement("div");
@@ -8378,7 +8468,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           meta.textContent = techSummary.join(" - ");
           row.appendChild(meta);
         }
- 
+
         row.addEventListener("click", async () => {
           const full = await apiGetJob(j.id);
           openDrawer("Job Details", (drawerBody) => {
@@ -8387,21 +8477,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             renderJobDetails(local, full, { afterSave: refresh, afterDelete: refresh });
           });
         });
- 
+
         list.appendChild(row);
       });
- 
+
       refreshBadges();
     }
- 
+
     // Office-only bulk Moses entry point; opens verified saved REVIEW tickets only.
     // Preparing these does not create numbered estimates or send emails.
     if(activePlatform==='pds'&&String(currentUser?.role||'')==='office_admin') {
       const batchBar=document.createElement('div');batchBar.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0 14px';
       const batchBtn=document.createElement('button');batchBtn.type='button';batchBtn.className='btn btn-orange';
-      batchBtn.textContent='✨ Moses — Prepare eligible quote reviews';
+      batchBtn.textContent='Prepare quote reviews';
       const batchInfo=document.createElement('small');batchInfo.setAttribute('role','status');batchInfo.className='hint';
-      batchInfo.textContent='Prepares saved quote-review tickets from eligible jobs. Estimates still require review in the existing editor.';
+      batchInfo.textContent='';
       batchBtn.onclick=async()=>{
         if(!confirm('Prepare saved review tickets for eligible PDS quotes? No estimates or emails will be issued.'))return;
         batchBtn.disabled=true;batchInfo.textContent='Reviewing saved PDS completion forms…';
@@ -8417,7 +8507,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     root.appendChild(list);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     const allJobsInput = searchWrap.querySelector("#all_jobs_search");
     const allJobsBtn = searchWrap.querySelector("#all_jobs_refresh");
     allJobsInput.addEventListener("keydown", (e) => {
@@ -8430,18 +8520,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       allJobsQuery = allJobsInput.value.trim();
       refresh();
     });
- 
+
     currentView = { refresh };
     refresh();
   }
- 
+
   function renderAllJobsView(searchTerm = "") {
- 
+
     setNavActive(navAllJobs);
     setActiveChip("Work Flow");
     setWorkspace("All Jobs");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const searchWrap = document.createElement("div");
     searchWrap.style.display = "flex";
@@ -8449,10 +8539,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     searchWrap.style.marginBottom = "10px";
     searchWrap.style.alignItems = "center";
     searchWrap.innerHTML = `<input class="input" id="all_jobs_search" placeholder="Search by customer, contact, address, job #, estimate #, invoice #, or PO #" /><button class="btn" id="all_jobs_refresh">Search</button>`;
- 
+
     const list = document.createElement("div");
     let allJobsQuery = String(searchTerm || "").trim();
- 
+
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
@@ -8516,7 +8606,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         });
       }).catch(e => alert(e.message || String(e)));
     }
- 
+
     function renderRows(jobs) {
       list.innerHTML = "";
       if (!jobs.length) {
@@ -8543,18 +8633,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         list.appendChild(row);
       });
     }
- 
+
     async function refresh() {
       const jobs = await apiListAllJobs({ q: allJobsQuery, limit: 5000 }).catch(() => []);
       renderRows(jobs);
       refreshBadges();
     }
- 
+
     root.appendChild(searchWrap);
     root.appendChild(list);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     const allJobsInput = searchWrap.querySelector("#all_jobs_search");
     const allJobsBtn = searchWrap.querySelector("#all_jobs_refresh");
     allJobsInput.addEventListener("keydown", (e) => {
@@ -8567,11 +8657,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       allJobsQuery = allJobsInput.value.trim();
       refresh();
     });
- 
+
     currentView = { refresh };
     refresh();
   }
- 
+
   function renderPartsListView() {
     setNavActive(navPartsList);
     setActiveChip("Work Flow");
@@ -9182,7 +9272,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         for(const [name,value] of Object.entries(byCategory).sort((a,b)=>b[1]-a[1]))make("div",`${name}: ${money(value)}`);
         // Office receipt submission uses the same /receipts storage and AI extraction as Forms.
         const uploadBox=document.createElement("div");uploadBox.className="card";uploadBox.style.margin="12px 0";uploadBox.style.display="none";
-        
+
         const uploadForm=document.createElement("form");uploadForm.style.marginTop="12px";
         uploadForm.innerHTML=`<div class="grid2"><label>Date<input class="input" type="date" name="date" required></label><label>Employee<input class="input" name="employee" required></label><label>Vendor<input class="input" name="vendor" required></label><label>Amount ($)<input class="input" type="number" min="0" step="0.01" name="amount" required></label><label>Card last 4<input class="input" name="card_last4" maxlength="4" pattern="[0-9]{4}"></label><label>Receipt #<input class="input" name="receipt_number"></label><label>Category<select class="input" name="category"></select></label></div><label>Notes<textarea class="input" name="notes" rows="2"></textarea></label><label>Photo / PDF<input class="input" type="file" name="file" accept="image/*,application/pdf" required></label><p class="hint" data-receipt-status>Select a file for AI reading. Review before saving.</p><button class="btn btn-orange" type="submit">Save Receipt</button>`;
         uploadBox.appendChild(uploadForm);host.appendChild(uploadBox);
@@ -9462,19 +9552,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
   }
 
   function renderTakeoffsView() {
- 
+
     setNavActive(navTakeoffs);
     setActiveChip("Forms");
     setWorkspace("Takeoffs");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `<h3>Takeoffs</h3><div class="hint">Download takeoff and order files here.</div>`;
     const list = document.createElement("div");
     list.style.marginTop = "12px";
- 
+
     async function refresh() {
       const forms = await apiListForms();
       list.innerHTML = "";
@@ -9485,14 +9575,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       forms.forEach(f => {
         const item = document.createElement("div");
         item.className = "jobrow";
- 
+
         const top = document.createElement("div");
         top.className = "jobrow-top";
- 
+
         const name = document.createElement("div");
         name.className = "jobrow-name";
         name.textContent = f.title || f.id;
- 
+
         const btn = document.createElement("button");
         btn.className = "btn";
         btn.textContent = "Open / Download";
@@ -9500,20 +9590,20 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           const url = f.open_url || `${f.download_url || ""}${String(f.download_url || "").includes("?") ? "&" : "?"}inline=1`;
           openFileUrl(url);
         });
- 
+
         top.appendChild(name);
         top.appendChild(btn);
- 
+
         const desc = document.createElement("div");
         desc.className = "jobrow-addr";
         desc.textContent = f.description || "";
- 
+
         item.appendChild(top);
         item.appendChild(desc);
         list.appendChild(item);
       });
     }
- 
+
     // Structured takeoffs supplement, rather than replace, the legacy PDF library.
     const builder=document.createElement("div");builder.className="card";
     builder.innerHTML=`<h3>New Door / Frame / Glass Takeoff</h3>
@@ -9628,11 +9718,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refreshSavedTakeoffs().catch(console.error);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     currentView = { refresh: refreshSavedTakeoffs };
   }
- 
- 
+
+
   function openTimecardEditor(item, refreshFn) {
     openDrawer("Edit Time Card", async (drawerBody, overlay) => {
       const selfOnly = currentUser && ["tech", "lead"].includes(String(currentUser.role || ""));
@@ -9742,12 +9832,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     setActiveChip("Forms");
     setWorkspace("Time Card");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `<h3>Time Card</h3><div class="hint">Fill out and save time card entries.</div>`;
- 
+
     const form = document.createElement("div");
     form.className = "grid2";
     form.style.marginTop = "10px";
@@ -9765,22 +9855,22 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       <div><div class="label">Holiday Hours</div><input class="input" id="tc_holiday_hours" type="number" step="0.25" placeholder="0.00" /></div>
       <div><div class="label">Double Time Hours</div><input class="input" id="tc_double_time_hours" type="number" step="0.25" placeholder="0.00" /></div>
     `;
- 
+
     const notes = document.createElement("div");
     notes.style.marginTop = "10px";
     notes.innerHTML = `<div class="label">Notes</div>`;
     const ta = document.createElement("textarea");
     notes.appendChild(ta);
- 
+
     const actions = document.createElement("div");
     actions.style.display = "flex";
     actions.style.gap = "8px";
     actions.style.marginTop = "10px";
- 
+
     const btnSave = document.createElement("button");
     btnSave.className = "btn btn-orange";
     btnSave.textContent = "Save Time Card";
- 
+
     const btnRefresh = document.createElement("button");
     btnRefresh.className = "btn";
     btnRefresh.textContent = "Refresh";
@@ -9791,13 +9881,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     filterWrap.style.gap = "8px";
     filterWrap.style.marginTop = "14px";
     filterWrap.innerHTML = `<div><div class="label">Filter by Technician</div><select class="input" id="tc_filter"><option value="">All Technicians</option></select></div>`;
- 
+
     actions.appendChild(btnSave);
     actions.appendChild(btnRefresh);
- 
+
     const list = document.createElement("div");
     list.style.marginTop = "14px";
- 
+
     async function refresh() {
       const employees = await apiListEmployees().catch(() => []);
       const tcSel = form.querySelector("#tc_employee");
@@ -9831,7 +9921,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         filterSel.innerHTML = `<option value="">All Technicians</option>` + employees.map(e => `<option value="${escapeHtml(e.name || "")}">${escapeHtml(e.name || "")}</option>`).join("");
         if (prevFilter) filterSel.value = prevFilter;
       }
- 
+
       try {
         const items = await apiListTimecards({ limit: 5000, ...(selfOnly && selfName ? { technician: selfName } : {}) });
         const activeFilter = (selfOnly ? selfName : filterSel.value).trim().toLowerCase();
@@ -9851,7 +9941,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             t.lunch_start,
             t.lunch_end
           );
- 
+
           const row = document.createElement("div");
           row.className = "jobrow";
           row.innerHTML = `
@@ -9871,7 +9961,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         list.innerHTML = `<div class="hint">Time cards unavailable: ${e.message || e}</div>`;
       }
     }
- 
+
     btnSave.addEventListener("click", async () => {
       if (btnSave.disabled) return;
       const originalSaveText = btnSave.textContent || "Save";
@@ -9915,24 +10005,24 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         alert(e.message || String(e));
       }
     });
- 
+
     btnRefresh.addEventListener("click", refresh);
     filterWrap.querySelector("#tc_filter").addEventListener("change", refresh);
- 
+
     root.appendChild(card);
     root.appendChild(form);
     root.appendChild(notes);
     root.appendChild(actions);
     root.appendChild(filterWrap);
     root.appendChild(list);
- 
+
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     currentView = { refresh };
     refresh();
   }
- 
+
 
 
 
@@ -10514,13 +10604,13 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const leadEstimatorOnly = !!(currentUser && currentUser.role === "lead");
     setWorkspace(leadEstimatorOnly ? "Data Center - Estimator Activity" : "Data Center");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
     tabs.style.gap = "8px";
     tabs.style.flexWrap = "wrap";
- 
+
     const btnDashboard = document.createElement("button"); btnDashboard.className = "btn btn-orange"; btnDashboard.textContent = "Productivity";
     const btnRollUp = document.createElement("button"); btnRollUp.className = "btn"; btnRollUp.textContent = "Roll Up";
     const btnEstimator = document.createElement("button"); btnEstimator.className = leadEstimatorOnly ? "btn btn-orange" : "btn"; btnEstimator.textContent = "Estimator Activity";
@@ -10529,7 +10619,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     } else {
       [btnDashboard, btnRollUp, btnEstimator].forEach(b => tabs.appendChild(b));
     }
- 
+
     const monthBar = document.createElement("div");
     monthBar.style.display = "flex";
     monthBar.style.justifyContent = "space-between";
@@ -10539,17 +10629,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const monthText = document.createElement("div"); monthText.style.fontWeight = "1000"; monthText.style.fontSize = "18px";
     const nextBtn = document.createElement("button"); nextBtn.className = "btn"; nextBtn.innerHTML = "Next Month &rarr;";
     monthBar.append(prevBtn, monthText, nextBtn);
- 
+
     const body = document.createElement("div");
     root.append(tabs, monthBar, body);
- 
+
     let currentMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
     let activeTab = leadEstimatorOnly ? "estimator" : "dashboard";
- 
+
     const monthKey = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`;
     const monthPretty = d => d.toLocaleDateString(undefined,{month:"long", year:"numeric"});
     const setTab = () => { [[btnDashboard,"dashboard"],[btnRollUp,"rollup"],[btnEstimator,"estimator"]].forEach(([b,k]) => { b.className = activeTab===k ? "btn btn-orange" : "btn"; }); };
- 
+
     async function loadData() {
       await ensureSharedSettingsLoaded();
       const month = monthKey(currentMonth);
@@ -10621,7 +10711,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         drawerBody.appendChild(card);
       });
     }
- 
+
     async function renderDashboardTab() {
       body.innerHTML = "";
       const { month, monthJobs, monthTimecards, monthDocs } = await loadData();
@@ -10697,7 +10787,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       approvalLayout.append(leftCard,rightCard);
       body.appendChild(approvalLayout);
     }
- 
+
 
 
     async function renderRollUpTab() {
@@ -10968,7 +11058,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       else approved.forEach(j=>{ const row=document.createElement("div"); row.className="jobrow"; row.innerHTML=`<div class="jobrow-top"><div class="jobrow-name">${j.customer||j.job_number}</div><div class="hint">Approved</div></div><div class="jobrow-addr">${j.customer||""}${j.job_number?` - Job #${j.job_number}`:""}${j.estimate_number?` - Est ${j.estimate_number}`:""}</div><div class="hint">${j.street_address || j.address || ""}</div>`; rightList.appendChild(row);});
       rightCard.appendChild(rightList); layout.append(leftCard,rightCard); body.appendChild(layout);
     }
- 
+
     async function renderEstimatorTab() {
       body.innerHTML = "";
       const { month, monthJobs, monthDocs, documentApprovals } = await loadData();
@@ -11164,7 +11254,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     nextBtn.addEventListener("click",()=>{currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 1); renderActiveTab();});
     workspaceBody.innerHTML=""; workspaceBody.appendChild(root); currentView={ refresh: renderActiveTab }; renderActiveTab();
   }
- 
+
 function renderCustomersView() {
     setNavActive(navCustomers);
     setActiveChip("Work Flow");
@@ -11897,12 +11987,12 @@ function renderEmployeesView() {
     currentView = { refresh };
     refresh();
   }
- 
+
   function money(v) {
     const n = Number(v || 0);
     return Number.isFinite(n) ? n.toFixed(2) : "0.00";
   }
- 
+
   function createDocLineItem(item = {}) {
     const kind = item.kind || "part";
     return {
@@ -11914,16 +12004,16 @@ function renderEmployeesView() {
       taxable: typeof item.taxable === "boolean" ? item.taxable : !(kind === "labor" || kind === "fee"),
     };
   }
- 
+
   function defaultDocItems() {
     return [
       createDocLineItem({ code: "TRIP", description: "Trip Charge", qty: 1, rate: 175, kind: "fee", taxable: false }),
       createDocLineItem({ code: "FUEL", description: "Fuel Surcharge", qty: 1, rate: 20, kind: "fee", taxable: false }),
     ];
   }
- 
-  
-  
+
+
+
   // Send saved PDS estimates/invoices from the server, never via the device mail application.
   async function openEstimateInvoiceEmail(doc, docType = "invoice") {
     const kind = String(docType).toLowerCase() === "estimate" ? "estimate" : "invoice";
@@ -12111,7 +12201,7 @@ function serializeDocItems(items, laborOnly) {
       .map(it => `${it.code || "ITEM"} - ${it.description} | Qty ${Number(it.qty || 0)} @ $${money(it.rate)} = $${money(Number(it.qty) * Number(it.rate))}${it.taxable === false ? " | Non-Taxable" : ""}`)
       .join("\n");
   }
- 
+
   async function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
     await doorksLoadSharedTicket();
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
@@ -12483,7 +12573,7 @@ function serializeDocItems(items, laborOnly) {
       }
       if (!editDoc) setTaxRateValue("");
       renderItems();
-      
+
       function buildCurrentDocPayloadForExport() {
         return {
           job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""),
@@ -12545,7 +12635,7 @@ const updated = await apiUpdateJob(job.id, {
 }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
- 
+
 
   function openEstimateInvoiceHelper(job = null, initialType = "estimate", container = null, ctx = null) {
     // Keep edits to existing saved docs direct; helper is only for new job estimate/invoice.
@@ -12854,11 +12944,11 @@ const updated = await apiUpdateJob(job.id, {
 function openEstimateDrawer(job, container = null, ctx = null) {
     return openEstimateInvoiceHelper(job, "estimate", container, ctx);
   }
- 
+
   function openInvoiceDrawer(job, container = null, ctx = null) {
     return openEstimateInvoiceHelper(job, "invoice", container, ctx);
   }
- 
+
   async function renderPdsVendorHub(){
     setWorkspace('PDS — Suppliers');clearWorkspaceActions();
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Suppliers</h2><p class="hint">Supplier profiles and purchase order relationships.</p></div><button class="btn" id="pdsSuppliersBack">← Business Hub</button></div><div id="pdsSuppliersCards"></div><section id="pdsSupplierEditor" hidden style="margin-top:16px"><button class="btn" id="pdsSupplierHome">← Suppliers</button><div class="card" style="margin-top:12px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3>Supplier Directory</h3><button class="btn btn-orange" id="pdsSupplierNew" type="button">+ New Supplier</button></div><input class="input" id="pdsSupplierSearch" placeholder="Search suppliers, contacts, phone, email or status…" style="width:100%;box-sizing:border-box;margin:12px 0"><div id="pdsSupplierList"></div><div id="pdsSupplierFormWrap" hidden style="margin-top:18px"><h3 id="pdsSupplierFormHeading">New Supplier</h3><button class="btn" type="button" id="pdsSupplierCancel">Cancel</button><form id="pdsSupplierForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form></div><p id="pdsSupplierMessage" class="hint"></p></div></section></div>';
@@ -12929,14 +13019,14 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     setActiveChip("Office Flow");
     setWorkspace("Business Hub");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     const tabs = document.createElement("div");
     tabs.style.display = "flex";
     tabs.style.gap = "8px";
     tabs.style.flexWrap = "wrap";
     tabs.style.marginBottom = "12px";
- 
+
     const btnGen = document.createElement("button");
     btnGen.className = "navbtn navbtn-active";
     btnGen.style.width = "auto";
@@ -12954,7 +13044,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     btnPO.style.width = "auto";
     btnPO.innerHTML = `<span>Purchase Orders</span>`;
     tabs.append(btnGen, btnEst, btnInv, btnPO);
- 
+
     const hubIntro=document.createElement('div');hubIntro.className='card pds-office-business-hub';hubIntro.innerHTML='<h2>Business Hub</h2><p class="hint">Manage estimates, invoices, purchasing, documents, customers and suppliers from one workspace.</p><div id="pdsBusinessCards"></div>';
     root.append(hubIntro);
     makeHubCards(hubIntro.querySelector('#pdsBusinessCards'),[
@@ -12975,7 +13065,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     hubIntro.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{if([btnGen,btnEst,btnInv,btnPO].some(x=>x===b))return;if(!hubIntro.isConnected)return;/* Non-document links navigate independently. */}));
     tabs.hidden=true;body.hidden=true;
     [btnGen,btnEst,btnInv,btnPO].forEach(b=>b.addEventListener('click',()=>{hubIntro.hidden=true;body.hidden=false;businessBack.hidden=false;}));
- 
+
     let activeTab = "generator";
     function syncTabs() {
       btnGen.classList.toggle("navbtn-active", activeTab === "generator");
@@ -12983,7 +13073,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       btnInv.classList.toggle("navbtn-active", activeTab === "invoices");
       btnPO.classList.toggle("navbtn-active", activeTab === "purchase_orders");
     }
- 
+
     async function renderDocList(type) {
       body.innerHTML = "";
       const docs = await apiListDocuments({ type }).catch(() => []);
@@ -13057,7 +13147,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       card.appendChild(list);
       body.appendChild(card);
     }
- 
+
     function renderGeneratorTab() {
       body.innerHTML = `<div class="card"><h3>Estimate / Invoice</h3><div class="hint">Open a blank document and choose estimate or invoice inside the builder.</div><div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="openDocBuilder">Open Builder</button><button class="btn" id="openPricingSettings">Billing Settings</button></div></div>`;
       const btn = document.getElementById("openDocBuilder");
@@ -13065,7 +13155,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const ps = document.getElementById("openPricingSettings");
       if (ps) ps.addEventListener("click", renderPricingSettingsView);
     }
- 
+
     async function renderActiveTab() {
       syncTabs();
       if (activeTab === "estimates") return renderDocList("estimate");
@@ -13073,18 +13163,18 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       if (activeTab === "purchase_orders") return renderPdsPurchaseOrders(body);
       renderGeneratorTab();
     }
- 
+
     btnGen.addEventListener("click", () => { activeTab = "generator"; renderActiveTab(); });
     btnEst.addEventListener("click", () => { activeTab = "estimates"; renderActiveTab(); });
     btnInv.addEventListener("click", () => { activeTab = "invoices"; renderActiveTab(); });
     btnPO.addEventListener("click", () => { activeTab = "purchase_orders"; renderActiveTab(); });
- 
+
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
     currentView = { refresh: renderActiveTab };
     renderActiveTab();
   }
- 
+
   // Phase 2S: document vault is separate from the receiving journal and expense ledger.
   async function renderDocumentVault(platform,initialType='receipt',backAction=null,libraryScope='accounting'){
     if(platform!=='pds'&&activePlatform!==platform)return;
@@ -13413,7 +13503,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   function renderInvoicePage() {
     renderEstimatePage();
   }
- 
+
 
 
   function renderPricingSettingsView() {
@@ -13520,7 +13610,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <div><div class="label">Door Location</div><input class="input" id="dl_location" /></div>
         <div><div class="label">Door ID</div><input class="input" id="dl_door_id" placeholder="Required searchable door identifier" /></div>
         <div><div class="label">Door Type</div><select class="input" id="dl_door_type"><option value="">Select Door Type --</option><option>Automatic Door</option><option>Man Door</option><option>Storefront Door</option><option>Herculite Door</option><option>Roll Up</option><option>Glass</option><option>Roll/Swing Gate</option><option>Other</option></select></div>
-        
+
         <div><div class="label">Manufacturer</div><input class="input" id="dl_manufacturer" /></div>
         <div><div class="label">Model</div><input class="input" id="dl_model" /></div>
         <div><div class="label">Serial Number</div><input class="input" id="dl_serial" /></div>
@@ -13710,12 +13800,12 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     setActiveChip("Forms");
     setWorkspace("Time Off Request");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     root.style.display = "grid";
     root.style.gridTemplateColumns = "1.1fr 1fr";
     root.style.gap = "14px";
- 
+
     const formCard = document.createElement("div");
     formCard.className = "card";
     formCard.innerHTML = `
@@ -13753,7 +13843,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         <button class="btn btn-orange" id="tor_submit">Submit Request</button>
       </div>
     `;
- 
+
     const listCard = document.createElement("div");
     listCard.className = "card";
     listCard.innerHTML = `<h3>Requests</h3><div class="hint">Pending, approved, and declined time off.</div>`;
@@ -13762,11 +13852,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     list.style.gap = "8px";
     list.style.marginTop = "12px";
     listCard.appendChild(list);
- 
+
     root.append(formCard, listCard);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     async function refresh() {
       const selfOnly = currentUser && ["tech", "lead"].includes(String(currentUser.role || ""));
       const selfName = (currentUser && (currentUser.name || currentUser.username)) ? String(currentUser.name || currentUser.username) : "";
@@ -13788,7 +13878,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         sel.innerHTML = `<option value="">-- Select employee --</option>` + employees.map(e => `<option value="${escapeHtml(e.name || "")}">${escapeHtml(e.name || "")}</option>`).join("");
         if (prevVal) sel.value = prevVal;
       }
- 
+
       const pendingCount = requests.filter(item => isActionableTimeOffRequest(item)).length;
       const timeOffBadge = el('badgeTimeOff');
       if (timeOffBadge) {
@@ -13823,7 +13913,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         list.appendChild(row);
       });
     }
- 
+
     formCard.querySelector("#tor_submit").addEventListener("click", async () => {
       const employee = ((currentUser && ["tech", "lead"].includes(String(currentUser.role || ""))) ? String(currentUser.name || currentUser.username || "") : formCard.querySelector("#tor_employee").value.trim());
       const start = formCard.querySelector("#tor_start").value;
@@ -13840,11 +13930,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       formCard.querySelector("#tor_pto_hours").value = "";
       refresh();
     });
- 
+
     currentView = { refresh };
     refresh();
   }
- 
+
   function renderNotificationsView() {
     setNavActive(navNotifications);
     setActiveChip("Notifications");
@@ -14151,17 +14241,17 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     setActiveChip(mode === "tech" ? "Atlas" : "Moses");
     setWorkspace(mode === "tech" ? "Atlas" : "Moses");
     clearWorkspaceActions();
- 
+
     const root = document.createElement("div");
     root.className = "card";
- 
+
     const title = document.createElement("h3");
     title.textContent = mode === "tech" ? "Atlas" : "Moses";
- 
+
     const sub = document.createElement("div");
     sub.className = "hint";
     sub.textContent = mode === "tech" ? "Tech Support" : "Office Support";
- 
+
     const msgs = document.createElement("div");
     msgs.style.marginTop = "10px";
     msgs.style.border = "1px solid var(--line)";
@@ -14170,45 +14260,45 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     msgs.style.height = "360px";
     msgs.style.overflow = "auto";
     msgs.style.background = "#fff";
- 
+
     const row = document.createElement("div");
     row.style.display = "flex";
     row.style.gap = "8px";
     row.style.marginTop = "10px";
- 
+
     const input = document.createElement("input");
     input.className = "input";
     input.placeholder = mode === "tech" ? "Ask a tech question..." : "Ask an office question...";
- 
+
     const btn = document.createElement("button");
     btn.className = "btn btn-orange";
     btn.textContent = "Send";
- 
+
     row.appendChild(input);
     row.appendChild(btn);
- 
+
     function addMsg(who, text) {
       const wrap = document.createElement("div");
       wrap.style.marginBottom = "10px";
- 
+
       const meta = document.createElement("div");
       meta.className = "label";
       meta.style.marginBottom = "4px";
       meta.textContent = who;
- 
+
       const body = document.createElement("div");
       body.style.whiteSpace = "pre-wrap";
       body.style.fontWeight = "900";
       body.textContent = text;
- 
+
       wrap.appendChild(meta);
       wrap.appendChild(body);
       msgs.appendChild(wrap);
       msgs.scrollTop = msgs.scrollHeight;
     }
- 
+
     let conversationId = "";
- 
+
     function openAnyJobCard(job) {
       if (!job) return;
       const sourceLabel = String(job.source || "").toUpperCase();
@@ -14243,7 +14333,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         openDrawer(`Job ${full.job_number || "Details"}`, async (bd) => renderJobDetails(bd, full, { afterSave: async () => {}, afterDelete: async () => {} }));
       }).catch(e => alert(e.message || String(e)));
     }
- 
+
     function openJobResultsPanel(items) {
       const panel = document.createElement("div");
       panel.style.position = "fixed";
@@ -14331,9 +14421,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       msgs.appendChild(wrap);
       msgs.scrollTop = msgs.scrollHeight;
     }
- 
+
     async function send() {
- 
+
       const q = input.value.trim();
       if (!q) return;
       addMsg("You", q);
@@ -14354,23 +14444,23 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         addMsg(mode === "tech" ? "Atlas" : "Moses", `Error: ${e.message || e}`);
       }
     }
- 
+
     btn.addEventListener("click", send);
     input.addEventListener("keydown", (e) => {
       if (e.key === "Enter") send();
     });
- 
+
     root.appendChild(title);
     root.appendChild(sub);
     root.appendChild(msgs);
     root.appendChild(row);
- 
+
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
- 
+
     currentView = { refresh: async () => {} };
   }
- 
+
   if (loginBtn) loginBtn.addEventListener("click", handleLogin);
   if (pinBtn) pinBtn.addEventListener("click", handlePinLogin);
   if (logoutBtn) logoutBtn.addEventListener("click", handleLogout);
@@ -14379,17 +14469,17 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (pinInput) pinInput.addEventListener("keydown", (e) => { if (e.key === "Enter") handlePinLogin(); });
 
   if (headerCalendarBtn) headerCalendarBtn.addEventListener("click", () => { if (activePlatform === "doorks" || activePlatform === "sdc") showPlatformShell(activePlatform); else renderCalendarView(); });
- 
+
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
   if (navTakeoffs) navTakeoffs.addEventListener("click", renderTakeoffsView);
   if (navFormsSignOff) navFormsSignOff.addEventListener("click", renderSignOffLibraryView);
- 
+
   if (navDataCenter) {
     const small = navDataCenter.querySelector("small");
     if (small) small.textContent = "Monthly Dashboard";
   }
- 
+
   if (navJobFlow) navJobFlow.addEventListener("click", () => renderJobFlowView("Dispatch"));
   if (navToDoList) navToDoList.addEventListener("click", renderToDoListView);
   navMyAssignments.addEventListener('click',renderMyAssignments);
@@ -14401,8 +14491,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   if (navContacts) navContacts.addEventListener("click", renderContactsView);
   if (navPartsList) navPartsList.addEventListener("click", renderPartsListView);
   if (navDoorLogs) navDoorLogs.addEventListener("click", renderDoorLogsView);
-  
- 
+
+
 
 function renderDataUploadView() {
     setNavActive(navDataUpload);
@@ -15317,7 +15407,7 @@ function renderSaddlebackView() {
   if (navEmployees) navEmployees.addEventListener("click", renderEmployeesView);
   if (navDataUpload) navDataUpload.addEventListener("click", renderDataUploadView);
   if (navSaddleback) navSaddleback.addEventListener("click", renderSaddlebackView);
- 
+
   if (navAtlas) navAtlas.addEventListener("click", () => renderChatView("tech"));
   // Emergency is a priority flag, not an ongoing notification after resolution.
   // Retain old requests in history without showing an endless badge.
@@ -15331,11 +15421,11 @@ function renderSaddlebackView() {
   }
 
   if (navMoses) navMoses.addEventListener("click", () => renderChatView("office"));
- 
+
   if (navNotifications) {
     navNotifications.addEventListener("click", renderNotificationsView);
   }
- 
+
   (async () => {
     if (loginBody) loginBody.style.display = "none";
     if (formsBody) formsBody.style.display = "block";
