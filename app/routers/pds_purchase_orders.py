@@ -391,3 +391,131 @@ def delete_purchase_order(platform:str,po_id:str,request:Request):
         _write(path,remaining)
         # Do not decrement PO counters; identifiers must never be reused.
         return {'ok':True,'po_number':target.get('po_number')}
+
+# QuickBooks-style vendor/item CSV: preview first, append-only commit with
+# duplicate checks against the CURRENT saved records under the same lock.
+# This deliberately does not use the legacy /admin/upload-data-file replace path.
+class ImportBatch(BaseModel):
+    kind: str
+    rows: list[dict]
+    confirm_import: bool = False
+
+
+def _import_guard(request: Request):
+    _guard(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Office admin approval required for data imports')
+
+
+def _import_norm(value):
+    return str(value if value is not None else '').strip().casefold()
+
+
+def _import_value(row: dict, *aliases: str) -> str:
+    normalized = {re.sub(r'[^a-z0-9]', '', str(k).casefold()): v for k,v in row.items()}
+    for key in aliases:
+        result = normalized.get(re.sub(r'[^a-z0-9]', '', key.casefold()))
+        if result is not None and str(result).strip():
+            return str(result).strip()[:250]
+    return ''
+
+
+def _import_prepare(request: Request, payload: ImportBatch):
+    if payload.kind not in ('vendors', 'parts'):
+        raise HTTPException(422, 'Choose vendors or parts')
+    if not (1 <= len(payload.rows) <= 1000):
+        raise HTTPException(422, 'CSV must contain 1–1,000 records')
+    if any(not isinstance(row, dict) or len(row) > 80 or any(len(str(v)) > 3000 for v in row.values()) for row in payload.rows):
+        raise HTTPException(422, 'Invalid or oversized CSV record')
+    if payload.kind == 'vendors':
+        existing = _read(_supplier_path(request), [])
+        if not isinstance(existing, list):
+            raise HTTPException(500, 'Supplier store unavailable')
+        known = {_import_norm(item.get('name')) for item in existing if isinstance(item, dict)}
+    else:
+        from app.routers.data import _parts_path
+        path = _parts_path(request)
+        obj = _read(path, {'items': []})
+        existing = obj.get('items', []) if isinstance(obj, dict) else []
+        if not isinstance(existing, list):
+            raise HTTPException(500, 'Part catalog unavailable')
+        known = {_import_norm(item.get('part_number')) for item in existing if isinstance(item, dict)}
+    results, new_records = [], []
+    for i, row in enumerate(payload.rows, 2):
+        if payload.kind == 'vendors':
+            name = _import_value(row, 'Vendor', 'Vendor Name', 'Company Name', 'Display Name', 'Name', 'Full Name')
+            key = _import_norm(name)
+            candidate = {'name':name, 'contact':_import_value(row,'Contact','Contact Name','Primary Contact'),
+                'email':_import_value(row,'Email','Email Address','E-mail'),
+                'phone':_import_value(row,'Phone','Main Phone','Phone Number'),
+                'address':_import_value(row,'Address','Billing Address','Street','Street Address'),
+                'payment_terms':_import_value(row,'Terms','Payment Terms'),
+                'notes':'Imported from reviewed CSV'}
+            display = name
+        else:
+            sku = _import_value(row,'SKU','Item','Item Name','Product/Service','Product Service','Part Number','Name')
+            key = _import_norm(sku)
+            rawcost = _import_value(row,'Cost','Purchase Cost','Purchase Price','Supplier Rate')
+            # Treat ambiguous vendor price as purchase cost, never as customer price.
+            cost = ''
+            if rawcost:
+                try:
+                    cost = float(rawcost.replace('$','').replace(',',''))
+                    if not (0 <= cost <= 100000000): raise ValueError()
+                except ValueError:
+                    results.append({'row':i,'sku':sku,'status':'invalid','reason':'Invalid purchase cost'});continue
+            candidate={'part_number':sku,'manufacturer':_import_value(row,'Manufacturer','Brand'),
+                'description':_import_value(row,'Description','Sales Description','Purchase Description'),
+                'supplier':_import_value(row,'Preferred Vendor','Vendor','Supplier'),
+                'supplier_rate':cost,'price':'','image_url':'','product_url':''}
+            display=sku
+        if not key:
+            status='invalid';reason='Missing name or SKU'
+        elif key in known:
+            status='duplicate';reason='Already saved or repeated in this CSV'
+        else:
+            status='new';reason='';known.add(key);new_records.append(candidate)
+        results.append({'row':i, ('name' if payload.kind=='vendors' else 'sku'):display,
+                        'status':status,'reason':reason})
+    return results, new_records
+
+
+@router.post('/import/preview')
+def preview_import(payload: ImportBatch, request: Request):
+    _import_guard(request)
+    with _lock:
+        preview, new_records = _import_prepare(request, payload)
+    return {'preview':preview,'new_count':len(new_records),
+            'duplicate_count':sum(x['status']=='duplicate' for x in preview),
+            'invalid_count':sum(x['status']=='invalid' for x in preview)}
+
+
+@router.post('/import/commit')
+def commit_import(payload: ImportBatch, request: Request):
+    _import_guard(request)
+    if payload.confirm_import is not True:
+        raise HTTPException(400, 'Import requires explicit confirmation')
+    with _lock:
+        preview, to_create = _import_prepare(request, payload)
+        if any(x['status']=='invalid' for x in preview):
+            raise HTTPException(422, 'Invalid records found. Correct CSV and preview again')
+        now=datetime.now(timezone.utc).isoformat()
+        if payload.kind == 'vendors':
+            path=_supplier_path(request)
+            existing=_read(path, [])
+            records=[{'id':uuid.uuid4().hex,'created_at':now,'updated_at':now,**_supplier_clean(row)}
+                     for row in to_create]
+            if records:_write(path,existing+records)
+        else:
+            from app.routers.data import _parts_path
+            path=_parts_path(request)
+            obj=_read(path, {'items': []})
+            existing=obj.get('items',[]) if isinstance(obj,dict) else []
+            records=[{'id':uuid.uuid4().hex,**row} for row in to_create]
+            if records:
+                # Keep the complete existing catalog and its metadata.
+                data=dict(obj) if isinstance(obj,dict) else {}
+                data['items']=existing+records
+                _write(path,data)
+        return {'created':len(records), 'skipped':sum(x['status']=='duplicate' for x in preview),
+                'kind':payload.kind,'no_existing_records_changed':True}

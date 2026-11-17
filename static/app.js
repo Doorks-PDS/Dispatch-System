@@ -129,25 +129,23 @@
     const orb=document.createElement('div');orb.className='moses-orb';orb.dataset.mode='idle';orb.setAttribute('role','img');orb.setAttribute('aria-label','Moses ready');
     const orbText=document.createElement('div');orbText.style.cssText='display:grid;gap:3px';
     const orbTitle=document.createElement('strong');orbTitle.textContent='Moses is ready';
-    const orbCaption=document.createElement('small');orbCaption.textContent='Ask naturally · Moses can prepare actions for approval';
+    const orbCaption=document.createElement('small');orbCaption.textContent='Ready to help';
     orbText.append(orbTitle,orbCaption);orbRow.append(orb,orbText);
     const setMosesMode=(mode)=>{orb.dataset.mode=mode;const label={idle:'Moses is ready',thinking:'Moses is working…',listening:'Listening on this device…',speaking:'Moses is responding…'}[mode]||'Moses is ready';orbTitle.textContent=label;orb.setAttribute('aria-label',label)};
-    const help=document.createElement('p');help.className='hint moses-help';help.textContent='One conversation. Tell Moses what outcome you want; review any actions before they change records.';
+    const help=document.createElement('p');help.className='hint moses-help';help.textContent='';
     const agentStatus=document.createElement('small');agentStatus.className='moses-agent-status';
     agentStatus.setAttribute('role','status');
     agentStatus.style.cssText='display:block;color:#5a6873;font-size:12px;margin:4px 0 10px';
-    agentStatus.textContent='Checking enhanced Moses availability…';
+    agentStatus.textContent='';agentStatus.hidden=true;
     const checkAgentReadiness=async()=>{
       const workspace=document.body.dataset.platform||'pds';
       try {
         const r=await fetchJSON('/doorks-assistant/agent-readiness');
         // Guard against showing a stale result after switching workspaces.
         if(document.body.dataset.platform!==workspace)return;
-        agentStatus.textContent=r.agent_enabled ?
-          (r.ready_for_live_check ? 'Enhanced Moses enabled · Live AI validation still required.' : 'Enhanced Moses enabled, but configuration is incomplete.') :
-          'Enhanced Moses is OFF for '+workspace.toUpperCase()+'. Basic record lookup only; no AI business tools.';
+        agentStatus.textContent=r.ready_for_live_check?'':(r.agent_enabled?'AI setup required':'AI tools unavailable');agentStatus.hidden=!agentStatus.textContent;
       } catch(e) {
-        agentStatus.textContent='Enhanced Moses status unavailable for this account.';
+        agentStatus.textContent='';agentStatus.hidden=true;
       }
     };
     const history=document.createElement('div');history.className='moses-chat-history';history.setAttribute('role','log');history.setAttribute('aria-label','Moses conversation');history.setAttribute('aria-live','polite');history.style.cssText='min-height:180px;max-height:min(42vh,420px);overflow:auto;display:grid;gap:9px;margin:12px 0;padding:4px 2px';
@@ -730,7 +728,7 @@
   const navMyAssignments = document.createElement('button');
   navMyAssignments.className = 'navbtn';
   navMyAssignments.id = 'navMyAssignments';
-  navMyAssignments.innerHTML = '<span>To-Do List</span><small>My jobs, leads &amp; office tasks</small>';
+  navMyAssignments.innerHTML = '<span>To-Do List</span><small>My Scheduled Tasks</small>';
   if (navJobFlow && navJobFlow.parentElement) navJobFlow.parentElement.appendChild(navMyAssignments);
 
   if (!navAllJobs) {
@@ -1842,6 +1840,7 @@
     function open(item=null,type='Estimate'){
       editing=item||null;viewing=null;q('wedDetails').hidden=true;q('wedEditor').hidden=false;form.reset();f('custom_terms').hidden=true;f('custom_terms').value='';q('wedLines').replaceChildren();if(platform==='doorks'){q('wedTrip').checked=false;q('wedFuel').checked=false;q('wedLaborType').value='';q('wedLaborHours').value='1';q('wedChargeStatus').textContent='';}
       const data=item||{};for(const key of ['document_type','document_number','date','terms','customer','address','work_order_number','po_number','ship_to','tax_rate','notes','paid','prepared_by'])if(data[key]!=null&&f(key))f(key).value=data[key];
+      if(!item&&platform==='pds'&&window.__pdsJobPODraft){const job=window.__pdsJobPODraft;form.elements.customer.value=job.customer;form.elements.work_order_number.value=job.job_number;form.elements.notes.value=job.description;customerSearch.value=job.customer;window.__pdsJobPODraft=null;}
       if(!item&&platform==='doorks'&&window.__doorksJobDraft){const job=window.__doorksJobDraft;for(const [key,value] of Object.entries({customer:job.customer,address:job.address,work_order_number:job.job_number,notes:job.description}))if(f(key))f(key).value=value;window.__doorksJobDraft=null;}
       if(!item&&window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type===(type==='Invoice'?'invoice':'estimate')){f('notes').value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}
       if(!item&&platform==='doorks'&&!f('ship_to').value.trim()){
@@ -6079,11 +6078,11 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
     const officeNotes = document.createElement("div");
     officeNotes.style.marginTop = "10px";
-    officeNotes.innerHTML = `<div class="label">Office Notes</div><div class="field" style="white-space:pre-wrap;">${job.office_notes || ""}</div>`;
+    officeNotes.className="pds-highlight-notes";officeNotes.style.cssText="padding:13px 15px;border:1.5px solid #f58220;border-left:4px solid #f58220;border-radius:12px;background:#fffaf5;margin:12px 0";officeNotes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Office Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.office_notes || "—")}</div>`;
  
     const notes = document.createElement("div");
     notes.style.marginTop = "10px";
-    notes.innerHTML = `<div class="label">Job Notes</div><div class="field" style="white-space:pre-wrap;">${job.job_notes || ""}</div>`;
+    notes.className="pds-highlight-notes";notes.style.cssText="padding:13px 15px;border:1.5px solid #f58220;border-left:4px solid #f58220;border-radius:12px;background:#fffaf5;margin:12px 0";notes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Job Description</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.description || job.job_notes || "—")}</div>`;
 
     const audit = document.createElement("div");
     audit.style.marginTop = "12px";
@@ -6220,6 +6219,15 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }
  
 
+    if (job.kind === "dispatch" && job.id && ['office','office_admin','admin'].includes(String(currentUser?.role||''))) {
+      const poButton=document.createElement('button');poButton.type='button';poButton.className='btn';poButton.textContent='Purchase Order';
+      poButton.onclick=()=>{
+        window.__pdsJobPODraft={customer:String(job.customer||''),job_number:String(job.job_number||''),description:String(job.job_notes||job.description||'')};
+        renderUnifiedPurchaseOrders('pds',true,()=>renderAllJobsView());
+      };
+      secondaryActions.appendChild(poButton);
+    }
+
     if (["Quote", "Complete/Quote"].includes(String(job.status || ""))) {
       const qt = document.createElement("button");
       qt.className = "btn";
@@ -6242,6 +6250,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
     const ticketHeading=document.createElement('h3');ticketHeading.textContent='Job & contact information';
     ticketInfo.append(ticketHeading,fields);
     card.appendChild(ticketInfo);
+    // High-visibility PDS job context belongs before scheduling.
+    card.append(notes, officeNotes);
     // Compact office scheduling plan: intentionally separate from the job date.
     // An unfinished visit plan does not move the calendar or assign a To-Do.
     if (job.id && !String(job.source||'').toUpperCase().startsWith('LEGACY') &&
@@ -6299,7 +6309,9 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }
     const noteHeading=document.createElement('h3');noteHeading.className='pds-office-section-label';noteHeading.textContent='Notes & history';
     card.appendChild(noteHeading);
-    card.appendChild(officeNotes);
+    if (job.description && job.job_notes && String(job.description).trim()!==String(job.job_notes).trim()) {
+      const separateNotes=document.createElement('div');separateNotes.className='card';separateNotes.innerHTML=`<div class="label">Additional Job Notes</div><div class="field" style="white-space:pre-wrap">${escapeHtml(job.job_notes)}</div>`;card.append(separateNotes);
+    }
     if (job.parts_order && Object.values(job.parts_order).some(v => String(v || "").trim())) {
       const poCard = document.createElement("div");
       poCard.style.marginTop = "10px";
@@ -6310,9 +6322,28 @@ Expected Arrival: ${job.parts_order.expected_arrival_date || ""}
 Notes: ${job.parts_order.notes || ""}</div>`;
       card.appendChild(poCard);
     }
-    card.appendChild(notes);
     if (createdBy || modifiedBy) card.appendChild(audit);
     card.appendChild(actions);
+    // Linked PDS purchase orders: read only until the user opens the PO editor.
+    if(job.kind==='dispatch' && String(job.job_number||'').trim()){
+      const related=document.createElement('section');related.className='pds-office-group';
+      const heading=document.createElement('h3');heading.textContent='Linked Purchase Orders';
+      const links=document.createElement('div');links.className='hint';links.textContent='Checking saved purchase orders…';
+      related.append(heading,links);card.append(related);
+      fetchJSON('/pds-purchase-orders').then(response=>{
+        if(!related.isConnected)return;
+        const jobNumber=String(job.job_number||'').trim().toLowerCase();
+        const matching=(response.items||[]).filter(po=>String(po.work_order||po.work_order_number||'').trim().toLowerCase()===jobNumber);
+        links.replaceChildren();
+        if(!matching.length){links.textContent='No purchase orders linked to this job.';return;}
+        for(const po of matching){
+          const link=document.createElement('button');link.className='btn';link.type='button';
+          link.textContent=[po.po_number,po.vendor,po.status].filter(Boolean).join(' · ');
+          link.onclick=()=>{window.__pdsPOFocusJob=job.job_number;renderUnifiedPurchaseOrders('pds',false,()=>renderAllJobsView());};
+          links.append(link);
+        }
+      }).catch(()=>{if(related.isConnected)links.textContent='PO links unavailable. Use Business Hub → Purchase Orders.';});
+    }
     card.appendChild(renderAttachmentSection(job.kind === "sales_lead" ? "Lead Attachments" : "Job Attachments", job.attachments || [], {
       urlBuilder: (file) => buildJobAttachmentUrl(job.id, file.filename),
     }));
@@ -7783,7 +7814,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const heading = document.createElement('div');
     heading.className = 'card';
     const h = document.createElement('h3');
-    h.textContent = 'My Jobs & Sales Leads';
+    h.textContent = 'To-Do List';
     const hint = document.createElement('p');
     hint.className = 'hint';
     hint.textContent = 'Assignments are tentative and may change. All PDS jobs remain on the shared calendar.';
@@ -7796,7 +7827,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     clear.className = 'btn';
     clear.textContent = 'All Dates';
     clear.onclick = () => { dateField.value = ''; refresh(); };
-    heading.append(h,hint,dateField,clear);
+    heading.append(h,dateField,clear);
     root.append(heading);
     const list = document.createElement('div');
     list.style.cssText = 'display:grid;gap:10px;margin:12px 0';
@@ -7814,7 +7845,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       scheduler.textContent='▦ Weekly Dispatch Scheduler';scheduler.style.marginBottom='12px';
       scheduler.onclick=()=>renderPdsWeekScheduler();
       const officeList=document.createElement('div');officeList.style.cssText='display:grid;gap:10px';
-      officeTasks.append(officeHeader,officeNote,scheduler,officeList);root.append(officeTasks);
+      officeTasks.append(officeHeader,scheduler,officeList);root.append(officeTasks);
       officeTasks._refresh=async()=>{
         officeList.replaceChildren();
         try{
@@ -7993,8 +8024,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const header = document.createElement("div");
     header.className = "card";
     header.innerHTML = `
-      <h3 style="margin:0;">Assigned Quote To-Do List</h3>
-      <div class="hint" style="margin-top:6px;">Assigned jobs and sales leads currently in Quote or Complete/Quote status.</div>
+      <h3 style="margin:0;">To-Do List</h3>
     `;
     root.appendChild(header);
     if((document.body.dataset.platform||'')==='pds'){
@@ -8036,7 +8066,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               <h3 style="margin:0;">${escapeHtml(assignedTo)}</h3>
               <span class="badge" style="display:inline-flex;">${items.length}</span>
             </div>
-            <div class="hint" style="margin-top:4px;">Assigned quote tasks</div>
+
           `;
 
           const rows = document.createElement("div");
@@ -13362,6 +13392,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       if(!shown.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching purchase orders.';list.append(empty);}};
     const reload=async()=>{try{const response=await fetchJSON(endpoint);orders=response.items||[];draw();}catch(e){q('upoList').textContent='Unable to load POs: '+(e.message||e);}};
     q('upoSearch').oninput=draw;
+    if(isPds&&window.__pdsPOFocusJob){q('upoSearch').value=String(window.__pdsPOFocusJob);window.__pdsPOFocusJob=null;}
     form.onsubmit=async event=>{event.preventDefault();const button=q('upoSave');button.disabled=true;const msg=q('upoMessage');msg.textContent='Saving…';try{
       const lines=getLines().filter(x=>x.item||x.description);if(!lines.length)throw Error('Add at least one line item');if(![q('upoTax').value,q('upoShipping').value].every(x=>Number.isFinite(Number(x))&&Number(x)>=0))throw Error('Tax and shipping must be valid nonnegative amounts');if(lines.some(x=>!Number.isFinite(x.quantity)||x.quantity<=0||!Number.isFinite(x.rate)||x.rate<0))throw Error('Each line needs a positive quantity and valid rate');
       const raw=JSON.stringify(lines);if(raw.length>3900)throw Error('Too many line-item details for this PO record. Shorten descriptions or split the PO.');
@@ -14383,7 +14414,16 @@ function renderDataUploadView() {
     const card = document.createElement("div");
     card.className = "card";
     card.innerHTML = `
-      <h3>Admin Data Import</h3>
+      <h3>Data Import</h3>
+      <div class="card" style="margin:12px 0;border:1px solid #d5e5da;padding:16px">
+        <h3 style="margin-top:0">QuickBooks CSV — Vendors &amp; Parts</h3>
+        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Vendors / Suppliers</option><option value="parts">Parts / Items</option></select></label>
+        <input class="input" id="qb_import_file" type="file" accept=".csv,text/csv" style="margin-top:10px;width:100%" />
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn btn-orange" type="button" id="qb_preview">Preview &amp; Check Duplicates</button><button class="btn" type="button" id="qb_import_commit" disabled>Import New Records</button></div>
+        <p class="hint" id="qb_import_status" role="status">Nothing is changed during preview. Existing records will never be overwritten.</p>
+        <div id="qb_import_preview" style="max-height:320px;overflow:auto"></div>
+      </div>
+      <details style="margin-top:12px"><summary style="font-weight:800;cursor:pointer">Legacy CSV Replacement (existing tools)</summary>
       <div class="hint">Upload only billable_time.csv or tech_notes.csv to the live Render disk.</div>
       <div class="grid2" style="margin-top:12px;">
         <div>
@@ -14412,9 +14452,9 @@ function renderDataUploadView() {
         </div>
       </div>
       <div class="card" style="margin-top:14px; padding:14px;">
-        <div style="font-weight:900; margin-bottom:6px;">How to use</div>
+        <div style="font-weight:900; margin-bottom:6px;">Legacy overwrite warning</div>
         <div class="hint">billable_time.csv and tech_notes.csv overwrite those live files directly. customers.csv and contacts.csv are converted into customers_db.json and contacts_db.json on the live Render disk. Restart the Render service once after upload to refresh references.</div>
-      </div>
+      </div></details>
     `;
 
     const wireUploader = (inputId, buttonId, statusId, expectedName) => {
@@ -14447,6 +14487,56 @@ function renderDataUploadView() {
     wireUploader("#upload_customers", "#upload_customers_btn", "#upload_customers_status", "customers.csv");
     wireUploader("#upload_contacts", "#upload_contacts_btn", "#upload_contacts_status", "contacts.csv");
 
+    // QuickBooks-style exports can have quoted commas/newlines. Preview is server-checked,
+    // and the import endpoint rechecks duplicates within the transaction on commit.
+    const parseImportCSV=(text)=>{
+      const rows=[];let row=[],cell='',quoted=false;
+      for(let i=0;i<text.length;i++){
+        const ch=text[i];
+        if(ch==='"'){if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;}
+        else if(ch===','&&!quoted){row.push(cell);cell='';}
+        else if((ch==='\n'||ch==='\r')&&!quoted){if(ch==='\r'&&text[i+1]==='\n')i++;row.push(cell);cell='';if(row.some(v=>v.trim()))rows.push(row);row=[];}
+        else cell+=ch;
+      }
+      if(quoted)throw Error('CSV has an unmatched quote.');
+      row.push(cell);if(row.some(v=>v.trim()))rows.push(row);
+      if(rows.length<2)throw Error('CSV needs a header and at least one record.');
+      const headers=rows.shift().map(h=>h.replace(/^\ufeff/,'').trim());
+      if(rows.length>1000)throw Error('Import at most 1,000 rows per batch.');
+      return rows.map(row=>Object.fromEntries(headers.map((h,i)=>[h,(row[i]||'').trim()])));
+    };
+    const qbKind=card.querySelector('#qb_import_kind'),qbFile=card.querySelector('#qb_import_file');
+    const qbPreview=card.querySelector('#qb_preview'),qbCommit=card.querySelector('#qb_import_commit');
+    const qbStatus=card.querySelector('#qb_import_status'),qbPreviewHost=card.querySelector('#qb_import_preview');
+    let checked=null;
+    const resetPreview=()=>{checked=null;qbCommit.disabled=true;qbPreviewHost.replaceChildren();};
+    qbFile.onchange=resetPreview;qbKind.onchange=resetPreview;
+    qbPreview.onclick=async()=>{
+      resetPreview();const file=qbFile.files?.[0];if(!file){qbStatus.textContent='Choose a QuickBooks CSV.';return;}
+      if(file.size>1500000){qbStatus.textContent='CSV is too large (1.5 MB maximum).';return;}
+      qbPreview.disabled=true;qbStatus.textContent='Checking current records…';
+      try{
+        const rows=parseImportCSV(await file.text());
+        const response=await fetchJSON('/pds-purchase-orders/import/preview',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:qbKind.value,rows})});
+        checked={kind:qbKind.value,rows};qbStatus.textContent=`${response.new_count} new · ${response.duplicate_count} duplicates · ${response.invalid_count} invalid. No changes made.`;
+        for(const item of (response.preview||[]).slice(0,150)){
+          const line=document.createElement('div');line.className='hint';line.style.cssText='padding:6px;border-bottom:1px solid #eee';
+          line.textContent=`Row ${item.row}: ${item.name||item.sku||'(blank)'} — ${item.status}${item.reason?' · '+item.reason:''}`;qbPreviewHost.append(line);
+        }
+        qbCommit.disabled=!response.new_count||!!response.invalid_count;
+        if(response.invalid_count)qbStatus.textContent+=' Correct the CSV and preview again before importing.';
+      }catch(e){qbStatus.textContent='Preview failed: '+(e.message||e);}
+      finally{qbPreview.disabled=false;}
+    };
+    qbCommit.onclick=async()=>{
+      if(!checked)return;
+      if(!confirm('Import only NEW '+checked.kind+'? Existing records are not overwritten.'))return;
+      qbCommit.disabled=true;qbStatus.textContent='Importing verified new records…';
+      try{const response=await fetchJSON('/pds-purchase-orders/import/commit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...checked,confirm_import:true})});
+        qbStatus.textContent=`Saved ${response.created} new ${checked.kind}. Skipped ${response.skipped} existing records. No existing records were changed.`;
+        checked=null;
+      }catch(e){qbStatus.textContent='Import not confirmed: '+(e.message||e)+'. Re-preview current records before trying again.';}
+    };
     root.appendChild(card);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);

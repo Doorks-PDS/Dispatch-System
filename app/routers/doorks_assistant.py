@@ -1182,8 +1182,20 @@ def chat(payload:Message,request:Request):
                 logging.getLogger(__name__).error(
                     'Moses live conversation failed workspace=%s exception_type=%s',
                     platform, type(exc).__name__)
-                return {'answer': ('Moses could not finish the live AI request. No completion is confirmed. '
-                                   'Check saved drafts or approvals before retrying.'),
+                # Recover only SDK schema validation, never make unsafe writes.
+                if type(exc).__name__ == 'ValidationError' and type(exc).__module__.startswith('pydantic'):
+                    try:
+                        details=exc.errors(include_input=False,include_url=False)
+                        summary=[{'type':v.get('type'),'loc':v.get('loc')} for v in details[:4]]
+                        logging.getLogger(__name__).error('Moses tool schema validation: %s',summary)
+                        from app.services.moses_agent import read_only_recovery
+                        safe_answer=read_only_recovery(request,text,history)
+                        return {'answer':safe_answer,'workspace':platform,'matches':[],'navigation':[],
+                                'agent_connected':True,'agent_mode':'read_only_recovery',
+                                'action_proposals':[],'document_proposals':[]}
+                    except Exception as recovery_error:
+                        logging.getLogger(__name__).error('Moses read-only recovery failed exception_type=%s',type(recovery_error).__name__)
+                return {'answer': 'Moses could not connect to the AI service. No changes were made.',
                         'workspace': platform, 'matches': [], 'navigation': [],
                         'agent_connected': False, 'action_proposals': [], 'document_proposals': []}
             return {'answer': natural_answer, 'workspace': platform,
