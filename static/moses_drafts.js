@@ -44,9 +44,9 @@ async function render(){
    const all=h('button','All drafts','btn');all.onclick=()=>{focusJobId='';render()};body.append(all);
    const selected=rows.filter(item=>String(item.job_id)===focusJobId);
    if(!selected.length){
-     const notice=h('p','No saved review for this job.');body.append(notice);
-     const prepareOne=h('button','Prepare quote review','btn btn-orange');
-     prepareOne.onclick=async()=>{prepareOne.disabled=true;try{await request('/prepare-job','POST',{record_id:focusJobId});await render()}catch(e){announce(e.message);prepareOne.disabled=false}};
+     const notice=h('p','No saved review for this job.');body.append(notice);const regular=h('button','Open Estimate Generator','btn btn-orange');regular.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-standard-estimator',{detail:{job_id:focusJobId}}));body.append(regular);
+     const prepareOne=h('button','Draft Estimate','btn btn-orange');
+     prepareOne.onclick=async()=>{prepareOne.disabled=true;try{await request('/prepare-job','POST',{record_id:focusJobId});await render()}catch(e){announce('No eligible Moses review: '+e.message+'. Opening the standard estimator.');document.dispatchEvent(new CustomEvent('moses-open-pds-standard-estimator',{detail:{job_id:focusJobId}}));prepareOne.disabled=false}};
      body.append(prepareOne);
      // One targeted preparation attempt per explicit click; no background retries.
      if(prepareIfMissing){prepareIfMissing=false;prepareOne.click()}
@@ -270,7 +270,7 @@ function openEditor(original){
   if(item.state==='pending_review'&&(item.scope!==original.scope||item.parts_review!==original.parts_review||item.freight_review!==original.freight_review||item.review_note!==original.review_note||JSON.stringify(item.selected_parts)!==JSON.stringify(original.selected_parts||[]))){
     const saved=await request('/'+encodeURIComponent(item.id),'PUT',{version:item.version,scope:item.scope,parts_review:item.parts_review,freight_review:item.freight_review,review_note:item.review_note,selected_parts:item.selected_parts});Object.assign(item,saved.item);
   }
-  const reply=await request('/'+encodeURIComponent(item.id)+'/decide','POST',{version:item.version,approve:approved});result.textContent=approved?'Approved for estimator. No document issued or emailed.':'Draft declined and retained for audit.';Object.assign(item,reply.item);backdrop.remove();await render();
+  const reply=await request('/'+encodeURIComponent(item.id)+'/decide','POST',{version:item.version,approve:approved});result.textContent=approved?'Approved for estimator. No document issued or emailed.':'Draft declined and retained for audit.';Object.assign(item,reply.item);backdrop.remove();await render();if(approved&&reply.item?.state==='ready_for_estimator'){document.dispatchEvent(new CustomEvent('moses-open-pds-estimator',{detail:{job_id:reply.item.job_id,draft_id:reply.item.id}}))}
  }catch(e){result.textContent=e.message}finally{busy(false)}};
  actions.append(save,approve,decline);
  const reopen=h('button','Reopen','btn');reopen.onclick=async()=>{reopen.disabled=true;try{await request('/'+encodeURIComponent(item.id)+'/reopen','POST',{version:item.version});backdrop.remove();await render()}catch(e){result.textContent=e.message}finally{reopen.disabled=false}};

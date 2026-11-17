@@ -463,10 +463,11 @@
     const followRefresh=document.createElement('button');followRefresh.type='button';followRefresh.className='btn';followRefresh.textContent='Refresh verified items';followPanel.append(followRefresh);
     const followResults=document.createElement('div');followResults.style.cssText='display:grid;gap:8px';followPanel.append(followResults);
     let followBusy=false;
+    let followGroupHost=followResults;
     const followCard=(heading,description)=>{
-      const card=document.createElement('article');card.style.cssText='display:grid;gap:6px;padding:11px;border:1px solid #e0e4e8;border-radius:10px';
+      const card=document.createElement('article');card.style.cssText='display:grid;gap:6px;padding:12px;border:1px solid #e0e4e8;border-left:4px solid #2d7b5b;border-radius:10px;background:#fff;overflow-wrap:anywhere';
       const title=document.createElement('strong');title.textContent=heading;const detail=document.createElement('small');detail.textContent=description;
-      card.append(title,detail);followResults.append(card);return card;
+      card.append(title,detail);followGroupHost.append(card);return card;
     };
     const followLoad=async()=>{
       if(followBusy)return;followBusy=true;followRefresh.disabled=true;followResults.replaceChildren();
@@ -479,8 +480,11 @@
         const approvals=data.approvals||{},delivery=data.delivery||{},work=data.work||{},drafts=data.drafts||{};
         followStatus.textContent='Read-only · '+workspace.toUpperCase()+' · No actions performed';
         for(const [title,section] of [['Pending approvals',approvals],['Moses saved drafts',drafts],['Email delivery exceptions',delivery],['PDS job follow-ups',work]]){
-          const head=document.createElement('div');head.style.cssText='font-weight:700;margin-top:7px';
-          head.textContent=title+' · '+(section.available?String(section.count??0):'Unavailable');followResults.append(head);
+          const group=document.createElement('details');group.style.cssText='border:1px solid #dbe3e8;border-radius:12px;background:white;overflow:hidden';
+          const head=document.createElement('summary');head.style.cssText='font-weight:750;padding:12px 14px;cursor:pointer;background:#f4f8f7';
+          head.textContent=title+' ('+(section.available?String(section.count??0):'Unavailable')+')';
+          const entries=document.createElement('div');entries.style.cssText='display:grid;gap:9px;padding:12px;max-height:360px;overflow:auto';
+          group.append(head,entries);followResults.append(group);followGroupHost=entries;
           if(!section.available){followCard('Not verified',section.note||'Saved source unavailable');continue;}
           if(!section.items?.length){followCard('No flagged items',section.note||'No matching saved records');continue;}
           for(const item of section.items){
@@ -5930,6 +5934,18 @@ function renderAttachmentSection(titleText, items, options = {}) {
       if(topDrawer)topDrawer.style.zIndex='11250';
     } catch (error) { alert('Could not open PDS ticket: ' + (error.message || error)); }
   });
+  document.addEventListener('moses-open-pds-standard-estimator', async event => {
+    if(activePlatform!=='pds'||currentUser?.role!=='office_admin')return;
+    const jobId=String(event.detail?.job_id||'');
+    if(!/^[a-zA-Z0-9_-]{1,80}$/.test(jobId))return;
+    try{
+      const job=await apiGetJob(jobId);
+      if(String(job?.id)!==jobId)throw Error('Saved PDS job not verified');
+      await openEstimateInvoiceDrawer(job,'estimate');
+      const top=[...document.querySelectorAll('.overlay')].at(-1);
+      if(top)top.style.zIndex='11360';
+    }catch(error){alert('Estimate generator unavailable: '+(error.message||error))}
+  });
   document.addEventListener('moses-open-pds-estimator', async event => {
     if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
     const jobId = String(event.detail?.job_id || '');
@@ -5949,7 +5965,20 @@ function renderAttachmentSection(titleText, items, options = {}) {
         helperPrefill: {autoFill: true, sourceIndex, tripQty: 1, fuelQty: 1},
         mosesDraft: handoff
       });
-    } catch (error) { alert('Could not open verified PDS estimator: ' + (error.message || error)); }
+      const top=[...document.querySelectorAll('.overlay')].at(-1);
+      if(top)top.style.zIndex='11360';
+    } catch (error) {
+      // Do not approve stale drafts or pass an unverified handoff into the generator.
+      const reason=error.message||String(error);
+      if(window.confirm('This Moses draft cannot be verified for estimator handoff: '+reason+'\nOpen the regular estimate generator instead?')){
+        try{
+          const current=await apiGetJob(jobId);
+          await openEstimateInvoiceDrawer(current,'estimate');
+          const top=[...document.querySelectorAll('.overlay')].at(-1);
+          if(top)top.style.zIndex='11360';
+        }catch(next){alert('Estimate generator unavailable: '+(next.message||next))}
+      }
+    }
   });
 
   function renderJobDetails(container, job, ctx) {
@@ -7973,7 +8002,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
               const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Open the saved draft or estimator for this job';
               const isInvoice=heading==='Office Invoices To Review';
-              assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else if(typeof window.openMosesDrafts==='function'){window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true})}else{alert('Quote review is unavailable. Refresh the page.')}};
+              assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else{await openPdsSingleQuoteReview(job)}};
               const statusChip=statusPill(String(job.status||'Dispatch'));statusChip.style.marginLeft='10px';statusChip.style.verticalAlign='middle';name.style.display='inline-block';
               const headingRow=document.createElement('div');headingRow.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap';headingRow.append(name,statusChip);buttons.append(open,assist);card.append(headingRow,info,buttons);officeList.append(card);
             }
@@ -8315,11 +8344,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
   // These are deterministic, record-backed office workflows, not speculative chat requests.
   async function openPdsSingleQuoteReview(job){
-    if(!job?.id){alert('Save the job before preparing a review.');return;}
-    if(typeof window.openMosesDrafts==='function'){
-      window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true});return;
-    }
-    alert('Quote drafts are still loading. Refresh the page and retry.');
+    if(!job?.id){alert('Save the job before preparing an estimate.');return;}
+    try{
+      // Draft service failure must not block the existing PDS estimate generator.
+      const saved=await fetchJSON('/moses-drafts').catch(()=>({items:[]}));
+      const draft=(saved.items||[]).find(item=>String(item.job_id)===String(job.id));
+      if(draft && typeof window.openMosesDrafts==='function'){
+        window.openMosesDrafts({jobId:String(job.id)});return;
+      }
+      // A saved recommendation is NOT required to use the standard PDS estimator.
+      // Draft approval is never inferred when no verified Moses ticket exists.
+      const full=await apiGetJob(job.id);
+      await openEstimateInvoiceDrawer(full,'estimate');
+      const top=[...document.querySelectorAll('.overlay')].at(-1);
+      if(top)top.style.zIndex='11260';
+    }catch(e){alert('Unable to open estimate: '+(e.message||e))}
   }
 
   async function openPdsPartReview(job){
@@ -8390,7 +8429,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const detail=document.createElement('div');detail.className='hint';detail.textContent=['#'+(job.job_number||''),job.status,job.quote_assigned_to?'Assigned: '+job.quote_assigned_to:'Unassigned',job.address].filter(Boolean).join(' · ');meta.append(name,detail);
         const controls=document.createElement('div');controls.style.cssText='display:flex;gap:7px;flex-wrap:wrap';
         const view=document.createElement('button');view.className='btn';view.textContent='View Job';view.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',drawer=>{const node=document.createElement('div');drawer.append(node);renderJobDetails(node,full,{})});const overlay=[...document.querySelectorAll('.overlay')].at(-1);if(overlay)overlay.style.zIndex='11250'}catch(e){alert('Could not open job: '+(e.message||e))}};controls.append(view);
-        const action=document.createElement('button');action.className='btn';action.textContent=active==='quotes'?'Review Quote':active==='invoices'?'Draft Invoice':'Review Parts';
+        const action=document.createElement('button');action.className='btn';action.textContent=active==='quotes'?'Draft Estimate':active==='invoices'?'Draft Invoice':'Review Parts';
         action.onclick=async()=>{
           if(active==='invoices'){try{await openEstimateInvoiceDrawer(await apiGetJob(job.id),'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}
           else if(active==='quotes'){await openPdsSingleQuoteReview(job)}
@@ -8672,7 +8711,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       batchBtn.textContent='✦ Moses';batchBtn.setAttribute('aria-label','Moses — Job Flow assistant');
       batchBtn.title='Moses: quotes, invoices, parts and assignments';
       batchBtn.style.cssText='min-width:98px;height:40px;border-radius:11px;font-size:14px;padding:0 12px';
-      batchBtn.onclick=()=>openPdsJobFlowWorkQueue();
+      batchBtn.title='Open quotes, invoices and parts requiring office action';batchBtn.style.cssText='background:linear-gradient(135deg,#f97316,#e55d16);box-shadow:0 5px 16px #f9731633;border-radius:12px;font-weight:800;letter-spacing:.01em';batchBtn.onclick=()=>openPdsJobFlowWorkQueue();
       batchBar.append(batchBtn);root.appendChild(batchBar);
     }
     root.appendChild(tabsRow);
@@ -13332,14 +13371,13 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     btnPO.innerHTML = `<span>Purchase Orders</span>`;
     tabs.append(btnGen, btnEst, btnInv, btnPO);
 
-    const hubIntro=document.createElement('div');hubIntro.className='card pds-office-business-hub';hubIntro.innerHTML='<h2>Business Hub</h2><p class="hint">Manage estimates, invoices, purchasing, documents, customers and suppliers from one workspace.</p><div id="pdsBusinessCards"></div>';
+    const hubIntro=document.createElement('div');hubIntro.className='card pds-office-business-hub';hubIntro.innerHTML='<h2>Business Hub</h2><div id="pdsBusinessCards"></div>';
     root.append(hubIntro);
     makeHubCards(hubIntro.querySelector('#pdsBusinessCards'),[
       {icon:'📝',label:'Generator',description:'Create estimates and invoices.',open:()=>btnGen.click()},
       {icon:'📋',label:'Estimates',description:'Search and manage saved estimates.',open:()=>btnEst.click()},
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
-      {icon:'💳',label:'Supplier Bills & Payments',description:'Review supplier bills and manual payments through the existing accounting ledger.',open:()=>renderManualAccountingLedger('pds','bills')},
       {icon:'📎',label:'Document Library & AI Upload',description:'Upload receipts, packing slips, bills and statements separately.',open:()=>renderDocumentVault('pds','',()=>renderEstimatePage())},
       {icon:'👥',label:'Customers & Contacts',description:'Open the existing PDS customer and contact database.',open:()=>renderCustomersView()},
       {icon:'🏢',label:'Suppliers',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()},

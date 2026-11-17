@@ -14,7 +14,8 @@ def test_job_flow_button_opens_office_queue_not_failed_ai_chat():
 
 
 def test_todo_actions_use_existing_workflows_and_keep_job_id():
-    assert "window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true})" in APP
+    assert "window.openMosesDrafts({jobId:String(job.id)})" in APP
+    assert "await openEstimateInvoiceDrawer(full,'estimate')" in APP
     assert "await openEstimateInvoiceDrawer(full,'invoice')" in APP
     assert "Review this job for an estimate: " not in APP
 
