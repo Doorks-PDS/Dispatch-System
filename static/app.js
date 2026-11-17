@@ -7973,7 +7973,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
               const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Ask Moses to review this saved job';
               const isInvoice=heading==='Office Invoices To Review';
-              assist.onclick=()=>{const launch=document.getElementById('workspaceMosesBubble');const panel=document.getElementById('workspaceMosesPanel');if(panel?.hidden)launch?.click();const input=document.getElementById('mosesChatMessage');if(!input)return;input.value=(isInvoice?'Review this job for invoicing: ':'Review this job for an estimate: ')+(job.job_number||job.customer||'')+'. Check the saved work and identify the next steps. Prepare a draft if supported; do not issue or send anything without approval.';input.focus();};
+              assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else if(typeof window.openMosesDrafts==='function'){window.openMosesDrafts({jobId:String(job.id)})}else{alert('Quote review is unavailable. Refresh the page.')}};
               buttons.append(open,assist);card.append(name,info,buttons);officeList.append(card);
             }
           }
@@ -8312,6 +8312,53 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     });
   }
 
+  // Office work queue: uses saved PDS jobs and the existing review/estimator tools.
+  // No LLM call, automatic email, status change or staff assignment is performed here.
+  async function openPdsJobFlowWorkQueue(){
+    if(activePlatform!=='pds'||currentUser?.role!=='office_admin')return;
+    const previous=document.getElementById('pdsMosesWorkQueue');if(previous)previous.remove();
+    const veil=document.createElement('div');veil.id='pdsMosesWorkQueue';veil.style.cssText='position:fixed;inset:0;z-index:11090;background:#101d2b70;display:flex;align-items:center;justify-content:center;padding:12px';
+    const dialog=document.createElement('section');dialog.style.cssText='background:#fff;border:1px solid #dce3e9;border-radius:16px;width:min(1100px,100%);height:min(88vh,900px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 44px #0004';
+    const head=document.createElement('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid #e3e8ed';
+    const title=document.createElement('strong');title.textContent='Moses · Job Flow';
+    const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>veil.remove();head.append(title,close);
+    const tabs=document.createElement('div');tabs.style.cssText='display:flex;gap:7px;padding:12px 18px;flex-wrap:wrap';
+    const body=document.createElement('div');body.style.cssText='padding:4px 18px 22px;overflow:auto;flex:1;min-height:0;display:grid;align-content:start;gap:8px';
+    dialog.append(head,tabs,body);veil.append(dialog);document.body.append(veil);
+    veil.addEventListener('click',e=>{if(e.target===veil)veil.remove()});
+    const kinds=[['quotes','Quotes'],['invoices','Invoices'],['parts','Parts / Pricing']];
+    let active='quotes';let jobs=[];
+    const field=document.createElement('input');field.className='input';field.placeholder='Search customer or job #';field.style.cssText='width:100%;margin-bottom:8px;box-sizing:border-box';
+    async function show(){
+      tabs.replaceChildren();body.replaceChildren();body.append(field);
+      const normalized=x=>String(x||'').toLowerCase();
+      const quotes=jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(normalized(j.status).trim())&&!j.sent_quote_number);
+      const invoices=jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(normalized(j.status).trim())&&j.kind!=='sales_lead'&&!j.invoice_number);
+      const parts=jobs.filter(j=>['parts on order','quote','complete/quote'].includes(normalized(j.status).trim())&&!j.sent_quote_number);
+      const groups={quotes,invoices,parts};
+      for(const [key,label] of kinds){const b=document.createElement('button');b.className=key===active?'btn btn-orange':'btn';b.textContent=label+' ('+groups[key].length+')';b.onclick=()=>{active=key;show()};tabs.append(b)}
+      const search=normalized(field.value.trim());const rows=(groups[active]||[]).filter(j=>!search||normalized(j.customer).includes(search)||normalized(j.job_number).includes(search));
+      for(const job of rows.slice(0,120)){
+        const card=document.createElement('div');card.style.cssText='border:1px solid #dce3e9;border-radius:11px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
+        const meta=document.createElement('div');meta.style.cssText='min-width:180px;flex:1';const name=document.createElement('strong');name.textContent=job.customer||'Job';
+        const detail=document.createElement('div');detail.className='hint';detail.textContent=['#'+(job.job_number||''),job.status,job.quote_assigned_to?'Assigned: '+job.quote_assigned_to:'Unassigned',job.address].filter(Boolean).join(' · ');meta.append(name,detail);
+        const controls=document.createElement('div');controls.style.cssText='display:flex;gap:7px;flex-wrap:wrap';
+        const view=document.createElement('button');view.className='btn';view.textContent='View Job';view.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',drawer=>{const node=document.createElement('div');drawer.append(node);renderJobDetails(node,full,{})});const overlay=[...document.querySelectorAll('.overlay')].at(-1);if(overlay)overlay.style.zIndex='11250'}catch(e){alert('Could not open job: '+(e.message||e))}};controls.append(view);
+        const action=document.createElement('button');action.className='btn';action.textContent=active==='quotes'?'Review Quote':active==='invoices'?'Draft Invoice':'Review Parts';
+        action.onclick=async()=>{
+          if(active==='invoices'){try{await openEstimateInvoiceDrawer(await apiGetJob(job.id),'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}
+          else if(active==='quotes'){if(typeof window.openMosesDrafts==='function')window.openMosesDrafts({jobId:String(job.id)});else alert('Moses Drafts unavailable')}
+          else{view.click()}
+        };controls.append(action);card.append(meta,controls);body.append(card);
+      }
+      if(rows.length>120){const note=document.createElement('small');note.textContent='Showing 120 of '+rows.length+' jobs. Search to narrow the list.';body.append(note)}
+      if(!rows.length){const note=document.createElement('p');note.className='hint';note.textContent='No matching jobs.';body.append(note)}
+    }
+    field.oninput=show;
+    body.textContent='Loading PDS jobs…';
+    try{jobs=await apiListJobs({limit:5000});show()}catch(e){body.textContent='Unable to load jobs: '+(e.message||e)}
+  }
+
   function renderJobFlowView(initialStatus = "Dispatch", standalone = false) {
     setNavActive(initialStatus === "__ALL__" ? navAllJobs : navJobFlow);
     setActiveChip("Work Flow");
@@ -8579,15 +8626,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       batchBtn.textContent='✦ Moses';batchBtn.setAttribute('aria-label','Moses — Job Flow assistant');
       batchBtn.title='Moses: quotes, invoices, parts and assignments';
       batchBtn.style.cssText='min-width:98px;height:40px;border-radius:11px;font-size:14px;padding:0 12px';
-      batchBtn.onclick=()=>{
-        const prompt='Review the PDS Job Flow. Identify unassigned Quote jobs for Nicholas or Dave (also Jason or Jim when available), jobs needing estimates, missing parts or supplier pricing, and completed jobs awaiting invoices. Show the next actions and prepare review drafts where supported. Do not send emails, assign staff or change records without approval.';
-        const launch=document.getElementById('workspaceMosesBubble');const panel=document.getElementById('workspaceMosesPanel');
-        if(!launch||!panel){alert('Moses is unavailable. Refresh the page.');return;}
-        if(panel.hidden)launch.click();const input=panel.querySelector('textarea');
-        if(input){input.value=prompt;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();
-          const send=panel.querySelector('.moses-send');if(send&&!send.disabled)send.click();}
-        else alert('Moses composer unavailable. Refresh the page.');
-      };
+      batchBtn.onclick=()=>openPdsJobFlowWorkQueue();
       batchBar.append(batchBtn);root.appendChild(batchBar);
     }
     root.appendChild(tabsRow);
@@ -11469,6 +11508,8 @@ function renderCustomersView() {
     }
 
     async function renderGroupedCustomersTab() {
+      body.replaceChildren();
+      const loading=document.createElement('p');loading.className='hint';loading.textContent='Loading customers & contacts…';body.append(loading);
       const [customers, contacts] = await Promise.all([
         apiListCustomers().catch(() => []), apiListContacts().catch(() => [])
       ]);
@@ -11478,15 +11519,18 @@ function renderCustomersView() {
       body.append(panel);
       const list=panel.querySelector('#pdsGroupedList'),search=panel.querySelector('#pdsGroupedSearch');
       const normalized=value=>String(value||'').trim().toLowerCase();
+      const contactsByCompany=new Map();
+      for(const contact of contacts){const key=normalized(contact.company_name);if(!contactsByCompany.has(key))contactsByCompany.set(key,[]);contactsByCompany.get(key).push(contact)}
       function draw(){
         const q=normalized(search.value);list.replaceChildren();
-        const used=new Set();
+        const used=new Set();let shown=0;let matched=0;
         for(const customer of customers){
           const company=String(customer.company_name||'').trim();
-          const related=contacts.filter(contact=>normalized(contact.company_name)===normalized(company));
+          const related=contactsByCompany.get(normalized(company))||[];
           related.forEach(contact=>used.add(contact));
-          const filteredContacts=related.filter(contact=>[contact.name,contact.phone_number,contact.cell_phone,contact.email].some(value=>normalized(value).includes(q)));
+          const filteredContacts=q?related.filter(contact=>[contact.name,contact.phone_number,contact.cell_phone,contact.email].some(value=>normalized(value).includes(q))):related;
           if(q&&![company,customer.address,customer.phone_number,customer.email].some(value=>normalized(value).includes(q))&&!filteredContacts.length)continue;
+          matched++;if(shown++>=60)continue;
           const card=document.createElement('div');card.className='card';card.style.cssText='border:1px solid #dce3e9;border-radius:12px;padding:16px';
           const top=document.createElement('div');top.style.cssText='display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap';
           const title=document.createElement('strong');title.textContent=company||'Unnamed customer';
@@ -11509,9 +11553,10 @@ function renderCustomersView() {
           };card.append(add);list.append(card);
         }
         const others=contacts.filter(contact=>!used.has(contact)&&(!q||[contact.name,contact.company_name,contact.phone_number,contact.email].some(value=>normalized(value).includes(q))));
-        if(others.length){const card=document.createElement('div');card.className='card';const title=document.createElement('h3');title.textContent='Other Contacts ('+others.length+')';card.append(title);
-          for(const contact of others){const row=document.createElement('div');row.className='jobrow';const label=document.createElement('span');label.textContent=[contact.name,contact.company_name,contact.phone_number].filter(Boolean).join(' · ');const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>editContact(contact,customers,renderGroupedCustomersTab);row.append(label,edit);card.append(row);}list.append(card);
+        if(others.length&&shown<60){const card=document.createElement('div');card.className='card';const title=document.createElement('h3');title.textContent='Other Contacts ('+others.length+')';card.append(title);
+          for(const contact of others.slice(0,60-shown)){const row=document.createElement('div');row.className='jobrow';const label=document.createElement('span');label.textContent=[contact.name,contact.company_name,contact.phone_number].filter(Boolean).join(' · ');const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>editContact(contact,customers,renderGroupedCustomersTab);row.append(label,edit);card.append(row);}list.append(card);
         }
+        if(matched>60){const note=document.createElement('p');note.className='hint';note.textContent='Showing 60 of '+matched+' customers. Search to find any customer or contact.';list.append(note)}
         if(!list.childNodes.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching customers or contacts.';list.append(empty);}
       }
       search.oninput=draw;

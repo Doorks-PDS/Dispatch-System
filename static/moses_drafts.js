@@ -8,12 +8,12 @@ const request=async(path,method='GET',data)=>{
   let result;try{result=await r.json()}catch{throw Error('Unable to read Moses draft response')}
   if(!r.ok)throw Error(typeof result.detail==='string'?result.detail:'Moses draft request failed');return result;
 };
-let panel,body,feedback;
+let panel,body,feedback,focusJobId='';
 function mount(){
  if(document.getElementById('mosesDraftsLaunch'))return;
  const launch=h('button','Moses Drafts','btn');launch.type='button';launch.id='mosesDraftsLaunch';
  launch.hidden=true;launch.style.display='none';
- const openDrafts=()=>{if(document.body.dataset.platform!=='pds')return;panel.hidden=false;panel.style.display='flex';render()};
+ const openDrafts=(options={})=>{if(document.body.dataset.platform!=='pds')return;focusJobId=String(options?.jobId||'');panel.hidden=false;panel.style.display='flex';render()};
  launch.onclick=openDrafts;
  window.openMosesDrafts=openDrafts;
  panel=h('section');panel.id='mosesDraftsPanel';panel.hidden=true;panel.style.cssText='position:fixed;inset:6vh max(14px,calc((100vw - 1100px)/2));z-index:11100;display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 15px 70px #0006;border:1px solid #dce5dd;overflow:hidden';
@@ -22,7 +22,7 @@ function mount(){
  const instructions=h('div');instructions.hidden=true;
  const controls=h('div');controls.style.cssText='padding:12px 20px;display:flex;gap:10px;flex-wrap:wrap';
  const prepare=h('button','Prepare quote reviews','btn btn-orange');prepare.onclick=async()=>{prepare.disabled=true;try{const result=await request('/prepare','POST');announce(`${result.created} new review tickets saved. Existing review decisions were preserved.`);await render()}catch(e){announce(e.message)}finally{prepare.disabled=false}};
- const refresh=h('button','Refresh drafts','btn');refresh.onclick=render;
+ prepareAllButton=prepare;const refresh=h('button','Refresh drafts','btn');refresh.onclick=render;
  controls.append(prepare,refresh);
  feedback=h('small');feedback.setAttribute('role','status');feedback.style.cssText='padding:0 20px 10px;color:#45624f';
  body=h('div');body.style.cssText='overflow:auto;flex:1;padding:4px 20px 22px';
@@ -37,10 +37,21 @@ function field(label,value,onchange,type='text'){
 }
 function select(label,choices,value,onchange){const wrap=h('label');wrap.style.cssText='display:grid;gap:5px;font-size:12px;font-weight:700;color:#53655b';wrap.append(h('span',label));const ctl=h('select');ctl.className='input';for(const [key,text] of choices){const o=h('option',text);o.value=key;ctl.append(o)}ctl.value=value||'';ctl.onchange=()=>onchange(ctl.value);wrap.append(ctl);return wrap}
 async function render(){
- if(!body)return;body.replaceChildren();announce('Loading saved Moses review tickets…');
+ if(!body)return;if(prepareAllButton)prepareAllButton.hidden=!!focusJobId;body.replaceChildren();announce('Loading saved Moses review tickets…');
  let rows;try{rows=(await request('')).items||[]}catch(e){announce(e.message);return}
  announce(`${rows.length} drafts`);
- if(!rows.length){body.append(h('p','No saved Moses review tickets. Select “Find eligible PDS quotes” to examine current quote-ready recommendation forms.','hint'));return}
+ if(focusJobId){
+   const all=h('button','All drafts','btn');all.onclick=()=>{focusJobId='';render()};body.append(all);
+   const selected=rows.filter(item=>String(item.job_id)===focusJobId);
+   if(!selected.length){
+     const notice=h('p','No saved review for this job.');body.append(notice);
+     const prepareOne=h('button','Prepare quote review','btn btn-orange');
+     prepareOne.onclick=async()=>{prepareOne.disabled=true;try{await request('/prepare-job','POST',{record_id:focusJobId});await render()}catch(e){announce(e.message);prepareOne.disabled=false}};
+     body.append(prepareOne);return;
+   }
+   rows=selected;
+ }
+ if(!rows.length){body.append(h('p','No saved quote reviews.','hint'));return}
  const counts=h('div');counts.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px';
  for(const [key,label] of [['pending_review','Needs review'],['ready_for_estimator','Approved for estimator'],['declined','Declined']]){const n=rows.filter(x=>x.state===key).length;const pill=h('span',`${label}: ${n}`);pill.style.cssText='border:1px solid #d9e5db;padding:5px 10px;border-radius:100px;font-size:12px';counts.append(pill)}body.append(counts);
  const grid=h('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:12px';body.append(grid);

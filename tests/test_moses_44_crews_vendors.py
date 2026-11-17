@@ -59,7 +59,7 @@ def test_moses_launcher_draft_drawer_and_vendor_ui():
     drafts=(ROOT/'static/moses_drafts.js').read_text()
     assert "batchBtn.textContent='✦ Moses'" in app
     assert "document.getElementById('workspaceMosesBubble')" in app
-    assert "panel.querySelector('.moses-send')" in app
+    assert "async function openPdsJobFlowWorkQueue()" in app
     assert "const selectedIds=()=>[...employeeRows.querySelectorAll('select')]" in app
     assert "renderPdsServiceVendors()" in app
     assert "document.dispatchEvent(new CustomEvent('moses-open-pds-job'" in drafts
