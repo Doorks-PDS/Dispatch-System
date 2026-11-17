@@ -8,12 +8,12 @@ const request=async(path,method='GET',data)=>{
   let result;try{result=await r.json()}catch{throw Error('Unable to read Moses draft response')}
   if(!r.ok)throw Error(typeof result.detail==='string'?result.detail:'Moses draft request failed');return result;
 };
-let panel,body,feedback,focusJobId='',prepareIfMissing=false;
+let panel,body,feedback,prepareAllButton,focusJobId='',prepareIfMissing=false,pendingPartNumber='';
 function mount(){
  if(document.getElementById('mosesDraftsLaunch'))return;
  const launch=h('button','Moses Drafts','btn');launch.type='button';launch.id='mosesDraftsLaunch';
  launch.hidden=true;launch.style.display='none';
- const openDrafts=(options={})=>{if(document.body.dataset.platform!=='pds')return;focusJobId=String(options?.jobId||'');prepareIfMissing=!!options?.prepareIfMissing;panel.hidden=false;panel.style.display='flex';render()};
+ const openDrafts=(options={})=>{if(document.body.dataset.platform!=='pds'){window.alert('Switch to the PDS workspace to review quote drafts.');return;}focusJobId=String(options?.jobId||'');prepareIfMissing=!!options?.prepareIfMissing;pendingPartNumber=String(options?.partNumber||'');panel.hidden=false;panel.style.display='flex';render()};
  launch.onclick=openDrafts;
  window.openMosesDrafts=openDrafts;
  panel=h('section');panel.id='mosesDraftsPanel';panel.hidden=true;panel.style.cssText='position:fixed;inset:6vh max(14px,calc((100vw - 1100px)/2));z-index:11100;display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 15px 70px #0006;border:1px solid #dce5dd;overflow:hidden';
@@ -53,15 +53,27 @@ async function render(){
      return;
    }
    rows=selected;
+   if(pendingPartNumber){
+     const code=pendingPartNumber;pendingPartNumber='';
+     const draft=rows.find(item=>item.state==='pending_review')||rows[0];
+     if(draft.state!=='pending_review'){announce('Reopen this draft before adding parts.');}
+     else {
+       const number=code.trim();
+       if(number&&!((draft.selected_parts||[]).some(p=>String(p.part_number).toLowerCase()===number.toLowerCase())))
+         draft.selected_parts=[...(draft.selected_parts||[]),{part_number:number,quantity:1}];
+       openEditor(draft);
+     }
+   }
  }
  if(!rows.length){body.append(h('p','No saved quote reviews.','hint'));return}
+ const search=h('input');search.className='input';search.placeholder='Search customer, job # or status';search.setAttribute('aria-label','Search Moses quote drafts');search.style.cssText='width:100%;box-sizing:border-box;margin:4px 0 10px';body.append(search);
  const counts=h('div');counts.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px';
  for(const [key,label] of [['pending_review','Needs review'],['ready_for_estimator','Approved for estimator'],['declined','Declined']]){const n=rows.filter(x=>x.state===key).length;const pill=h('span',`${label}: ${n}`);pill.style.cssText='border:1px solid #d9e5db;padding:5px 10px;border-radius:100px;font-size:12px';counts.append(pill)}body.append(counts);
  const grid=h('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,360px),1fr));gap:12px';body.append(grid);
  for(const item of rows){
   const card=h('article');card.style.cssText='border:1px solid #d9e1dc;border-left:5px solid '+(item.state==='ready_for_estimator'?'#26835c':item.state==='declined'?'#8993a0':'#d99731')+';border-radius:12px;background:white;padding:15px;display:grid;gap:9px;align-content:start';
   const name=h('strong',item.customer||'Unnamed customer');name.style.fontSize='15px';const meta=h('small','Job #'+(item.job_number||'—')+' · '+(item.job_status||'')+' · '+(item.date||''));meta.style.color='#67756e';const status=h('div',item.state==='pending_review'?'Awaiting office decision':item.state==='ready_for_estimator'?'Approved for estimator':'Declined');status.style.fontWeight='700';status.style.fontSize='12px';
-  const scope=h('p',item.scope||'Parts/freight details require review');scope.style.cssText='margin:0;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:13px';
+  const scope=h('p',item.scope||'Parts/freight details require review');scope.style.cssText='margin:0;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;font-size:13px';
   const actions=h('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:7px';
   const review=h('button','Review','btn');review.onclick=()=>openEditor(item);actions.append(review);
   const ticket=h('button','View Job','btn');ticket.onclick=()=>{document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.job_id}}))};actions.append(ticket);
@@ -76,8 +88,9 @@ async function render(){
     delivery.onclick=()=>openDelivery(item);
     actions.append(estimate,delivery);
   }
-  card.append(name,meta,status,scope,actions);grid.append(card);
+  card.dataset.search=[item.customer,item.job_number,item.job_status,item.state,item.scope].join(' ').toLowerCase();card.append(name,meta,status,scope,actions);grid.append(card);
  }
+ search.oninput=()=>{const term=search.value.trim().toLowerCase();for(const card of grid.children)card.style.display=(!term||card.dataset.search.includes(term))?'grid':'none'};
 }
 // Official document delivery is delegated to the existing PDS Resend approval service.
 // This view never creates a PDF or sends based on the Moses review approval alone.

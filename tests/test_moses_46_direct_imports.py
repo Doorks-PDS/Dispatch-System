@@ -17,8 +17,8 @@ def test_quote_and_todo_use_record_backed_draft():
 def test_part_review_reads_verified_job_and_catalog():
     assert 'async function openPdsPartReview(job)' in APP
     assert 'await apiGetJob(job.id)' in APP
-    assert 'apiListParts({q:search.value.trim(),limit:25})' in APP
-    assert 'Confirm fit, quantities and supplier pricing' in APP
+    assert 'apiListParts({q:query,limit:25})' in APP
+    assert "draft.textContent='Add to Quote Draft'" in APP
 
 
 def test_import_preview_separate_from_approved_write():
@@ -40,4 +40,4 @@ def test_pds_document_intent_does_not_mistake_negation_for_send():
 
 
 def test_todo_status_present():
-    assert "statusChip.textContent=String(job.status||'New')" in APP
+    assert "const statusChip=statusPill(String(job.status||'Dispatch'))" in APP

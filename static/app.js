@@ -7974,8 +7974,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Open the saved draft or estimator for this job';
               const isInvoice=heading==='Office Invoices To Review';
               assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else if(typeof window.openMosesDrafts==='function'){window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true})}else{alert('Quote review is unavailable. Refresh the page.')}};
-              const statusChip=document.createElement('span');statusChip.textContent=String(job.status||'New');statusChip.style.cssText='display:inline-block;align-self:flex-start;font-size:12px;font-weight:700;border-radius:12px;border:1px solid #f8b778;background:#fff5e9;color:#965010;padding:3px 9px';
-              buttons.append(open,assist);card.append(name,statusChip,info,buttons);officeList.append(card);
+              const statusChip=statusPill(String(job.status||'Dispatch'));statusChip.style.marginLeft='10px';statusChip.style.verticalAlign='middle';name.style.display='inline-block';
+              const headingRow=document.createElement('div');headingRow.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap';headingRow.append(name,statusChip);buttons.append(open,assist);card.append(headingRow,info,buttons);officeList.append(card);
             }
           }
         }catch(error){const msg=document.createElement('p');msg.className='hint';msg.textContent='Unable to load office tasks: '+(error.message||error);officeList.append(msg)}
@@ -8335,22 +8335,24 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const notes=[full.job_description,full.office_notes,full.notes,full.description,full.work_performed,full.additional_recommendations,full.recommendations,full.parts_needed,...formNotes].filter(Boolean);
     const notesLabel=document.createElement('strong');notesLabel.textContent='Saved job notes / recommendations';
     const notesBody=document.createElement('p');notesBody.textContent=[...new Set(notes.map(x=>String(x).trim()))].join('\n\n')||'No part details in saved job fields. Review the completion and recommendation forms.';source.append(notesLabel,notesBody);panel.append(source);
-    const search=document.createElement('input');search.className='input';search.placeholder='Find part number, manufacturer or description';search.setAttribute('aria-label','Search PDS parts catalog');panel.append(search);
-    const matches=document.createElement('div');matches.style.cssText='display:grid;gap:8px';panel.append(matches);
+    const search=document.createElement('input');search.className='input';search.placeholder='Search by part number, manufacturer or description';search.setAttribute('aria-label','Search PDS parts catalog');panel.append(search);
+    const matches=document.createElement('div');matches.style.cssText='display:grid;gap:8px';panel.append(matches);let chosenPartNumber='';
     const status=document.createElement('small');status.setAttribute('role','status');panel.append(status);
     const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
     const view=document.createElement('button');view.className='btn';view.textContent='View Job';view.onclick=()=>{openDrawer('Job Details',body=>{const node=document.createElement('div');body.append(node);renderJobDetails(node,full,{})});const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11300'};
-    const add=document.createElement('button');add.className='btn';add.textContent='Open Parts List';add.onclick=()=>{veil.remove();renderPartsListView()};actions.append(view,add);panel.append(actions);veil.append(panel);document.body.append(veil);
+    const add=document.createElement('button');add.className='btn';add.textContent='New Part';add.onclick=()=>{veil.remove();renderPartsListView()};
+    const draft=document.createElement('button');draft.className='btn btn-orange';draft.textContent='Add to Quote Draft';draft.onclick=()=>{if(typeof window.openMosesDrafts!=='function'){status.textContent='Moses Drafts unavailable. Reload and retry.';return;}window.openMosesDrafts({jobId:String(job.id),prepareIfMissing:true,partNumber:chosenPartNumber});status.textContent='Review the part quantity and save changes in Moses Drafts.'};
+    actions.append(view,add,draft);panel.append(actions);veil.append(panel);document.body.append(veil);
     veil.addEventListener('click',e=>{if(e.target===veil)veil.remove()});
     let generation=0;
     const find=async()=>{
       const id=++generation;matches.replaceChildren();status.textContent='Looking up saved PDS parts…';
       try{
-        const rows=await apiListParts({q:search.value.trim(),limit:25});if(id!==generation)return;
+        const query=search.value.trim();if(query.length<2){status.textContent='Enter a part name or number to see matching records, or open the quote draft.';return;}const rows=await apiListParts({q:query,limit:25});if(id!==generation)return;
         status.textContent=rows.length+' matching saved parts. Select a part to inspect its catalog information; prices are not assigned to the quote automatically.';
         for(const part of rows){const card=document.createElement('div');card.className='jobrow';card.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap';
           const label=document.createElement('span');label.textContent=[part.part_number,part.description,part.supplier,part.supplier_rate?'Supplier $'+part.supplier_rate:''].filter(Boolean).join(' · ');
-          const button=document.createElement('button');button.className='btn';button.textContent='Review Part';button.onclick=()=>{status.textContent='Catalog match: '+[part.part_number,part.description,part.supplier].filter(Boolean).join(' · ')+'. Confirm fit, quantities and supplier pricing before estimating.'};card.append(label,button);matches.append(card)}
+          const button=document.createElement('button');button.className='btn';button.textContent='Select Part';button.onclick=()=>{chosenPartNumber=String(part.part_number||part.Item||part.item||'');status.textContent='Selected '+chosenPartNumber+'. Open Add to Quote Draft, set quantity and save.'};card.append(label,button);matches.append(card)}
       }catch(e){status.textContent='Parts catalog unavailable: '+(e.message||e)}
     };
     let debounce;search.addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(find,250)});await find();
@@ -8378,7 +8380,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const normalized=x=>String(x||'').toLowerCase();
       const quotes=jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(normalized(j.status).trim())&&!j.sent_quote_number);
       const invoices=jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(normalized(j.status).trim())&&j.kind!=='sales_lead'&&!j.invoice_number);
-      const parts=jobs.filter(j=>['parts on order','quote','complete/quote'].includes(normalized(j.status).trim())&&!j.sent_quote_number);
+      const parts=jobs.filter(j=>['quote','complete/quote','to be quoted','to be invoiced','complete'].includes(normalized(j.status).trim())&&!j.sent_quote_number&&!j.invoice_number);
       const groups={quotes,invoices,parts};
       for(const [key,label] of kinds){const b=document.createElement('button');b.className=key===active?'btn btn-orange':'btn';b.textContent=label+' ('+groups[key].length+')';b.onclick=()=>{active=key;show()};tabs.append(b)}
       const search=normalized(field.value.trim());const rows=(groups[active]||[]).filter(j=>!search||normalized(j.customer).includes(search)||normalized(j.job_number).includes(search));
@@ -14793,7 +14795,7 @@ function renderDataUploadView() {
       <div class="card" style="margin:12px 0;border:1px solid #d5e5da;padding:16px">
         <h3 style="margin-top:0">PDS Import Review</h3>
         <p class="hint">CSV or Excel records can be mapped to saved suppliers or parts after duplicate review. PDF, DOCX, TXT and image files are preview-only; no live records are altered.</p>
-        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Parts Suppliers</option><option value="parts">Parts / Items</option></select></label>
+        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Parts Suppliers — Import</option><option value="parts">Parts / Items — Import</option><option value="customers">Customers — Preview</option><option value="contacts">Contacts — Preview</option><option value="addresses">Addresses — Preview</option><option value="service_vendors">Service Vendors — Preview</option><option value="jobs">Jobs / Sales Leads — Preview</option><option value="invoices">Invoices — Preview</option><option value="purchase_orders">Purchase Orders — Preview</option><option value="other">Other Documents — Preview</option></select></label>
         <input class="input" id="qb_import_file" type="file" accept=".csv,.xlsx,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" style="margin-top:10px;width:100%" />
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn btn-orange" type="button" id="qb_preview">Preview &amp; Check Duplicates</button><button class="btn" type="button" id="qb_import_commit" disabled>Import New Records</button></div>
         <p class="hint" id="qb_import_status" role="status">Nothing is changed during preview. Existing records will never be overwritten.</p>
@@ -14894,10 +14896,10 @@ function renderDataUploadView() {
         const form=new FormData();form.append('file',file);
         const previewResponse=await fetch('/pds-purchase-orders/import/file-preview',{method:'POST',credentials:'same-origin',body:form});
         const extracted=await previewResponse.json();if(!previewResponse.ok)throw Error(extracted.detail||'File preview failed');
-        if(!extracted.can_import_supplier_parts){
-          qbStatus.textContent='Document preview only; no data has been imported.';
+        if(!extracted.can_import_supplier_parts||!['vendors','parts'].includes(qbKind.value)){
+          qbStatus.textContent='Preview only for '+qbKind.selectedOptions[0].textContent+' — records are not imported from this destination yet.';
           const content=document.createElement('div');content.style.cssText='padding:12px;border:1px solid #dce3e9;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:290px;overflow:auto';
-          content.textContent=extracted.text_preview||'No readable text. Review the original file and prepare a structured CSV for import.';
+          content.textContent=extracted.text_preview||(extracted.rows||[]).slice(0,30).map(row=>Object.entries(row).map(([k,v])=>k+': '+v).join(' · ')).join('\n')||'No readable text. Review the original file.';
           qbPreviewHost.append(content);return;
         }
         const rows=extracted.rows||[];if(!rows.length)throw Error('No spreadsheet records found');
