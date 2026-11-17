@@ -158,4 +158,5 @@ def test_orb_and_week_scheduler_are_guarded_frontend_features():
     assert "openDrawer('Job Details',body=>" in text
     assert "renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh})" in text
     assert "'Update to Schedule'" in text
-    assert "if(!confirm('Update '" in text
+    assert "if(!confirm('Schedule '+" in text
+    assert "ids.length+' technician(s)?'" in text

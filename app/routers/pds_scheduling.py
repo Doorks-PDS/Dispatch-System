@@ -167,7 +167,8 @@ def assign(job_id: str, payload: Assignment, request: Request):
 
 
 class VisitPlan(BaseModel):
-    employee_id: str = Field(default='', max_length=80)
+    employee_id: str = Field(default='', max_length=80)  # legacy single-person client
+    employee_ids: list[str] = Field(default_factory=list, max_length=30)
     scheduled_date: str = Field(default='', max_length=10)
     scheduled_time: str = Field(default='', max_length=5)
     update_to_schedule: bool = False
@@ -189,7 +190,12 @@ def visit_plan(job_id: str, payload: VisitPlan, request: Request):
         raise HTTPException(404, 'PDS job not found')
     if str(job.get('source') or '').upper().startswith('LEGACY'):
         raise HTTPException(409, 'Historical jobs cannot be rescheduled here')
-    employee_id = payload.employee_id.strip()
+    employee_ids = [str(v).strip() for v in (payload.employee_ids if payload.employee_ids else ([payload.employee_id] if payload.employee_id else []))]
+    if any(not v for v in employee_ids) or len(set(employee_ids)) != len(employee_ids):
+        raise HTTPException(422, 'Choose unique employees')
+    for identifier in employee_ids:
+        _person(request, identifier)
+    employee_id = employee_ids[0] if employee_ids else ''
     visit_date = payload.scheduled_date.strip()
     visit_time = payload.scheduled_time.strip()
     if employee_id:
@@ -202,13 +208,14 @@ def visit_plan(job_id: str, payload: VisitPlan, request: Request):
             raise HTTPException(422, 'Scheduled date must be YYYY-MM-DD') from exc
     if visit_time and not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', visit_time):
         raise HTTPException(422, 'Scheduled time must be HH:MM')
-    if payload.update_to_schedule and not (employee_id and visit_date and visit_time):
+    if payload.update_to_schedule and not (employee_ids and visit_date and visit_time):
         raise HTTPException(422, 'Choose an employee, date and time before Update to Schedule')
     updates = {'planned_employee_id': employee_id,
+               'planned_employee_ids': employee_ids,
                'scheduled_date': visit_date, 'scheduled_time': visit_time}
     if payload.update_to_schedule:
         updates.update({'date': visit_date, 'status': 'Scheduled',
-                        'assigned_employee_ids': [employee_id],
+                        'assigned_employee_ids': employee_ids,
                         'assigned_lead_id': '', 'assignment_tentative': False})
     saved = store.update_job(job_id, updates)
     if (not isinstance(saved, dict) or
@@ -218,11 +225,12 @@ def visit_plan(job_id: str, payload: VisitPlan, request: Request):
         raise HTTPException(503, 'Visit plan not confirmed by saved job')
     if payload.update_to_schedule and (
         saved.get('status') != 'Scheduled' or saved.get('date') != visit_date or
-        saved.get('assigned_employee_ids') != [employee_id]):
+        saved.get('assigned_employee_ids') != employee_ids):
         raise HTTPException(503, 'Schedule update not confirmed by saved job')
     return {'ok': True, 'job_id': job_id, 'updated_to_schedule': payload.update_to_schedule,
             'job_date': str(saved.get('date') or ''), 'status': saved.get('status'),
-            'planned_employee_id': employee_id, 'scheduled_date': visit_date,
+            'planned_employee_id': employee_id, 'planned_employee_ids': employee_ids,
+            'assigned_employee_ids': saved.get('assigned_employee_ids') or [], 'scheduled_date': visit_date,
             'scheduled_time': visit_time, 'assignment_confirmed': bool(payload.update_to_schedule)}
 
 

@@ -13,7 +13,7 @@ def test_pds_context_cards_are_white_with_subtle_outline():
 
 
 def test_staff_plan_compact_and_keeps_workspace_permissions():
-    assert "textContent='Employee'" in APP
+    assert "caption.textContent='Technicians'" in APP
     assert "textContent='Date'" in APP
     assert "textContent='Time'" in APP
     assert "textContent='Reconnecting PDS…'" in APP
@@ -23,7 +23,8 @@ def test_staff_plan_compact_and_keeps_workspace_permissions():
 
 def test_draft_view_job_closes_overlay_and_review_is_reversible():
     assert "h('button','View Job','btn')" in DRAFTS
-    assert "panel.hidden=true;panel.style.display='none';document.dispatchEvent" in DRAFTS
+    assert "document.dispatchEvent(new CustomEvent('moses-open-pds-job'" in DRAFTS
+    assert "topDrawer.style.zIndex='11250'" in APP
     assert "'/reopen'" in DRAFTS
     assert "'/archive'" in DRAFTS
     assert "item.get('state') not in ('ready_for_estimator', 'declined')" in API

@@ -50,7 +50,7 @@ async function render(){
   const scope=h('p',item.scope||'Parts/freight details require review');scope.style.cssText='margin:0;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:13px';
   const actions=h('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:7px';
   const review=h('button','Review','btn');review.onclick=()=>openEditor(item);actions.append(review);
-  const ticket=h('button','View Job','btn');ticket.onclick=()=>{panel.hidden=true;panel.style.display='none';document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.job_id}}))};actions.append(ticket);
+  const ticket=h('button','View Job','btn');ticket.onclick=()=>{document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.job_id}}))};actions.append(ticket);
   if(item.state!=='pending_review'){
     const reopen=h('button','Reopen','btn');reopen.onclick=async()=>{reopen.disabled=true;try{await request('/'+encodeURIComponent(item.id)+'/reopen','POST',{version:item.version});await render()}catch(e){announce(e.message)}finally{reopen.disabled=false}};actions.append(reopen);
   }

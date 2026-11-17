@@ -9,8 +9,8 @@ def test_pds_directory_reuses_existing_records_and_vendor_directory():
     assert 'apiListCustomers().catch(() => [])' in SOURCE
     assert 'apiListContacts().catch(() => [])' in SOURCE
     assert "label:'Customers & Contacts',description:'Customer profiles with their contacts.'" in SOURCE
-    assert "label:'Vendors',description:'Supplier profiles for purchase orders.'" in SOURCE
-    assert "renderPdsVendorHub(true)" in SOURCE
+    assert "label:'Vendors',description:'Subcontractors and service partners.'" in SOURCE
+    assert "renderPdsServiceVendors" in SOURCE
 
 
 def test_new_dispatch_saved_site_is_explicit_but_address_remains_free_text():

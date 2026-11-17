@@ -5925,6 +5925,9 @@ function renderAttachmentSection(titleText, items, options = {}) {
         drawerBody.appendChild(local);
         renderJobDetails(local, job, {});
       });
+      // The ticket belongs in FRONT of Moses Drafts. Closing it returns to Drafts.
+      const topDrawer=[...document.querySelectorAll('.overlay')].at(-1);
+      if(topDrawer)topDrawer.style.zIndex='11250';
     } catch (error) { alert('Could not open PDS ticket: ' + (error.message || error)); }
   });
   document.addEventListener('moses-open-pds-estimator', async event => {
@@ -6303,11 +6306,22 @@ function renderAttachmentSection(titleText, items, options = {}) {
       plan.style.cssText='margin:9px 0;padding:10px 12px;border:1px solid #d9dee7;border-radius:10px';
       const heading=document.createElement('strong');heading.textContent='Staff & scheduling';
       const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-top:6px';
-      const employeeLabel=document.createElement('label');employeeLabel.textContent='Employee';
-      const employee=document.createElement('select');employee.className='input';employee.style.width='100%';
-      employee.append(new Option('— Select employee —',''));
-      const knownId=String(job.planned_employee_id||'');
-      employeeLabel.append(employee);row.append(employeeLabel);
+      const employeeLabel=document.createElement('div');employeeLabel.style.cssText='grid-column:1/-1';
+      const caption=document.createElement('strong');caption.textContent='Technicians';employeeLabel.append(caption);
+      const employeeRows=document.createElement('div');employeeRows.style.cssText='display:grid;gap:6px;margin-top:5px';employeeLabel.append(employeeRows);
+      let staffOptions=[];
+      const selectRow=(value='')=>{
+        const line=document.createElement('div');line.style.cssText='display:flex;gap:6px;align-items:center';
+        const control=document.createElement('select');control.className='input';control.style.flex='1';
+        control.add(new Option('Select employee',''));
+        for(const person of staffOptions)control.add(new Option(person.name,person.id));control.value=value;
+        const remove=document.createElement('button');remove.type='button';remove.className='btn';remove.textContent='−';remove.setAttribute('aria-label','Remove technician');remove.onclick=()=>{line.remove();if(!employeeRows.children.length)selectRow()};
+        line.append(control,remove);employeeRows.append(line);return control;
+      };
+      const knownIds=(Array.isArray(job.planned_employee_ids)&&job.planned_employee_ids.length?job.planned_employee_ids:job.assigned_employee_ids?.length?job.assigned_employee_ids:[job.planned_employee_id||'']).map(String);
+      for(const id of knownIds)selectRow(id);
+      const addTech=document.createElement('button');addTech.type='button';addTech.className='btn';addTech.textContent='+ Technician';addTech.style.marginTop='5px';addTech.onclick=()=>{if(employeeRows.children.length<30)selectRow()};employeeLabel.append(addTech);row.append(employeeLabel);
+      const selectedIds=()=>[...employeeRows.querySelectorAll('select')].map(x=>x.value).filter(Boolean);
       const dateLabel=document.createElement('label');dateLabel.textContent='Date';
       const dateInput=document.createElement('input');dateInput.type='date';dateInput.className='input';
       dateInput.value=String(job.scheduled_date||'');dateLabel.append(dateInput);row.append(dateLabel);
@@ -6322,8 +6336,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       buttons.append(savePlan,update);plan.append(heading,row,buttons,note);card.appendChild(plan);
       fetchJSON('/pds-scheduling/assignable-staff').then(result=>{
         const staff=[...(result.staff||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
-        for(const person of staff)employee.append(new Option(String(person.name||''),String(person.id||'')));
-        if(knownId&&staff.some(person=>String(person.id)===knownId))employee.value=knownId;
+        staffOptions=staff;const values=(job.planned_employee_ids?.length?job.planned_employee_ids:job.assigned_employee_ids?.length?job.assigned_employee_ids:[job.planned_employee_id||'']);employeeRows.replaceChildren();for(const id of values)selectRow(String(id));
       }).catch(async err=>{
         const message=String(err.message||err);
         if(/Select the PDS workspace/i.test(message)){
@@ -6337,9 +6350,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
         }else note.textContent='Staff list unavailable: '+message;
       });
       const submit=async(schedule)=>{
-        const body={employee_id:employee.value,scheduled_date:dateInput.value,
+        const ids=selectedIds();if(new Set(ids).size!==ids.length){note.textContent='Remove duplicate technicians.';return;}
+        const body={employee_id:ids[0]||'',employee_ids:ids,scheduled_date:dateInput.value,
                     scheduled_time:timeInput.value,update_to_schedule:schedule};
-        if(schedule&&(!body.employee_id||!body.scheduled_date||!body.scheduled_time)){
+        if(schedule&&(!ids.length||!body.scheduled_date||!body.scheduled_time)){
           note.textContent='Choose an employee, scheduled date and time first.';return;
         }
         savePlan.disabled=update.disabled=true;note.textContent=schedule?'Updating calendar & To-Do…':'Saving visit plan…';
@@ -6347,14 +6361,14 @@ function renderAttachmentSection(titleText, items, options = {}) {
           const confirmed=await fetchJSON('/pds-scheduling/jobs/'+encodeURIComponent(job.id)+'/visit-plan',{
             method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
           if(!confirmed.ok||confirmed.updated_to_schedule!==schedule||confirmed.scheduled_date!==body.scheduled_date||
-             confirmed.scheduled_time!==body.scheduled_time||confirmed.planned_employee_id!==body.employee_id)
+             confirmed.scheduled_time!==body.scheduled_time||JSON.stringify(confirmed.planned_employee_ids)!==JSON.stringify(ids))
             throw Error('Visit plan not confirmed by server');
           if(schedule){
             const actual=await apiGetJob(job.id);
             if(actual.date!==body.scheduled_date||actual.status!=='Scheduled')throw Error('New schedule not verified');
             renderJobDetails(container,actual,ctx);refreshBadges();
             if(ctx?.afterSave)try{await ctx.afterSave()}catch(e){console.warn('Schedule saved; refresh unavailable',e)}
-          }else{job.planned_employee_id=body.employee_id;job.scheduled_date=body.scheduled_date;
+          }else{job.planned_employee_id=body.employee_id;job.planned_employee_ids=ids;job.scheduled_date=body.scheduled_date;
                 job.scheduled_time=body.scheduled_time;note.textContent='Visit plan saved. Original job date and status unchanged.';}
         }catch(err){note.textContent='Not confirmed: '+(err.message||err)}
         finally{savePlan.disabled=update.disabled=false;}
@@ -8077,19 +8091,23 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const form=document.createElement('form');form.className='card';form.style.cssText='width:min(460px,100%);max-height:90vh;overflow:auto;display:grid;gap:10px';
       const h=document.createElement('h3');h.textContent='Schedule · '+(job.customer||job.job_number);h.style.margin='0';form.append(h);
       const label=document.createElement('p');label.className='hint';label.textContent='Changing the visit here updates the shared job date and status only after confirmation. For multi-day work, create or use a separate visit record where supported.';form.append(label);
-      const select=document.createElement('select');select.className='input';select.required=true;select.add(new Option('Choose employee',''));
-      for(const p of staff)select.add(new Option(p.name,p.id));select.value=job.planned_employee_id||job.assigned_employee_ids?.[0]||'';
+      const employeeBox=document.createElement('div');employeeBox.style.cssText='display:grid;gap:5px';
+      const employeeRows=document.createElement('div');employeeRows.style.cssText='display:grid;gap:6px';employeeBox.append(employeeRows);
+      const addEmployee=(id='')=>{const line=document.createElement('div');line.style.cssText='display:flex;gap:6px';const select=document.createElement('select');select.className='input';select.style.flex='1';select.add(new Option('Select employee',''));for(const p of staff)select.add(new Option(p.name,p.id));select.value=id;const remove=document.createElement('button');remove.className='btn';remove.type='button';remove.textContent='−';remove.setAttribute('aria-label','Remove technician');remove.onclick=()=>{line.remove();if(!employeeRows.children.length)addEmployee()};line.append(select,remove);employeeRows.append(line)};
+      const ids=(job.planned_employee_ids?.length?job.planned_employee_ids:job.assigned_employee_ids?.length?job.assigned_employee_ids:[job.planned_employee_id||'']);for(const id of ids)addEmployee(id);
+      const add=document.createElement('button');add.type='button';add.className='btn';add.textContent='+ Technician';add.onclick=()=>{if(employeeRows.children.length<30)addEmployee()};employeeBox.append(add);
+      const selectedIds=()=>[...employeeRows.querySelectorAll('select')].map(x=>x.value).filter(Boolean);
       const date=document.createElement('input');date.className='input';date.type='date';date.required=true;date.value=chosenDate||job.scheduled_date||job.date||'';
       const time=document.createElement('input');time.className='input';time.type='time';time.required=true;time.value=job.scheduled_time||'';
-      for(const [name,control] of [['Employee',select],['Scheduled date',date],['Scheduled time',time]]){const label=document.createElement('label');label.textContent=name;label.style.cssText='display:grid;gap:4px';label.append(control);form.append(label)}
+      for(const [name,control] of [['Technicians',employeeBox],['Scheduled date',date],['Scheduled time',time]]){const label=document.createElement('label');label.textContent=name;label.style.cssText='display:grid;gap:4px';label.append(control);form.append(label)}
       const status=document.createElement('small');status.setAttribute('role','status');form.append(status);
       const actions=document.createElement('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:8px';
       const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';cancel.onclick=()=>popup.remove();
       const save=document.createElement('button');save.type='submit';save.className='btn btn-orange';save.textContent='Update to Schedule';actions.append(cancel,save);form.append(actions);popup.append(form);document.body.append(popup);
-      form.onsubmit=async(e)=>{e.preventDefault();if(!select.value||!date.value||!time.value)return;
-        if(!confirm('Update '+(job.job_number||job.customer)+' to '+date.value+' at '+time.value+' and assign '+select.options[select.selectedIndex].text+'?'))return;
+      form.onsubmit=async(e)=>{e.preventDefault();const ids=selectedIds();if(!ids.length||!date.value||!time.value){status.textContent='Choose a technician, date and time.';return;}if(new Set(ids).size!==ids.length){status.textContent='Remove duplicate technicians.';return;}
+        if(!confirm('Schedule '+(job.job_number||job.customer)+' for '+date.value+' at '+time.value+' with '+ids.length+' technician(s)?'))return;
         save.disabled=true;status.textContent='Saving verified schedule…';
-        try{const payload={employee_id:select.value,scheduled_date:date.value,scheduled_time:time.value,update_to_schedule:true};
+        try{const payload={employee_id:ids[0],employee_ids:ids,scheduled_date:date.value,scheduled_time:time.value,update_to_schedule:true};
           const result=await fetchJSON('/pds-scheduling/jobs/'+encodeURIComponent(job.id)+'/visit-plan',{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
           if(!result.ok||!result.assignment_confirmed||result.job_date!==date.value||result.status!=='Scheduled')throw Error('Saved schedule could not be confirmed');
           popup.remove();notice.textContent='Schedule confirmed for '+(job.job_number||job.customer)+'.';await afterSave();
@@ -8558,15 +8576,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     if(activePlatform==='pds'&&String(currentUser?.role||'')==='office_admin') {
       const batchBar=document.createElement('div');batchBar.style.cssText='display:flex;align-items:center;gap:8px;margin:4px 0 12px';
       const batchBtn=document.createElement('button');batchBtn.type='button';batchBtn.className='btn btn-orange';
-      batchBtn.textContent='✦';batchBtn.setAttribute('aria-label','Moses — Job Flow assistant');
+      batchBtn.textContent='✦ Moses';batchBtn.setAttribute('aria-label','Moses — Job Flow assistant');
       batchBtn.title='Moses: quotes, invoices, parts and assignments';
-      batchBtn.style.cssText='min-width:42px;height:40px;border-radius:11px;font-size:20px;padding:0 10px';
+      batchBtn.style.cssText='min-width:98px;height:40px;border-radius:11px;font-size:14px;padding:0 12px';
       batchBtn.onclick=()=>{
         const prompt='Review the PDS Job Flow. Identify unassigned Quote jobs for Nicholas or Dave (also Jason or Jim when available), jobs needing estimates, missing parts or supplier pricing, and completed jobs awaiting invoices. Show the next actions and prepare review drafts where supported. Do not send emails, assign staff or change records without approval.';
-        if(typeof window.openMosesWithPrompt==='function')window.openMosesWithPrompt(prompt);
-        else if(typeof window.openMosesChat==='function')window.openMosesChat(prompt);
-        else if(typeof window.openMoses==='function')window.openMoses(prompt);
-        else alert('Moses is unavailable. Refresh the page.');
+        const launch=document.getElementById('workspaceMosesBubble');const panel=document.getElementById('workspaceMosesPanel');
+        if(!launch||!panel){alert('Moses is unavailable. Refresh the page.');return;}
+        if(panel.hidden)launch.click();const input=panel.querySelector('textarea');
+        if(input){input.value=prompt;input.dispatchEvent(new Event('input',{bubbles:true}));input.focus();
+          const send=panel.querySelector('.moses-send');if(send&&!send.disabled)send.click();}
+        else alert('Moses composer unavailable. Refresh the page.');
       };
       batchBar.append(batchBtn);root.appendChild(batchBar);
     }
@@ -11734,9 +11754,9 @@ function renderCustomersView() {
     makeHubCards(cards,[
       {icon:'🏢',label:'Customers & Contacts',description:'Customer profiles with their contacts.',open:()=>enter('combined')},
       {icon:'📍',label:'Addresses',description:'Saved and historical job locations.',open:()=>enter('addresses')},
-      {icon:'🏭',label:'Vendors',description:'Supplier profiles for purchase orders.',open:()=>renderPdsVendorHub(true)}
+      {icon:'🛠️',label:'Vendors',description:'Subcontractors and service partners.',open:()=>renderPdsServiceVendors()}
     ]);
-    cards.classList.add('pds-directory-cards');if(!document.getElementById('pds-directory-style')){const style=document.createElement('style');style.id='pds-directory-style';style.textContent='@media(min-width:900px){.pds-directory-cards{grid-template-columns:repeat(3,minmax(0,1fr))!important}}';document.head.append(style);}
+    cards.classList.add('pds-directory-cards');if(!document.getElementById('pds-directory-style')){const style=document.createElement('style');style.id='pds-directory-style';style.textContent='.pds-directory-cards{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr))!important;gap:10px!important}.pds-directory-cards button{min-height:90px!important;padding:12px!important;gap:5px!important}.pds-directory-cards button .hint{font-size:12px!important}@media(max-width:680px){.pds-directory-cards{grid-template-columns:1fr!important}}';document.head.append(style);}
     sectionBack.onclick=showDirectory;
 
     workspaceBody.innerHTML = "";
@@ -13091,6 +13111,40 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     return openEstimateInvoiceHelper(job, "invoice", container, ctx);
   }
 
+  // PDS subcontractors/service vendors: separate from material suppliers and PO records.
+  async function renderPdsServiceVendors(){
+    if(activePlatform!=='pds'||!isOfficeUser())return;
+    setWorkspace('Vendors');clearWorkspaceActions();
+    const root=document.createElement('section');root.className='card';root.style.cssText='display:grid;gap:12px';
+    const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap';
+    const title=document.createElement('h2');title.textContent='Vendors';title.style.margin='0';
+    const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px';
+    const add=document.createElement('button');add.className='btn btn-orange';add.textContent='+ Vendor';
+    const back=document.createElement('button');back.className='btn';back.textContent='← Directory';back.onclick=renderCustomersView;
+    actions.append(add,back);head.append(title,actions);root.append(head);
+    const search=document.createElement('input');search.className='input';search.type='search';search.placeholder='Search company, trade, contact, license';root.append(search);
+    const status=document.createElement('small');status.setAttribute('role','status');root.append(status);
+    const list=document.createElement('div');list.style.cssText='display:grid;gap:8px';root.append(list);workspaceBody.replaceChildren(root);
+    const fields=[['name','Company'],['vendor_type','Relationship'],['trade','Trade / services'],['service_area','Service area'],['contact','Primary contact'],['phone','Phone'],['email','Email'],['address','Address'],['license_number','License #'],['license_expiration','License expiration'],['insurance_expiration','Insurance expiration'],['payment_terms','Terms'],['document_references','Document references'],['notes','Notes']];
+    let records=[];
+    const editor=item=>{
+      const veil=document.createElement('div');veil.style.cssText='position:fixed;inset:0;z-index:13500;background:#17213399;display:flex;align-items:center;justify-content:center;padding:12px';
+      const form=document.createElement('form');form.className='card';form.style.cssText='width:min(700px,100%);max-height:92vh;overflow:auto;display:grid;grid-template-columns:repeat(auto-fit,minmax(205px,1fr));gap:10px';
+      const heading=document.createElement('h3');heading.textContent=item?'Edit Vendor':'New Vendor';heading.style.gridColumn='1/-1';form.append(heading);
+      for(const [key,label] of fields){const wrap=document.createElement('label');wrap.textContent=label;wrap.style.cssText='display:grid;gap:4px';const input=['notes','document_references'].includes(key)?document.createElement('textarea'):document.createElement('input');input.name=key;input.className='input';input.value=item?.[key]||'';if(key==='name')input.required=true;if(key==='email')input.type='email';if(['license_expiration','insurance_expiration'].includes(key))input.type='date';wrap.append(input);form.append(wrap)}
+      const hint=document.createElement('small');hint.setAttribute('role','status');hint.style.gridColumn='1/-1';form.append(hint);
+      const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;grid-column:1/-1';const cancel=document.createElement('button');cancel.className='btn';cancel.type='button';cancel.textContent='Cancel';cancel.onclick=()=>veil.remove();const save=document.createElement('button');save.className='btn btn-orange';save.type='submit';save.textContent='Save';buttons.append(cancel,save);form.append(buttons);veil.append(form);document.body.append(veil);
+      form.onsubmit=async e=>{e.preventDefault();save.disabled=true;hint.textContent='Saving…';const data=Object.fromEntries(fields.map(([k])=>[k,form.elements.namedItem(k).value.trim()]));try{await fetchJSON('/pds-purchase-orders/service-vendors'+(item?'/'+encodeURIComponent(item.id):''),{method:item?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});veil.remove();await refresh()}catch(err){hint.textContent=err.message||String(err);save.disabled=false}};
+    };
+    const draw=()=>{list.replaceChildren();const q=search.value.trim().toLowerCase();const shown=records.filter(r=>fields.some(([k])=>String(r[k]||'').toLowerCase().includes(q)));
+      for(const item of shown){const card=document.createElement('article');card.className='card';card.style.cssText='padding:12px;display:grid;gap:7px';const name=document.createElement('strong');name.textContent=item.name+(item.active===false?' · Inactive':'');const details=document.createElement('small');details.textContent=[item.vendor_type,item.trade,item.contact,item.phone].filter(Boolean).join(' · ');
+        const row=document.createElement('div');row.style.cssText='display:flex;flex-wrap:wrap;gap:7px';const edit=document.createElement('button');edit.className='btn';edit.textContent='Edit';edit.onclick=()=>editor(item);
+        const view=document.createElement('button');view.className='btn';view.textContent='Details';const info=document.createElement('div');info.style.cssText='white-space:pre-wrap;font-size:13px';info.hidden=true;info.textContent=fields.filter(([k])=>item[k]).map(([k,label])=>label+': '+item[k]).join('\n');view.onclick=()=>{info.hidden=!info.hidden};
+        const active=document.createElement('button');active.className='btn';active.textContent=item.active===false?'Reactivate':'Deactivate';active.onclick=async()=>{if(!confirm(active.textContent+' '+item.name+'?'))return;try{await fetchJSON('/pds-purchase-orders/service-vendors/'+encodeURIComponent(item.id)+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:item.active===false})});await refresh()}catch(err){status.textContent=err.message||String(err)}};
+        row.append(view,edit,active);card.append(name,details,row,info);list.append(card)}if(!shown.length)list.textContent='No matching vendors.'};
+    const refresh=async()=>{try{records=(await fetchJSON('/pds-purchase-orders/service-vendors')).items||[];status.textContent=records.length+' vendors';draw()}catch(err){status.textContent='Vendor directory unavailable: '+(err.message||err)}};
+    add.onclick=()=>editor(null);search.oninput=draw;await refresh();
+  }
   async function renderPdsVendorHub(returnToCustomers=false){
     setWorkspace('PDS — Suppliers');clearWorkspaceActions();
     workspaceBody.innerHTML='<div class="card" style="max-width:1160px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Suppliers</h2><p class="hint">Supplier profiles and purchase order relationships.</p></div><button class="btn" id="pdsSuppliersBack">← Business Hub</button></div><div id="pdsSuppliersCards"></div><section id="pdsSupplierEditor" hidden style="margin-top:16px"><button class="btn" id="pdsSupplierHome">← Suppliers</button><div class="card" style="margin-top:12px"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><h3>Supplier Directory</h3><button class="btn btn-orange" id="pdsSupplierNew" type="button">+ New Supplier</button></div><input class="input" id="pdsSupplierSearch" placeholder="Search suppliers, contacts, phone, email or status…" style="width:100%;box-sizing:border-box;margin:12px 0"><div id="pdsSupplierList"></div><div id="pdsSupplierFormWrap" hidden style="margin-top:18px"><h3 id="pdsSupplierFormHeading">New Supplier</h3><button class="btn" type="button" id="pdsSupplierCancel">Cancel</button><form id="pdsSupplierForm" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px"></form></div><p id="pdsSupplierMessage" class="hint"></p></div></section></div>';

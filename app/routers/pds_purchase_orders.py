@@ -519,3 +519,65 @@ def commit_import(payload: ImportBatch, request: Request):
                 _write(path,data)
         return {'created':len(records), 'skipped':sum(x['status']=='duplicate' for x in preview),
                 'kind':payload.kind,'no_existing_records_changed':True}
+
+# PDS service vendors are independent of PO material suppliers.
+SERVICE_VENDOR_FIELDS = ('name','vendor_type','trade','contact','phone','email','address',
+                         'service_area','license_number','license_expiration',
+                         'insurance_expiration','payment_terms','document_references','notes')
+
+def _service_vendor_path(request):
+    path=Path(request.app.state.data_dir)/'pds_service_vendors'
+    path.mkdir(parents=True,exist_ok=True)
+    return path/'records.json'
+
+def _service_vendor_clean(data):
+    if not isinstance(data,dict):raise HTTPException(400,'Invalid vendor')
+    cleaned={}
+    for key in SERVICE_VENDOR_FIELDS:
+        value=data.get(key,'')
+        if not isinstance(value,(str,type(None))):raise HTTPException(422,'Invalid '+key)
+        cleaned[key]=(value or '').strip()[:4000 if key in ('notes','document_references') else 300]
+    if not cleaned['name']:raise HTTPException(422,'Vendor name required')
+    return cleaned
+
+@router.get('/service-vendors')
+def service_vendors(request:Request):
+    _guard(request)
+    with _lock:return {'items':_read(_service_vendor_path(request),[])}
+
+@router.post('/service-vendors')
+def add_service_vendor(payload:POInput,request:Request):
+    _guard(request)
+    data=_service_vendor_clean(payload.data)
+    with _lock:
+        path=_service_vendor_path(request);records=_read(path,[])
+        if any(row.get('name','').casefold()==data['name'].casefold() for row in records):raise HTTPException(409,'Vendor already exists')
+        now=datetime.now(timezone.utc).isoformat()
+        record={'id':uuid.uuid4().hex,'active':True,'created_at':now,'updated_at':now,**data}
+        records.append(record);_write(path,records)
+    return {'item':record}
+
+@router.patch('/service-vendors/{vendor_id}')
+def edit_service_vendor(vendor_id:str,payload:POInput,request:Request):
+    _guard(request)
+    data=_service_vendor_clean(payload.data)
+    with _lock:
+        path=_service_vendor_path(request);records=_read(path,[])
+        if any(r['id']!=vendor_id and r.get('name','').casefold()==data['name'].casefold() for r in records):raise HTTPException(409,'Vendor already exists')
+        for row in records:
+            if row['id']==vendor_id:
+                row.update(data);row['updated_at']=datetime.now(timezone.utc).isoformat();_write(path,records)
+                return {'item':row}
+    raise HTTPException(404,'Vendor not found')
+
+@router.patch('/service-vendors/{vendor_id}/status')
+def status_service_vendor(vendor_id:str,payload:dict,request:Request):
+    _guard(request)
+    if not isinstance(payload.get('active'),bool):raise HTTPException(422,'Active must be boolean')
+    with _lock:
+        path=_service_vendor_path(request);records=_read(path,[])
+        for row in records:
+            if row['id']==vendor_id:
+                row['active']=payload['active'];row['updated_at']=datetime.now(timezone.utc).isoformat();_write(path,records)
+                return {'item':row}
+    raise HTTPException(404,'Vendor not found')
