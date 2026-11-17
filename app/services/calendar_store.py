@@ -812,7 +812,15 @@ class CalendarStore:
             old_status = str(j.get("status") or "")
 
             status_update = _normalize_status(payload.get("status_update"), str(j.get("status") or "Dispatch"))
-            if j.get("kind") == "sales_lead" and ready_to_quote:
+            # A submitted sales-lead recommendation is a request for office quoting,
+            # even when the technician forgot to tick Ready to Quote.  Do not
+            # regress a lead that has already progressed beyond quote preparation.
+            has_recommendation = bool(
+                ready_to_quote or str(payload.get("recommendations") or "").strip()
+                or str(payload.get("parts_required") or "").strip()
+                or str(payload.get("time_required") or "").strip()
+            )
+            if j.get("kind") == "sales_lead" and has_recommendation and old_status in {"Sales Lead", "Dispatch", "Scheduled"}:
                 j["status"] = "Quote"
             elif status_update in STATUSES:
                 j["status"] = status_update
@@ -926,9 +934,19 @@ class CalendarStore:
 
                 old_status = str(j.get("status") or "")
 
-                if "status_update" in payload:
+                if (j.get("kind") == "sales_lead" and old_status in {"Sales Lead", "Dispatch", "Scheduled"}
+                    and (bool(f.get("ready_to_quote")) or str(f.get("recommendations") or "").strip()
+                         or str(f.get("parts_required") or "").strip()
+                         or str(f.get("time_required") or "").strip())):
+                    j["status"] = "Quote"
+                    f["status_update"] = "Quote"
+                elif "status_update" in payload:
                     st = _normalize_status(payload.get("status_update"), str(j.get("status") or "Dispatch"))
-                    if j.get("kind") == "sales_lead" and bool(f.get("ready_to_quote")):
+                    if j.get("kind") == "sales_lead" and (
+                        bool(f.get("ready_to_quote")) or str(f.get("recommendations") or "").strip()
+                        or str(f.get("parts_required") or "").strip()
+                        or str(f.get("time_required") or "").strip()
+                    ) and old_status in {"Sales Lead", "Dispatch", "Scheduled"}:
                         j["status"] = "Quote"
                         f["status_update"] = "Quote"
                     elif st in STATUSES:

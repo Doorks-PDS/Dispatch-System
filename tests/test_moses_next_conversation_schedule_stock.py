@@ -155,6 +155,7 @@ def test_orb_and_week_scheduler_are_guarded_frontend_features():
     text=Path(__file__).resolve().parents[1].joinpath('static/app.js').read_text()
     assert 'moses-orb' in text and 'prefers-reduced-motion' in text
     assert "function renderPdsWeekScheduler()" in text
-    assert "renderAllJobsView(job.job_number||job.customer||'')" in text
+    assert "openDrawer('Job Details',body=>" in text
+    assert "renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh})" in text
     assert "'Update to Schedule'" in text
     assert "if(!confirm('Update '" in text

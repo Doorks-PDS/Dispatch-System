@@ -18,10 +18,10 @@ function mount(){
  window.openMosesDrafts=openDrafts;
  panel=h('section');panel.id='mosesDraftsPanel';panel.hidden=true;panel.style.cssText='position:fixed;inset:6vh max(14px,calc((100vw - 1100px)/2));z-index:11100;display:flex;flex-direction:column;background:#fff;border-radius:18px;box-shadow:0 15px 70px #0006;border:1px solid #dce5dd;overflow:hidden';
  const heading=h('div');heading.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px;padding:16px 20px;border-bottom:1px solid #e4e9e6';
- const title=h('strong','Moses Drafts · PDS Quote Review');const close=h('button','Close ×','btn');close.onclick=()=>{panel.hidden=true;panel.style.display='none'};heading.append(title,close);
- const instructions=h('div','Saved review tickets survive closing Moses and returning later. Approving a review ticket does not issue or email an estimate.','hint');instructions.style.padding='12px 20px 0';
+ const title=h('strong','Moses · Quote drafts');const close=h('button','Close ×','btn');close.onclick=()=>{panel.hidden=true;panel.style.display='none'};heading.append(title,close);
+ const instructions=h('div');instructions.hidden=true;
  const controls=h('div');controls.style.cssText='padding:12px 20px;display:flex;gap:10px;flex-wrap:wrap';
- const prepare=h('button','Find eligible PDS quotes','btn btn-orange');prepare.onclick=async()=>{prepare.disabled=true;try{const result=await request('/prepare','POST');announce(`${result.created} new review tickets saved. Existing review decisions were preserved.`);await render()}catch(e){announce(e.message)}finally{prepare.disabled=false}};
+ const prepare=h('button','Prepare quote reviews','btn btn-orange');prepare.onclick=async()=>{prepare.disabled=true;try{const result=await request('/prepare','POST');announce(`${result.created} new review tickets saved. Existing review decisions were preserved.`);await render()}catch(e){announce(e.message)}finally{prepare.disabled=false}};
  const refresh=h('button','Refresh drafts','btn');refresh.onclick=render;
  controls.append(prepare,refresh);
  feedback=h('small');feedback.setAttribute('role','status');feedback.style.cssText='padding:0 20px 10px;color:#45624f';
@@ -39,7 +39,7 @@ function select(label,choices,value,onchange){const wrap=h('label');wrap.style.c
 async function render(){
  if(!body)return;body.replaceChildren();announce('Loading saved Moses review tickets…');
  let rows;try{rows=(await request('')).items||[]}catch(e){announce(e.message);return}
- announce(`${rows.length} saved review tickets · All status decisions are stored on the PDS server.`);
+ announce(`${rows.length} drafts`);
  if(!rows.length){body.append(h('p','No saved Moses review tickets. Select “Find eligible PDS quotes” to examine current quote-ready recommendation forms.','hint'));return}
  const counts=h('div');counts.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin:6px 0 14px';
  for(const [key,label] of [['pending_review','Needs review'],['ready_for_estimator','Approved for estimator'],['declined','Declined']]){const n=rows.filter(x=>x.state===key).length;const pill=h('span',`${label}: ${n}`);pill.style.cssText='border:1px solid #d9e5db;padding:5px 10px;border-radius:100px;font-size:12px';counts.append(pill)}body.append(counts);
@@ -49,20 +49,18 @@ async function render(){
   const name=h('strong',item.customer||'Unnamed customer');name.style.fontSize='15px';const meta=h('small','Job #'+(item.job_number||'—')+' · '+(item.job_status||'')+' · '+(item.date||''));meta.style.color='#67756e';const status=h('div',item.state==='pending_review'?'Awaiting office decision':item.state==='ready_for_estimator'?'Approved for estimator':'Declined');status.style.fontWeight='700';status.style.fontSize='12px';
   const scope=h('p',item.scope||'Parts/freight details require review');scope.style.cssText='margin:0;white-space:pre-wrap;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;font-size:13px';
   const actions=h('div');actions.style.cssText='display:flex;flex-wrap:wrap;gap:7px';
-  const review=h('button','Open / Review','btn');review.onclick=()=>openEditor(item);actions.append(review);
-  const ticket=h('button','PDS Ticket','btn');ticket.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.job_id}}));actions.append(ticket);
+  const review=h('button','Review','btn');review.onclick=()=>openEditor(item);actions.append(review);
+  const ticket=h('button','View Job','btn');ticket.onclick=()=>{panel.hidden=true;panel.style.display='none';document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.job_id}}))};actions.append(ticket);
+  if(item.state!=='pending_review'){
+    const reopen=h('button','Reopen','btn');reopen.onclick=async()=>{reopen.disabled=true;try{await request('/'+encodeURIComponent(item.id)+'/reopen','POST',{version:item.version});await render()}catch(e){announce(e.message)}finally{reopen.disabled=false}};actions.append(reopen);
+  }
+  const archive=h('button','Remove','btn');archive.onclick=async()=>{if(!window.confirm('Remove this draft from the list? Its audit history will be preserved.'))return;archive.disabled=true;try{await request('/'+encodeURIComponent(item.id)+'/archive','POST',{version:item.version});await render()}catch(e){announce(e.message)}finally{archive.disabled=false}};actions.append(archive);
   if(item.state==='ready_for_estimator'){
     const estimate=h('button','Open Estimator','btn btn-orange');
     estimate.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-estimator',{detail:{job_id:item.job_id,draft_id:item.id}}));
-    const reopen=h('button','Return to Review','btn');reopen.onclick=async()=>{
-      if(!window.confirm('Return this approved ticket to office review? It will no longer open the estimator until reapproved.'))return;
-      reopen.disabled=true;
-      try{await request('/'+encodeURIComponent(item.id)+'/reopen','POST',{version:item.version});announce('Review reopened; edit and approve again before preparing an estimate.');await render()}
-      catch(e){announce(e.message)}finally{reopen.disabled=false}
-    };
     const delivery=h('button','Email / Delivery','btn');
     delivery.onclick=()=>openDelivery(item);
-    actions.append(estimate,delivery,reopen);
+    actions.append(estimate,delivery);
   }
   card.append(name,meta,status,scope,actions);grid.append(card);
  }
@@ -170,7 +168,7 @@ function openEditor(original){
  const item={...original,selected_parts:[...(original.selected_parts||[])]};const backdrop=h('div');backdrop.style.cssText='position:fixed;inset:0;background:#15241b85;z-index:11110;display:flex;align-items:center;justify-content:center;padding:12px';
  const dialog=h('section');dialog.style.cssText='width:min(760px,100%);max-height:94vh;overflow:auto;background:#fff;border-radius:16px;padding:22px;box-sizing:border-box';
  const top=h('div');top.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px';top.append(h('h3',`${item.customer} · #${item.job_number||'—'}`));const close=h('button','Close ×','btn');close.onclick=()=>backdrop.remove();top.append(close);dialog.append(top);
- const note=h('p','Review the technician’s recommended scope. Parts and freight need human confirmation. This does not issue or send a document.','hint');dialog.append(note);
+ const note=h('p');note.hidden=true;
  const form=h('div');form.style.cssText='display:grid;gap:12px';
  form.append(field('Proposed work / estimate description',item.scope,v=>{item.scope=v},'textarea'));
  const parts=h('div','Parts requested: '+(item.parts_required||'No parts specified'));parts.style.cssText='font-size:13px;white-space:pre-wrap;background:#f4f7f4;padding:12px;border-radius:10px';form.append(parts);
@@ -247,7 +245,11 @@ function openEditor(original){
   }
   const reply=await request('/'+encodeURIComponent(item.id)+'/decide','POST',{version:item.version,approve:approved});result.textContent=approved?'Approved for estimator. No document issued or emailed.':'Draft declined and retained for audit.';Object.assign(item,reply.item);backdrop.remove();await render();
  }catch(e){result.textContent=e.message}finally{busy(false)}};
- actions.append(save,approve,decline);form.append(actions,result);if(item.state!=='pending_review'){for(const b of [save,approve,decline])b.disabled=true;result.textContent='This ticket has a final review decision and is preserved.'}
+ actions.append(save,approve,decline);
+ const reopen=h('button','Reopen','btn');reopen.onclick=async()=>{reopen.disabled=true;try{await request('/'+encodeURIComponent(item.id)+'/reopen','POST',{version:item.version});backdrop.remove();await render()}catch(e){result.textContent=e.message}finally{reopen.disabled=false}};
+ const remove=h('button','Remove','btn');remove.onclick=async()=>{if(!window.confirm('Remove this draft from the list? Its audit history is kept.'))return;remove.disabled=true;try{await request('/'+encodeURIComponent(item.id)+'/archive','POST',{version:item.version});backdrop.remove();await render()}catch(e){result.textContent=e.message}finally{remove.disabled=false}};
+ if(item.state!=='pending_review'){for(const b of [save,approve,decline])b.hidden=true;actions.append(reopen)}
+ actions.append(remove);form.append(actions,result);
  dialog.append(form);backdrop.append(dialog);backdrop.addEventListener('dblclick',e=>{if(e.target===backdrop)backdrop.remove()});document.body.append(backdrop);
 }
 if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',mount,{once:true});else mount();

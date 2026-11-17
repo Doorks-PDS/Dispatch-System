@@ -185,6 +185,37 @@ def propose(request, kind, number):
         return {'proposal': _public(row), 'approval_required': True, 'sent': False}
 
 
+def _sync_sent_document_status(request, snapshot):
+    """Move one verified PDS job only after Resend accepts its document.
+
+    Never mutate status on preview, draft, approval proposal or uncertain send.
+    This is best-effort: a successful external send is never retried just because
+    the internal status write failed. An error is returned for office follow-up.
+    """
+    store = request.app.state.calendar_store
+    job_id = str(snapshot.get('job_id') or '').strip()
+    job = store.get_job(job_id)
+    if not job or str(job.get('job_number') or '') != str(snapshot.get('job_number') or ''):
+        raise RuntimeError('Linked PDS job changed after document send')
+    kind = snapshot['kind']
+    current = str(job.get('status') or '')
+    if kind == 'estimate':
+        # Do not regress a completed, invoiced or already-advanced job.
+        if current not in {'Quote', 'Complete/Quote'}:
+            return current
+        target = 'Quote Sent'
+    elif kind == 'invoice':
+        if current == 'Done':
+            return current
+        target = 'Done'
+    else:
+        return current
+    updated = store.update_job(job_id, {'status': target})
+    if str(updated.get('status') or '') != target:
+        raise RuntimeError('PDS job status update not verified')
+    return target
+
+
 def decide(request, proposal_id, approve):
     _guard(request)
     if not isinstance(approve, bool):
@@ -235,8 +266,20 @@ def decide(request, proposal_id, approve):
         row.update(state='sent', completed_at=_now(), provider_message_id=provider_id,
                    delivery_status='accepted_by_provider')
         _save(path, rows)
+        # The email was already accepted. Never attempt another send if status
+        # synchronization fails; show the follow-up rather than claiming success.
+        try:
+            job_status = _sync_sent_document_status(request, snap)
+            row['job_status'] = job_status
+            row['status_sync'] = 'verified'
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception('PDS document sent but job status sync failed')
+            row['status_sync'] = 'needs_review'
+        _save(path, rows)
         return {'state': 'sent', 'sent': True, 'provider_message_id': provider_id,
-                'delivery_status': 'accepted_by_provider'}
+                'delivery_status': 'accepted_by_provider',
+                'status_sync': row['status_sync'], 'job_status': row.get('job_status')}
 
 
 def _delivery_events(request, provider_ids):

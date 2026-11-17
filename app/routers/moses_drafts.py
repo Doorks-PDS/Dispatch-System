@@ -186,7 +186,7 @@ def _safe_ticket(row):
     allowed = ('id', 'job_id', 'job_number', 'customer', 'address', 'date', 'job_status',
                'state', 'scope', 'parts_required', 'parts_review', 'freight_review',
                'review_note', 'created_at', 'updated_at', 'version', 'source_form_id',
-               'approved_at', 'approved_by', 'declined_at', 'declined_by', 'selected_parts')
+               'approved_at', 'approved_by', 'declined_at', 'declined_by', 'selected_parts', 'archived_at')
     return {k: row[k] for k in allowed if k in row}
 
 
@@ -199,7 +199,7 @@ def list_drafts(request: Request):
         return {'items': [], 'count': 0, 'workspace': 'pds', 'storage': 'server_data_dir'}
     with _lock(path):
         items = _read(path)
-    return {'items': [_safe_ticket(row) for row in items[-300:][::-1]],
+    return {'items': [_safe_ticket(row) for row in items[-300:][::-1] if not row.get('archived_at')],
             'count': len(items), 'workspace': 'pds', 'storage': 'server_data_dir'}
 
 
@@ -455,19 +455,42 @@ def reopen_draft(draft_id: str, payload: DraftReopen, request: Request):
         item = _find(rows, draft_id)
         if item.get('version') != payload.version:
             raise HTTPException(409, 'Draft changed; refresh before reopening')
-        if item.get('state') != 'ready_for_estimator':
-            raise HTTPException(409, 'Only approved estimator tickets may return to review')
+        if item.get('state') not in ('ready_for_estimator', 'declined'):
+            raise HTTPException(409, 'Only decided tickets may return to review')
         _validate_source(store, item)
         stamp = _now()
         events = item.get('review_events') if isinstance(item.get('review_events'), list) else []
         events.append({'action': 'reopened', 'actor': _actor(request), 'at': stamp,
-                       'previous_approval_at': item.get('approved_at', '')})
+                       'previous_approval_at': item.get('approved_at', ''), 'previous_state': item.get('state')})
         item.update(state='pending_review', review_events=events[-30:],
                     updated_at=stamp, version=item['version'] + 1)
         _write(path, rows)
         return {'item': _safe_ticket(item), 'document_created': False,
                 'note': 'Ticket returned to review; original approval preserved in history'}
 
+
+
+@router.post('/{draft_id}/archive')
+def archive_draft(draft_id: str, payload: DraftReopen, request: Request):
+    """Hide an unwanted review while retaining decisions and audit history."""
+    _guard(request)
+    path = _file(request)
+    with _lock(path):
+        rows = _read(path)
+        item = _find(rows, draft_id)
+        if item.get('version') != payload.version:
+            raise HTTPException(409, 'Draft changed; refresh before archiving')
+        if item.get('archived_at'):
+            raise HTTPException(409, 'Draft is already archived')
+        stamp = _now()
+        events = item.get('review_events') if isinstance(item.get('review_events'), list) else []
+        events.append({'action': 'archived', 'actor': _actor(request), 'at': stamp})
+        item.update(archived_at=stamp, archived_by=_actor(request),
+                    review_events=events[-30:], updated_at=stamp,
+                    version=item['version'] + 1)
+        _write(path, rows)
+        return {'ok': True, 'archived': True, 'document_created': False,
+                'email_sent': False}
 
 def _linked_estimate_documents(request, draft_id):
     """Read-only linkage of approved Moses ticket to actual PDS estimate PDFs.
