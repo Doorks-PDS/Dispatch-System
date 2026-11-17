@@ -579,7 +579,7 @@
         for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false;setMosesMode('idle')}};
     // SDC command center: persistent approval queue. No automatic task execution.
     const commandBtn=document.createElement('button');commandBtn.type='button';commandBtn.className='btn';commandBtn.textContent='Command Center';
-    header.insertBefore(commandBtn,close);
+    headerActions.insertBefore(commandBtn,close);
     const command=document.createElement('section');command.hidden=true;command.style.cssText='display:none;gap:10px;margin-top:12px;border-top:1px solid #e1e5e9;padding-top:12px';
     const commandTitle=document.createElement('strong');commandTitle.textContent='SDC · Moses Command Center';command.append(commandTitle);
     const commandHint=document.createElement('p');commandHint.className='hint';commandHint.textContent='Moses can use read-only SDC record summaries to prepare drafts. Approval records your decision; automatic execution is not enabled.';command.append(commandHint);
@@ -732,12 +732,6 @@
   navMyAssignments.id = 'navMyAssignments';
   navMyAssignments.innerHTML = '<span>To-Do List</span><small>My jobs, leads &amp; office tasks</small>';
   if (navJobFlow && navJobFlow.parentElement) navJobFlow.parentElement.appendChild(navMyAssignments);
-  // Always provide a visible way to reach Moses, including on small Android/iOS screens.
-  const navMosesShortcut=document.createElement('button');
-  navMosesShortcut.type='button';navMosesShortcut.id='navMosesShortcut';navMosesShortcut.className='navbtn';
-  navMosesShortcut.innerHTML='<span>✨ Moses AI</span><small>Ask your assistant</small>';
-  navMosesShortcut.onclick=()=>{const bubble=document.getElementById('workspaceMosesBubble');if(bubble)bubble.click();else alert('Moses has not loaded. Refresh this page and try again.');};
-  if(navJobFlow?.parentElement)navJobFlow.parentElement.appendChild(navMosesShortcut);
 
   if (!navAllJobs) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
@@ -849,7 +843,7 @@
   // PDS navigation cleanup: move existing controls without replacing their listeners.
   const pdsJobCol=navJobFlow?.parentElement;
   const pdsOfficeCol=navDataCenter?.parentElement;
-  if(pdsJobCol) [navMyAssignments,navMosesShortcut,navJobFlow,navToDoList,navAllJobs,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
+  if(pdsJobCol) [navJobFlow,navAllJobs,navMyAssignments,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
   if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
   const pdsFormsCol=document.querySelector('#formsBody .navcol');
   if(pdsFormsCol) [navFormsTimeCard,navFormsReceipts,navFormsTimeOff,navFormsSignOff,navTakeoffs].forEach(b=>{if(b)pdsFormsCol.appendChild(b);});
@@ -4427,7 +4421,6 @@ async function apiListForms() {
     setVisible(navDoorLogs, !!role && perms.parts);
     setVisible(navToDoList, activePlatform !== 'pds' && !!role && ["office", "office_admin", "admin"].includes(String(role || "")));
     setVisible(navMyAssignments, !!role && ['tech', 'lead', 'office', 'office_admin', 'admin'].includes(String(role || '')) && activePlatform === 'pds');
-    setVisible(navMosesShortcut, !!role && activePlatform === 'pds');
     setVisible(navPricingSettings, !!role && perms.estimates);
   }
 
