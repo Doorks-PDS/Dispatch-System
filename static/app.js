@@ -6359,10 +6359,11 @@ function renderAttachmentSection(titleText, items, options = {}) {
       timeInput.value=String(job.scheduled_time||'');timeLabel.append(timeInput);row.append(timeLabel);
       const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:7px';
       const savePlan=document.createElement('button');savePlan.type='button';savePlan.className='btn';savePlan.textContent='Save plan';
+      const moveDate=document.createElement('button');moveDate.type='button';moveDate.className='btn';moveDate.textContent='Move Date';
       const update=document.createElement('button');update.type='button';update.className='btn btn-orange';update.textContent='Update to Schedule';
       const note=document.createElement('small');note.className='hint';note.setAttribute('role','status');
       note.textContent='';
-      buttons.append(savePlan,update);plan.append(heading,row,buttons,note);card.appendChild(plan);
+      buttons.append(savePlan,moveDate,update);plan.append(heading,row,buttons,note);card.appendChild(plan);
       fetchJSON('/pds-scheduling/assignable-staff').then(result=>{
         const staff=[...(result.staff||[])].sort((a,b)=>String(a.name||'').localeCompare(String(b.name||'')));
         staffOptions=staff;const values=(job.planned_employee_ids?.length?job.planned_employee_ids:job.assigned_employee_ids?.length?job.assigned_employee_ids:[job.planned_employee_id||'']);employeeRows.replaceChildren();for(const id of values)selectRow(String(id));
@@ -6401,6 +6402,20 @@ function renderAttachmentSection(titleText, items, options = {}) {
                 job.scheduled_time=body.scheduled_time;note.textContent='Visit plan saved. Original job date and status unchanged.';}
         }catch(err){note.textContent='Not confirmed: '+(err.message||err)}
         finally{savePlan.disabled=update.disabled=false;}
+      };
+      // Move the actual shared calendar date independently of staff/time planning.
+      moveDate.onclick=async()=>{
+        const target=dateInput.value;
+        if(!target){note.textContent='Choose a date to move this job.';return;}
+        if(target===String(job.date||'')){note.textContent='Already on this calendar date.';return;}
+        if(!confirm('Move '+(job.job_number||job.customer)+' to '+target+' on the shared calendar?'))return;
+        moveDate.disabled=true;note.textContent='Moving calendar date…';
+        try{
+          const actual=await apiUpdateJob(job.id,{date:target,scheduled_date:target});
+          if(String(actual?.date||'')!==target)throw Error('Calendar date was not verified');
+          renderJobDetails(container,actual,ctx);refreshBadges();
+          if(ctx?.afterSave)await ctx.afterSave();
+        }catch(err){note.textContent='Move could not be verified: '+(err.message||err);moveDate.disabled=false;}
       };
       savePlan.onclick=()=>submit(false);update.onclick=()=>submit(true);
     }
@@ -8069,8 +8084,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
 
-  // PDS office dispatch board. Dragging only stages a proposed change;
-  // explicit Update to Schedule is required to persist any change.
+  // PDS office dispatch board. Dropping moves the shared calendar date after confirmation;
+  // staff/time changes still require Update to Schedule.
   async function renderPdsWeekScheduler(){
     if(!isOfficeUser() || (document.body.dataset.platform||'')!=='pds'){
       showLoggedOutSplash('PDS office access required for scheduling');return;
@@ -8156,8 +8171,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         for(const day of days){const column=document.createElement('section');column.className='card';column.style.cssText='min-height:120px;padding:7px;display:grid;align-content:start;gap:5px;border:1px solid #dbe3e8;background:#fafcfd';
           const heading=document.createElement('strong');heading.textContent=new Date(day+'T12:00:00').toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});column.append(heading);
           column.ondragover=e=>{if(e.dataTransfer?.types.includes('text/plain'))e.preventDefault()};
-          column.ondrop=e=>{e.preventDefault();const id=e.dataTransfer?.getData('text/plain');const job=jobs.find(j=>j.id===id);if(job&&day!==job.date)editVisit(job,day,staff,refresh)};
-          for(const job of jobs.filter(j=>j.date===day || (j.scheduled_date===day&&j.date!==day))){const card=document.createElement('article');card.draggable=!!job.id;card.style.cssText='padding:7px;border-radius:8px;background:white;border:1px solid #dce3e8;display:grid;gap:3px;cursor:grab;font-size:12px;min-width:0';
+          column.ondrop=async e=>{
+            e.preventDefault();const id=e.dataTransfer?.getData('text/plain');
+            const job=jobs.find(j=>j.id===id);
+            if(!job||day===job.date)return;
+            if(!confirm('Move '+(job.job_number||job.customer)+' to '+day+' on the shared calendar?'))return;
+            notice.textContent='Moving '+(job.job_number||job.customer)+'…';
+            try{
+              const saved=await apiUpdateJob(job.id,{date:day,scheduled_date:day});
+              if(String(saved?.date||'')!==day)throw Error('Saved calendar date was not verified');
+              await refresh();notice.textContent='Moved '+(job.job_number||job.customer)+' to '+day+'.';
+            }catch(err){notice.textContent='Move failed: '+(err.message||err);}
+          };
+          for(const job of jobs.filter(j=>j.date===day)){const card=document.createElement('article');card.draggable=!!job.id;card.style.cssText='padding:7px;border-radius:8px;background:white;border:1px solid #dce3e8;display:grid;gap:3px;cursor:grab;font-size:12px;min-width:0';
             card.ondragstart=e=>{e.dataTransfer.setData('text/plain',job.id);e.dataTransfer.effectAllowed='move'};
             const name=document.createElement('strong');name.textContent=job.customer||'Dispatch';name.style.cssText='font-size:12px;line-height:1.25;overflow-wrap:anywhere';const detail=document.createElement('small');detail.textContent=[job.job_number,job.scheduled_time,job.status].filter(Boolean).join(' · ');
             const person=document.createElement('small');person.textContent=job.assigned_names?.join(', ')||'Unassigned';
