@@ -4408,9 +4408,9 @@ async function apiListForms() {
   function accessForRole(role) {
     const all = { calendar: true, forms: true, jobFlow: true, office: true, chat: true, notifications: true, atlas: true, moses: true, payroll: true, employees: true, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: true, dataUpload: true };
     if (role === "office_admin") return all;
-    if (role === "office") return { ...all, chat: false, atlas: false, moses: false, dataUpload: false };
-    if (role === "lead") return { calendar: true, forms: true, jobFlow: true, office: true, chat: false, notifications: true, atlas: false, moses: false, payroll: false, employees: false, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: false, dataUpload: false };
-    if (role === "tech") return { calendar: true, forms: true, jobFlow: true, office: false, chat: false, notifications: true, atlas: false, moses: false, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false, dataUpload: false };
+    if (role === "office") return { ...all, chat: false, atlas: false, moses: true, dataUpload: false };
+    if (role === "lead") return { calendar: true, forms: true, jobFlow: true, office: true, chat: false, notifications: true, atlas: false, moses: true, payroll: false, employees: false, dataCenter: true, customers: true, estimates: true, parts: true, saddleback: false, dataUpload: false };
+    if (role === "tech") return { calendar: true, forms: true, jobFlow: true, office: false, chat: false, notifications: true, atlas: false, moses: true, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false, dataUpload: false };
     return { calendar: false, forms: false, jobFlow: false, office: false, chat: false, notifications: false, atlas: false, moses: false, payroll: false, employees: false, dataCenter: false, customers: false, estimates: false, parts: false, saddleback: false, dataUpload: false };
   }
 
@@ -5918,7 +5918,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
   // Moses draft review links to existing PDS ticket/estimator, not a duplicate editor.
   document.addEventListener('moses-open-pds-job', async event => {
-    if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
+    if (activePlatform !== 'pds' || !['office_admin','office','lead'].includes(currentUser?.role)) return;
     const jobId = String(event.detail?.job_id || '');
     if (!/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) return;
     try {
@@ -5935,7 +5935,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     } catch (error) { alert('Could not open PDS ticket: ' + (error.message || error)); }
   });
   document.addEventListener('moses-open-pds-standard-estimator', async event => {
-    if(activePlatform!=='pds'||currentUser?.role!=='office_admin')return;
+    if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(currentUser?.role))return;
     const jobId=String(event.detail?.job_id||'');
     if(!/^[a-zA-Z0-9_-]{1,80}$/.test(jobId))return;
     try{
@@ -5947,7 +5947,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }catch(error){alert('Estimate generator unavailable: '+(error.message||error))}
   });
   document.addEventListener('moses-open-pds-estimator', async event => {
-    if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
+    if (activePlatform !== 'pds' || !['office_admin','office','lead'].includes(currentUser?.role)) return;
     const jobId = String(event.detail?.job_id || '');
     const draftId = String(event.detail?.draft_id || '');
     if (!/^[a-f0-9]{32}$/.test(draftId)) return;
@@ -6119,7 +6119,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }
 
     const fields = document.createElement("div");
-    fields.className = "grid2";
+    fields.className = "grid2 pds-ticket-reference-grid";
     fields.style.marginTop = "10px";
     // The office ticket uses the same field renderer as the customer/vendor ticket.
     // Keep the original markup as a fail-safe if the shared module cannot load.
@@ -6153,11 +6153,11 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
     const officeNotes = document.createElement("div");
     officeNotes.style.marginTop = "10px";
-    officeNotes.className="pds-highlight-notes";officeNotes.style.cssText="padding:13px 15px;border:1px solid #f58220;border-left:2px solid #f58220;border-radius:10px;background:#fff;margin:10px 0";officeNotes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Office Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.office_notes || "—")}</div>`;
+    officeNotes.className="pds-highlight-notes";officeNotes.style.cssText="padding:13px 15px;border:1px solid #dbe3e9;border-radius:10px;background:#fff;margin:10px 0";officeNotes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Office Notes</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.office_notes || "—")}</div>`;
 
     const notes = document.createElement("div");
     notes.style.marginTop = "10px";
-    notes.className="pds-highlight-notes";notes.style.cssText="padding:13px 15px;border:1px solid #f58220;border-left:2px solid #f58220;border-radius:10px;background:#fff;margin:10px 0";notes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Job Description</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.description || job.job_notes || "—")}</div>`;
+    notes.className="pds-highlight-notes";notes.style.cssText="padding:13px 15px;border:1px solid #dbe3e9;border-radius:10px;background:#fff;margin:10px 0";notes.innerHTML = `<div class="label" style="font-weight:900;color:#9a4600;font-size:14px;margin-bottom:7px">Job Description</div><div class="field" style="white-space:pre-wrap;">${escapeHtml(job.description || job.job_notes || "—")}</div>`;
 
     const audit = document.createElement("div");
     audit.style.marginTop = "12px";
@@ -8426,7 +8426,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
   // Office work queue: uses saved PDS jobs and the existing review/estimator tools.
   // No LLM call, automatic email, status change or staff assignment is performed here.
   async function openPdsJobFlowWorkQueue(){
-    if(activePlatform!=='pds'||currentUser?.role!=='office_admin')return;
+    if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(currentUser?.role))return;
     const previous=document.getElementById('pdsMosesWorkQueue');if(previous)previous.remove();
     const veil=document.createElement('div');veil.id='pdsMosesWorkQueue';veil.style.cssText='position:fixed;inset:0;z-index:11090;background:#101d2b70;display:flex;align-items:center;justify-content:center;padding:12px';
     const dialog=document.createElement('section');dialog.style.cssText='background:#fff;border:1px solid #dce3e9;border-radius:16px;width:min(1100px,100%);height:min(88vh,900px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 44px #0004';
@@ -8731,7 +8731,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
     // Office Job Flow: compact Moses entry point for estimates, parts, invoices
     // and quote assignments. This does not automatically send or change records.
-    if(activePlatform==='pds'&&String(currentUser?.role||'')==='office_admin') {
+    if(activePlatform==='pds'&&['office_admin','office','lead'].includes(String(currentUser?.role||''))) {
       const batchBar=document.createElement('div');batchBar.style.cssText='display:flex;align-items:center;gap:8px;margin:4px 0 12px';
       const batchBtn=document.createElement('button');batchBtn.type='button';batchBtn.className='btn btn-orange';
       batchBtn.textContent='✦ Moses';batchBtn.setAttribute('aria-label','Moses — Job Flow assistant');

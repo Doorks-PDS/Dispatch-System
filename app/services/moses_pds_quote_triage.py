@@ -14,7 +14,7 @@ def _require_admin(request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Sign in required')
     if (request.session.get('active_platform') != 'pds' or
-            getattr(request.state, 'auth_role', None) != 'office_admin'):
+            getattr(request.state, 'auth_role', None) not in ('office_admin','office','lead')):
         raise HTTPException(403, 'PDS office administrator access required')
 
 

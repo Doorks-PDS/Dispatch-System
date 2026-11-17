@@ -8,7 +8,7 @@ API = (ROOT / 'app/routers/moses_drafts.py').read_text(encoding='utf-8')
 
 
 def test_pds_context_cards_are_white_with_subtle_outline():
-    assert APP.count('border:1px solid #f58220;border-left:2px solid #f58220') == 2
+    assert APP.count('border:1px solid #dbe3e9;border-radius:10px;background:#fff;margin:10px 0') == 2
     assert 'background:#fffaf5' not in APP
 
 

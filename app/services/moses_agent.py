@@ -769,7 +769,7 @@ def read_only_recovery(request, message: str, history: list[dict[str,str]]) -> s
     from zoneinfo import ZoneInfo
     from app.routers.doorks_assistant import _request_model, _model_answer
     platform = request.session.get('active_platform')
-    if platform not in ('pds','doorks','sdc') or getattr(request.state,'auth_role',None)!='office_admin':
+    if platform not in ('pds','doorks','sdc') or (getattr(request.state,'auth_role',None)!='office_admin' and not (platform=='pds' and getattr(request.state,'auth_role',None) in ('office','lead'))):
         raise PermissionError('Office admin access required')
     key = os.getenv('OPENAI_API_KEY','').strip()
     if not key:

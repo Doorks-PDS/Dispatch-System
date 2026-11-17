@@ -16,3 +16,12 @@
 .pds-office-ticket>.pds-office-group>.grid2{margin-top:12px}
 .pds-office-ticket .pds-office-section-label{margin:5px 0 -8px}
 @media(max-width:680px){.pds-office-intake>.pds-office-group,.pds-office-ticket>.pds-office-group{padding:12px}.pds-office-group>.grid2{grid-template-columns:minmax(0,1fr)!important}.pds-office-intake-actions{position:static}}
+
+/* Moses 5.3: restrained PDS job ticket emphasis and consistent reference inputs. */
+.pds-office-ticket .pds-highlight-notes {border-color:#dbe3e9!important;background:#fff!important;box-shadow:none!important}
+.pds-office-ticket .pds-highlight-notes>.label {color:#a44d09!important}
+.pds-office-ticket .pds-ticket-reference-grid>.grid2,
+.pds-office-ticket .pds-ticket-reference-grid>div {min-width:0}
+.pds-office-ticket .pds-ticket-reference-grid .field,
+.pds-office-ticket .pds-ticket-reference-grid input.input {box-sizing:border-box;width:100%;min-width:0;min-height:42px;height:auto;line-height:1.35;margin:0;padding:10px 12px}
+.pds-office-ticket .pds-ticket-reference-grid input.input {height:42px;max-height:42px}

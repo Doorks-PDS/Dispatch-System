@@ -26,7 +26,7 @@ MAX_BATCH = 100
 def _guard(request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Sign in required')
-    if request.session.get('active_platform') != 'pds' or getattr(request.state, 'auth_role', None) != 'office_admin':
+    if request.session.get('active_platform') != 'pds' or getattr(request.state, 'auth_role', None) not in ('office_admin','office','lead'):
         raise HTTPException(403, 'Active PDS office administrator required')
     return request.app.state.calendar_store
 
@@ -375,6 +375,8 @@ def update_draft(draft_id: str, payload: DraftEdit, request: Request):
 
 @router.post('/{draft_id}/decide')
 def decide_draft(draft_id: str, payload: DraftDecision, request: Request):
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Office administrator approval required')
     store = _guard(request)
     path = _file(request)
     with _lock(path):
@@ -407,6 +409,8 @@ def decide_draft(draft_id: str, payload: DraftDecision, request: Request):
 
 @router.get('/{draft_id}/handoff')
 def estimator_handoff(draft_id: str, request: Request):
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Office administrator handoff required')
     """Revalidate reviewed ticket and return safe unsent estimator inputs.
 
     Never creates or prices a PDS estimate. Explicit freight review is passed as
@@ -581,6 +585,8 @@ class MosesNewPart(BaseModel):
 
 @router.post('/parts/intake/create')
 def moses_create_catalog_part(payload: MosesNewPart, request: Request):
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Office administrator catalog approval required')
     """PDS-admin, manual price, duplicate-safe one-click part intake.
 
     No purchase, automatic price lookup, or external action occurs.

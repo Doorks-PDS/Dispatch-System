@@ -30,7 +30,9 @@ def test_ticket_buttons_removed_but_only_five_reference_fields_are_inline():
     helper = source.split('  function attachInlineJobReferences', 1)[1].split('  function renderJobDetails', 1)[0]
     for key in ('po_number', 'estimate_number', 'sent_quote_number', 'quote_assigned_to', 'invoice_number'):
         assert "'" + key + "'" in helper
-    assert helper.count("['") == 5
+    import re
+    map_entries = re.findall(r"\['[^']+', '(po_number|estimate_number|sent_quote_number|quote_assigned_to|invoice_number)'\]", helper)
+    assert len(map_entries) == 5 and len(set(map_entries)) == 5
 
 
 def test_pds_inbox_is_workspace_scoped(monkeypatch):

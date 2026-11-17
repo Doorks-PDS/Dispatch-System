@@ -15,7 +15,7 @@ def _guard(request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Sign in to use Moses')
     platform = request.session.get('active_platform')
-    if platform not in _ALLOWED or getattr(request.state, 'auth_role', None) != 'office_admin':
+    if platform not in _ALLOWED or (getattr(request.state, 'auth_role', None) != 'office_admin' and not (platform == 'pds' and getattr(request.state, 'auth_role', None) in ('office','lead'))):
         raise HTTPException(403, 'Active workspace office administrator required')
     return platform
 

@@ -75,13 +75,23 @@ def test_saved_draft_detail_verified_and_unpriced(connected):
 
 
 @pytest.mark.parametrize('platform,role,user,status', [
-    ('pds','tech',True,403),('pds','office',True,403),('sdc','office',True,403),
+    ('pds','tech',True,403),('sdc','office',True,403),
     ('pds','office_admin',False,401),('unknown','office_admin',True,403),
 ])
 def test_guards(connected,platform,role,user,status):
     with pytest.raises(HTTPException) as e:
         action.overview(Request(connected,platform=platform,role=role,logged_in=user))
     assert e.value.status_code==status
+
+
+def test_pds_office_read_only_action_center(connected):
+    result = action.overview(Request(connected, platform='pds', role='office'))
+    assert result['workspace'] == 'pds' and result['read_only'] is True
+
+
+def test_pds_lead_read_only_action_center(connected):
+    result = action.overview(Request(connected, platform='pds', role='lead'))
+    assert result['workspace'] == 'pds' and result['read_only'] is True
 
 
 def test_workspace_isolation(connected):

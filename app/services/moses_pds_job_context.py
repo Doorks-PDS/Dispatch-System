@@ -13,7 +13,7 @@ def _guard(request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Sign in required')
     if (request.session.get('active_platform') != 'pds' or
-            getattr(request.state, 'auth_role', None) != 'office_admin'):
+            getattr(request.state, 'auth_role', None) not in ('office_admin','office','lead')):
         raise HTTPException(403, 'Active PDS office administrator required')
     return getattr(request.app.state, 'calendar_store', None)
 

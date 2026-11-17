@@ -10,7 +10,7 @@ def test_job_flow_button_opens_office_queue_not_failed_ai_chat():
     assert "async function openPdsJobFlowWorkQueue()" in APP
     assert "Review the PDS Job Flow. Identify unassigned Quote jobs" not in APP
     assert "const groups={quotes,invoices,parts}" in APP
-    assert "if(activePlatform!=='pds'||currentUser?.role!=='office_admin')return" in APP
+    assert "if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(currentUser?.role))return" in APP
 
 
 def test_todo_actions_use_existing_workflows_and_keep_job_id():

@@ -1130,6 +1130,19 @@ def _model_answer(output):
 def chat(payload:Message,request:Request):
     platform=allowed(request)
     text=payload.message.strip()
+    # Staff and leads: natural-language insight without privileged tool execution.
+    # A failed read-only AI call falls through to the existing deterministic search.
+    if platform == 'pds' and getattr(request.state, 'auth_role', None) in ('office','lead'):
+        try:
+            from app.services.moses_agent import readiness, read_only_recovery
+            if readiness('pds')['ready_for_live_check']:
+                answer_text=read_only_recovery(request, text, payload.history[-10:])
+                return {'answer':answer_text, 'workspace':platform, 'matches':[], 'navigation':[],
+                        'read_only':True,'agent_mode':'staff_read_only',
+                        'action_proposals':[],'document_proposals':[]}
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).warning('Moses staff read-only unavailable exception_type=%s',type(exc).__name__)
     # A selected action ID is just a pointer; the server validates saved receipts.
     from app.services.moses_conversation import followup as _moses_followup
     verified_followup = _moses_followup(request, text, payload.action_context)
@@ -1183,7 +1196,7 @@ def chat(payload:Message,request:Request):
                     'Moses live conversation failed workspace=%s exception_type=%s',
                     platform, type(exc).__name__)
                 # Recover only SDK schema validation, never make unsafe writes.
-                if type(exc).__name__ == 'ValidationError' and type(exc).__module__.startswith('pydantic'):
+                if type(exc).__name__ == 'ValidationError' and type(exc).__module__.startswith('pydantic') and not getattr(request.state, 'moses_action_proposals', None) and not getattr(request.state, 'moses_document_proposals', None):
                     try:
                         details=exc.errors(include_input=False,include_url=False)
                         summary=[{'type':v.get('type'),'loc':v.get('loc')} for v in details[:4]]
@@ -1195,6 +1208,32 @@ def chat(payload:Message,request:Request):
                                 'action_proposals':[],'document_proposals':[]}
                     except Exception as recovery_error:
                         logging.getLogger(__name__).error('Moses read-only recovery failed exception_type=%s',type(recovery_error).__name__)
+                # Non-destructive second path: the read-only model can still explain
+                # verified business facts after SDK/tool failures. NEVER re-run any
+                # tool call or retry after a saved action/document proposal exists.
+                from app.services.moses_agent_recovery_policy import may_retry_read_only
+                if may_retry_read_only(exc, request):
+                    try:
+                        from app.services.moses_agent import read_only_recovery
+                        safe_answer = read_only_recovery(request, text, history)
+                        return {'answer': safe_answer, 'workspace': platform,
+                                'matches': [], 'navigation': [], 'agent_connected': True,
+                                'agent_mode': 'read_only_recovery', 'read_only': True,
+                                'action_proposals': [], 'document_proposals': []}
+                    except Exception as recovery_error:
+                        logging.getLogger(__name__).warning(
+                            'Moses safe conversational recovery failed workspace=%s exception_type=%s',
+                            platform, type(recovery_error).__name__)
+                # If live conversation fails on a broad work-priority question,
+                # return an actual saved-record briefing, never a fabricated AI answer.
+                # Document-mail requests are handled above and cannot use this path.
+                from app.services.moses_butler_recovery import recover_office_priorities
+                safe = recover_office_priorities(request, text, platform)
+                if safe is not None:
+                    return {'answer': safe, 'workspace': platform,
+                            'matches': [], 'navigation': [], 'agent_connected': False,
+                            'agent_mode': 'verified_read_only', 'read_only': True,
+                            'action_proposals': [], 'document_proposals': []}
                 return {'answer': 'Moses could not connect to the AI service. No changes were made.',
                         'workspace': platform, 'matches': [], 'navigation': [],
                         'agent_connected': False, 'action_proposals': [], 'document_proposals': []}
@@ -1204,7 +1243,7 @@ def chat(payload:Message,request:Request):
                     'document_proposals': request.state.moses_document_proposals}
     # Record lookup is restricted to office admins; technicians receive generic help.
     role=str(getattr(request.state,'auth_role',''))
-    can_search=role=='office_admin'
+    can_search=role in ('office_admin','office','lead') if platform=='pds' else role=='office_admin'
     matches=[]
     query=text.lower()
     # Deterministic PDS quote triage: run against saved forms, not model guesses.

@@ -29,7 +29,7 @@ def _guard(request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Sign in required')
     workspace = request.session.get('active_platform')
-    if workspace not in KINDS or getattr(request.state, 'auth_role', None) != 'office_admin':
+    if workspace not in KINDS or (getattr(request.state, 'auth_role', None) != 'office_admin' and not (workspace == 'pds' and getattr(request.state, 'auth_role', None) in ('office','lead'))):
         raise HTTPException(403, 'Active workspace office administrator required')
     return workspace
 
