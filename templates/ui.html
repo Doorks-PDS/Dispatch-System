@@ -28,6 +28,31 @@
     .platform-current-label {display:none;border:1px solid rgba(255,255,255,.5);border-radius:999px;background:rgba(109,43,0,.24);color:white;font-weight:750;font-size:13px;padding:9px 17px;}
     @media(max-width:640px){.topbar-inner > .brand{font-size:24px}.platform-switch-label{display:none!important}.topbar-inner > .topbar-right{min-width:88px}.platform-current-label{padding:8px 12px}}
     @media(max-width:640px){body[data-platform="pds"] .topbar-inner > .brand{font-size:clamp(12px,3.7vw,18px);max-width:calc(100vw - 205px);overflow:hidden;text-overflow:ellipsis;letter-spacing:-.4px} .platform-switch-wrap{margin-left:8px;gap:5px}.platform-switch-label{display:none}.platform-select-shell{min-width:102px}.platform-select{padding:8px 27px 8px 12px}}
+    /* Mobile: keep the PDS title, calendar and workspace selector on-screen. */
+    @media (max-width: 700px) {
+      html, body {width:100%;max-width:100%;overflow-x:clip;}
+      .topbar .topbar-inner {width:100%;max-width:100%;padding:10px 9px;min-height:62px;
+        display:grid;grid-template-columns:42px minmax(0,1fr) 86px;gap:6px;align-items:center;}
+      .topbar-inner > .topbar-left,.topbar-inner > .topbar-right {position:static!important;
+        top:auto!important;left:auto!important;right:auto!important;transform:none!important;margin:0!important;min-width:0!important;}
+      .topbar-inner > .brand,body[data-platform="pds"] .topbar-inner > .brand {
+        position:static!important;left:auto!important;transform:none!important;max-width:100%!important;
+        min-width:0;font-size:clamp(12px,3.7vw,17px)!important;line-height:1.2;
+        overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:center;letter-spacing:-.35px;}
+      .topbar .header-calendar-btn {font-size:17px;padding:8px;max-width:42px;}
+      .topbar-inner > .topbar-right {justify-content:flex-end;width:86px;}
+      .platform-switch-wrap{margin:0!important;min-width:0;}
+      .platform-select-shell{min-width:0!important;width:83px;max-width:83px;}
+      .platform-select{padding:8px 20px 8px 9px;font-size:12px;}
+      .platform-select-chevron{right:7px;}
+      .platform-current-label{padding:8px!important;max-width:82px;}
+      main.layout {width:calc(100% - 16px)!important;max-width:100%;padding:0!important;
+        grid-template-columns:minmax(0,1fr)!important;gap:12px!important;}
+      main.layout > .sidebar,main.layout > .workspace,.sidebar .panel,.sidebar .navcol {min-width:0;max-width:100%;}
+      .sidebar .navbtn {min-width:0;max-width:100%;gap:8px;}
+      .sidebar .navbtn small {min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right;}
+      #workspaceBody {max-width:100%;min-width:0;}
+    }
   </style>
 </head>
 <body>

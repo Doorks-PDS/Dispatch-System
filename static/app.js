@@ -118,7 +118,7 @@
         .moses-chat-shell button:focus-visible,.moses-chat-shell textarea:focus-visible{outline:3px solid #3caaa3;outline-offset:2px}
         .moses-launch-glow{display:inline-block;vertical-align:middle;width:13px;height:13px;border-radius:50%;
           background:radial-gradient(circle at 35% 30%,#e9fff8,#7fdec4 35%,#1f84a2 70%,#163955);box-shadow:0 0 0 2px #ffffff6e,0 0 14px #8edfd0}
-        @media(max-width:640px){.moses-chat-shell{right:8px!important;bottom:8px!important;left:8px!important;width:auto!important;
+        @media(max-width:640px){#workspaceMosesBubble{position:fixed!important;right:calc(12px + env(safe-area-inset-right))!important;bottom:calc(12px + env(safe-area-inset-bottom))!important;z-index:11000!important;min-height:48px!important;visibility:visible!important} .moses-chat-shell{right:8px!important;bottom:8px!important;left:8px!important;width:auto!important;
           max-height:calc(100dvh - 16px)!important;border-radius:17px!important}.moses-chat-history{padding:10px 12px!important}
           .moses-compose{padding:10px 12px 12px}.moses-chat-header{padding:11px 12px}}
         @media(prefers-reduced-motion:reduce){.moses-launch-glow{animation:none!important}}
@@ -730,8 +730,14 @@
   const navMyAssignments = document.createElement('button');
   navMyAssignments.className = 'navbtn';
   navMyAssignments.id = 'navMyAssignments';
-  navMyAssignments.innerHTML = '<span>My To-Do List</span><small>My assigned jobs &amp; leads</small>';
+  navMyAssignments.innerHTML = '<span>To-Do List</span><small>My jobs, leads &amp; office tasks</small>';
   if (navJobFlow && navJobFlow.parentElement) navJobFlow.parentElement.appendChild(navMyAssignments);
+  // Always provide a visible way to reach Moses, including on small Android/iOS screens.
+  const navMosesShortcut=document.createElement('button');
+  navMosesShortcut.type='button';navMosesShortcut.id='navMosesShortcut';navMosesShortcut.className='navbtn';
+  navMosesShortcut.innerHTML='<span>✨ Moses AI</span><small>Ask your assistant</small>';
+  navMosesShortcut.onclick=()=>{const bubble=document.getElementById('workspaceMosesBubble');if(bubble)bubble.click();else alert('Moses has not loaded. Refresh this page and try again.');};
+  if(navJobFlow?.parentElement)navJobFlow.parentElement.appendChild(navMosesShortcut);
 
   if (!navAllJobs) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
@@ -843,7 +849,7 @@
   // PDS navigation cleanup: move existing controls without replacing their listeners.
   const pdsJobCol=navJobFlow?.parentElement;
   const pdsOfficeCol=navDataCenter?.parentElement;
-  if(pdsJobCol) [navJobFlow,navToDoList,navAllJobs,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
+  if(pdsJobCol) [navMyAssignments,navMosesShortcut,navJobFlow,navToDoList,navAllJobs,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
   if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
   const pdsFormsCol=document.querySelector('#formsBody .navcol');
   if(pdsFormsCol) [navFormsTimeCard,navFormsReceipts,navFormsTimeOff,navFormsSignOff,navTakeoffs].forEach(b=>{if(b)pdsFormsCol.appendChild(b);});
@@ -4419,8 +4425,9 @@ async function apiListForms() {
     setVisible(navEstimateInvoice, !!role && perms.estimates);
     setVisible(navPartsList, false); // Available through Business Hub
     setVisible(navDoorLogs, !!role && perms.parts);
-    setVisible(navToDoList, !!role && ["office", "office_admin", "admin"].includes(String(role || "")));
-    setVisible(navMyAssignments, !!role && ['tech', 'lead', 'office', 'office_admin'].includes(String(role || '')) && activePlatform === 'pds');
+    setVisible(navToDoList, activePlatform !== 'pds' && !!role && ["office", "office_admin", "admin"].includes(String(role || "")));
+    setVisible(navMyAssignments, !!role && ['tech', 'lead', 'office', 'office_admin', 'admin'].includes(String(role || '')) && activePlatform === 'pds');
+    setVisible(navMosesShortcut, !!role && activePlatform === 'pds');
     setVisible(navPricingSettings, !!role && perms.estimates);
   }
 
@@ -7774,16 +7781,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
   // Personal work tickets; no fabricated mileage. The office can set a
   // specific visit order later; until then date and job number are authoritative.
   function renderMyAssignments() {
-    if (!currentUser || !['tech','lead','office','office_admin'].includes(String(currentUser.role || ''))) return;
+    if (!currentUser || !['tech','lead','office','office_admin','admin'].includes(String(currentUser.role || ''))) return;
     setNavActive(navMyAssignments);
     setActiveChip('Work Flow');
-    setWorkspace('My To-Do List');
+    setWorkspace('To-Do List');
     clearWorkspaceActions();
     const root = document.createElement('div');
     const heading = document.createElement('div');
     heading.className = 'card';
     const h = document.createElement('h3');
-    h.textContent = 'My Assigned Jobs & Sales Leads';
+    h.textContent = 'My Jobs & Sales Leads';
     const hint = document.createElement('p');
     hint.className = 'hint';
     hint.textContent = 'Assignments are tentative and may change. All PDS jobs remain on the shared calendar.';
@@ -7801,8 +7808,48 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     const list = document.createElement('div');
     list.style.cssText = 'display:grid;gap:10px;margin:12px 0';
     root.append(list);
+    // One To-Do List for PDS. Office staff also see assigned quotes and
+    // invoices requiring attention; technicians see only their assigned jobs.
+    const officeTasks=document.createElement('section');
+    if(isOfficeUser()) {
+      officeTasks.className='card';
+      officeTasks.style.marginTop='14px';
+      const officeHeader=document.createElement('h3');officeHeader.textContent='Office Quotes & Invoices';
+      const officeNote=document.createElement('p');officeNote.className='hint';
+      officeNote.textContent='Quotes assigned to you, plus the office invoice queue. No records are changed from this list.';
+      const scheduler=document.createElement('button');scheduler.className='btn btn-orange';scheduler.type='button';
+      scheduler.textContent='▦ Weekly Dispatch Scheduler';scheduler.style.marginBottom='12px';
+      scheduler.onclick=()=>renderPdsWeekScheduler();
+      const officeList=document.createElement('div');officeList.style.cssText='display:grid;gap:10px';
+      officeTasks.append(officeHeader,officeNote,scheduler,officeList);root.append(officeTasks);
+      officeTasks._refresh=async()=>{
+        officeList.replaceChildren();
+        try{
+          const [jobs,employees]=await Promise.all([apiListJobs({limit:5000}),apiListEmployees().catch(()=>[])]);
+          const me=[currentUser.name,currentUser.full_name,currentUser.username].map(v=>String(v||'').trim().toLowerCase()).filter(Boolean);
+          const mine=assignedQuoteJobs(jobs).filter(j=>{
+            const name=normalizeQuoteAssigneeName(j.quote_assigned_to,employees).trim().toLowerCase();
+            return me.includes(name)||me.includes(String(j.quote_assigned_to||'').trim().toLowerCase());
+          });
+          const invoiceQueue=jobs.filter(j=>['To Be Invoiced','Complete'].includes(String(j.status||''))&&!j.invoice_number&&j.kind!=='sales_lead');
+          for(const [heading,items] of [['My Assigned Quotes',mine],['Office Invoices To Review',invoiceQueue]]){
+            const title=document.createElement('h4');title.textContent=heading+' ('+items.length+')';title.style.margin='12px 0 2px';officeList.append(title);
+            if(!items.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No pending items';officeList.append(empty);continue;}
+            for(const job of items){
+              const card=document.createElement('div');card.className='jobrow';
+              const name=document.createElement('strong');name.textContent=job.customer||'Job';
+              const info=document.createElement('p');info.className='hint';info.textContent=[job.job_number&&'Job #'+job.job_number,job.status,job.date].filter(Boolean).join(' · ');
+              const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='Open Ticket';
+              open.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',body=>{const local=document.createElement('div');body.append(local);renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh})})}catch(error){alert('Unable to open job: '+(error.message||error))}};
+              card.append(name,info,open);officeList.append(card);
+            }
+          }
+        }catch(error){const msg=document.createElement('p');msg.className='hint';msg.textContent='Unable to load office tasks: '+(error.message||error);officeList.append(msg)}
+      };
+    }
     workspaceBody.replaceChildren(root);
     async function refresh() {
+      if(officeTasks._refresh)officeTasks._refresh();
       list.replaceChildren();
       const loading = document.createElement('p');
       loading.textContent = 'Loading assignments…';
