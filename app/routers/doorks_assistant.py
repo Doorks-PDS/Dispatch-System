@@ -12,6 +12,7 @@ router=APIRouter(prefix='/doorks-assistant',tags=['doorks-assistant'])
 class Message(BaseModel):
     message: str=Field(min_length=1,max_length=1500)
     history: list[dict[str, str]] = Field(default_factory=list, max_length=12)
+    action_context: dict[str, str] = Field(default_factory=dict)
 
 def allowed(request):
     if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Sign in to use Moses')
@@ -92,11 +93,25 @@ async def atlas_public_chat(payload: AtlasPublicQuestion, request: Request):
     return {'answer':answer.strip()[:900], 'scope':'public_product_only'}
 
 
+@router.get('/pds/quote-triage')
+def moses_pds_quote_triage(request: Request):
+    """Read-only readiness scan of saved PDS quotes and forms."""
+    from app.services.moses_pds_quote_triage import triage
+    return triage(request)
+
+
 @router.get('/briefing')
 def moses_business_briefing(request: Request):
     """Current business priorities from verified records, without AI inference."""
     from app.services.moses_briefing import brief
     return brief(request)
+
+
+@router.get('/priorities')
+def moses_verified_priorities(request: Request):
+    """Current, authorized review suggestions from saved workspace records."""
+    from app.services.moses_priorities import priorities
+    return priorities(request)
 
 
 
@@ -109,6 +124,13 @@ class MosesButlerPrepare(BaseModel):
 
 class MosesButlerDecision(BaseModel):
     approve: bool
+
+@router.get('/butler/followthrough')
+def moses_butler_followthrough(request: Request):
+    """Saved-record follow-through desk; no send, approve or write operations."""
+    from app.services.moses_followthrough import desk
+    return desk(request)
+
 
 @router.get('/butler/actions/pending')
 def moses_butler_pending(request: Request):
@@ -124,6 +146,21 @@ def moses_butler_capabilities(request: Request):
 def moses_butler_prepare(payload: MosesButlerPrepare, request: Request):
     from app.services.moses_butler_flow import prepare
     return prepare(request, payload.kind, payload.record_id, payload.details)
+
+@router.get('/butler/actions/continuations')
+def moses_butler_continuations(request: Request):
+    from app.services.moses_butler_flow import ready_continuations
+    return ready_continuations(request)
+
+@router.get('/butler/actions/{kind}/{proposal_id}/next-step')
+def moses_butler_next_step(kind: str, proposal_id: str, request: Request):
+    from app.services.moses_butler_flow import next_step
+    return next_step(request, kind, proposal_id)
+
+@router.post('/butler/actions/{kind}/{proposal_id}/next-step/prepare')
+def moses_butler_prepare_next_step(kind: str, proposal_id: str, request: Request):
+    from app.services.moses_butler_flow import prepare_next_step
+    return prepare_next_step(request, kind, proposal_id)
 
 @router.get('/butler/actions/{kind}/{proposal_id}/receipt')
 def moses_butler_receipt(kind: str, proposal_id: str, request: Request):
@@ -1093,6 +1130,11 @@ def _model_answer(output):
 def chat(payload:Message,request:Request):
     platform=allowed(request)
     text=payload.message.strip()
+    # A selected action ID is just a pointer; the server validates saved receipts.
+    from app.services.moses_conversation import followup as _moses_followup
+    verified_followup = _moses_followup(request, text, payload.action_context)
+    if verified_followup is not None:
+        return {'workspace': platform, 'matches': [], 'navigation': [], **verified_followup}
     # Client history is untrusted conversation context, never a source of business facts.
     history=[]
     for turn in payload.history[-10:]:
@@ -1101,11 +1143,53 @@ def chat(payload:Message,request:Request):
         content=turn.get("content")
         if role in ("user","assistant") and isinstance(content,str) and content.strip():
             history.append({"role":role,"content":content.strip()[:1200]})
+    # Explicit PDS document delivery belongs to the verified Moses agent, not
+    # the deterministic quote/job lookup. Never route without active SDK tools.
+    from app.services.moses_pds_document_intent import is_pds_document_mail_request
+    if platform == 'pds' and getattr(request.state, 'auth_role', None) == 'office_admin' and is_pds_document_mail_request(text):
+        from app.services.moses_agent import enabled as _moses_tools_enabled
+        if not _moses_tools_enabled('pds'):
+            return {'answer': 'PDS document emailing requires the enabled Moses agent. No email was prepared or sent.',
+                    'workspace': platform, 'matches': [], 'navigation': [], 'agent_connected': False}
+        request.state.moses_action_proposals = []
+        request.state.moses_document_proposals = []
+        try:
+            from app.services.moses_agent import answer as _moses_agent_answer
+            _answer = _moses_agent_answer(request, text, history)
+        except Exception as exc:
+            import logging
+            logging.getLogger(__name__).error('Moses PDS document request failed exception_type=%s', type(exc).__name__)
+            return {'answer': 'Moses could not verify this request. Review existing email approvals before retrying.',
+                    'workspace': platform, 'matches': [], 'navigation': [], 'agent_connected': False}
+        return {'answer': _answer, 'workspace': platform, 'matches': [], 'navigation': [],
+                'action_proposals': request.state.moses_action_proposals,
+                'document_proposals': request.state.moses_document_proposals,
+                'agent_connected': True}
     # Record lookup is restricted to office admins; technicians receive generic help.
     role=str(getattr(request.state,'auth_role',''))
     can_search=role=='office_admin'
     matches=[]
     query=text.lower()
+    # Deterministic PDS quote triage: run against saved forms, not model guesses.
+    # Do not misclassify ordinary customer-specific quote requests as queue triage.
+    import re as _triage_re
+    triage_intent = bool(_triage_re.search(
+        r'\b(?:quote triage|quote readiness|jobs? (?:ready|eligible) (?:for|to) (?:quote|estimate)|'
+        r'which jobs? (?:have|has) (?:recommendation|completion) forms?|'
+        r'(?:review|go through|check|analy[sz]e|assess) (?:the |my |our |all )?'
+        r'(?:pds )?(?:jobs? )?(?:that )?(?:need(?:ing)? quotes?|quote queue)|'
+        r'prepare (?:the |all )?eligible estimates?)\b', query))
+    if can_search and platform == 'pds' and triage_intent:
+        from app.services.moses_pds_quote_triage import triage, summary
+        try:
+            scan = triage(request)
+        except HTTPException:
+            return {'answer': 'I cannot verify PDS quote readiness from the saved job records right now. No records were changed.',
+                    'workspace': 'pds', 'matches': [], 'queue_cards': [], 'read_only': True}
+        return {'answer': summary(scan), 'workspace': 'pds',
+                'matches': [], 'queue_cards': scan['groups'], 'read_only': True,
+                'triage': {'counts': scan['counts'], 'total_needing_quote': scan['total_needing_quote']},
+                'navigation': [{'label': 'Open All Jobs', 'target': 'all_jobs'}]}
     # Office-admin requests for a daily briefing are deterministic and should
     # not require a live model. Never blend PDS/Doorks/SDC records together.
     import re as _brief_re
@@ -1115,10 +1199,10 @@ def chat(payload:Message,request:Request):
         r'what(?: is|\x27s) on my plate|give me (?:a |my )?(?:overview|briefing|priorities)|'
         r'today(?:\x27s)? priorities)\b', query))
     if can_search and daily_brief_intent:
-        from app.services.moses_briefing import brief, summary
+        from app.services.moses_priorities import priorities, summary
         from fastapi import HTTPException as _BriefHTTPException
         try:
-            report = brief(request)
+            report = priorities(request)
         except _BriefHTTPException as exc:
             return {'answer': ('I cannot verify a current briefing from the saved '
                                'records in this workspace. No records were changed.'),
@@ -1126,7 +1210,37 @@ def chat(payload:Message,request:Request):
                     'read_only': True, 'briefing_available': False}
         return {'answer': summary(report), 'workspace': platform,
                 'matches': [], 'navigation': [], 'read_only': True,
-                'briefing_available': True, 'briefing': report}
+                'briefing_available': True, 'briefing': report, 'priority_cards': report['priorities']}
+    # PDS approval counts are verified locally before any AI call. The scoped
+    # adapter returns only aggregate counts, not payroll details or employee names.
+    if can_search and platform == 'pds':
+        import re as _payroll_re
+        if (_payroll_re.search(r'\b(timecards?|time cards?)\b', query)
+                and _payroll_re.search(r'\b(approv|pending|unapproved|outstanding|still|how many)\w*\b', query)):
+            from app.services.moses_pds_timecards import pending_approvals
+            month_match = _payroll_re.search(r'\b(20\d{2})[-/](0?[1-9]|1[0-2])\b', query)
+            month = (f"{month_match.group(1)}-{int(month_match.group(2)):02d}"
+                     if month_match else '')
+            try:
+                counts = pending_approvals(request, month)
+            except HTTPException as exc:
+                return {'answer': ('I cannot verify the PDS timecard approvals right now. '
+                                   'The saved timecards were not changed.'),
+                        'workspace': platform, 'matches': [], 'navigation': [
+                            {'label': 'Open Payroll', 'target': 'payroll'}],
+                        'read_only': True, 'payroll_available': False,
+                        'error_status': exc.status_code}
+            answer = (f"For {counts['month']}, {counts['pending_approval']} of "
+                      f"{counts['total_timecards']} saved PDS timecards still need approval. "
+                      f"{counts['approved']} are approved.")
+            if counts['approval_status_needs_review']:
+                answer += (f" {counts['approval_status_needs_review']} have an unusual "
+                           'approval status requiring manual review.')
+            answer += ' No timecards were changed.'
+            return {'answer': answer, 'workspace': platform, 'matches': [],
+                    'navigation': [{'label': 'Open Payroll', 'target': 'payroll'}],
+                    'read_only': True, 'payroll_available': True,
+                    'approval_summary': counts}
     # Follow-up context is conversational only, not authority to change records.
     # Resolve short references such as 'what about those expenses?' for read-only queries.
     if platform == 'sdc' and len(query.split()) <= 7 and not any(
@@ -1209,6 +1323,15 @@ def chat(payload:Message,request:Request):
                     'queue_cards': queue_cards,
                     'navigation': [{'label': 'Open All Jobs', 'target': 'all_jobs'}],
                     'workspace': platform}
+        # Read-only category queues above are authoritative and retain their cards.
+        # For a specific quote-preparation request, let Moses use the verified
+        # PDS search + draft tools rather than returning a static job suggestion.
+        # If the workspace agent is disabled the original fallback remains.
+        if quote_request:
+            from app.services.moses_quote_conversation import dispatch as _quote_agent_dispatch
+            _quote_response = _quote_agent_dispatch(request, text, history)
+            if _quote_response is not None:
+                return _quote_response
         terms = []
         if quote_request:
             # Natural requests: "provide estimate for previous Irvine company job
@@ -1261,6 +1384,9 @@ def chat(payload:Message,request:Request):
                 if quote_request:
                     ident = str(item.get('job_number') or '').casefold()
                     search_ok = all(t in (customer + ' ' + ident) for t in terms)
+                    # Customer-name typos must not silently select the wrong job.
+                    # A conservative fuzzy fallback runs only when exact lookup
+                    # finds nothing, below, and never fuzzes a job number.
                 else:
                     search_ok = bool(tokens) and all(t in searchable for t in tokens)
                 if search_ok:
@@ -1275,6 +1401,43 @@ def chat(payload:Message,request:Request):
                 if len(matches) >= 100:
                     break
             if quote_request:
+                if not matches and terms and not any(any(ch.isdigit() for ch in t) for t in terms):
+                    # A typed customer name can differ slightly from the saved
+                    # spelling. Match against customer names only, never freeform
+                    # notes or other jobs. Require a single, high-confidence name.
+                    from difflib import SequenceMatcher
+                    needle_name = ' '.join(terms)
+                    candidates = []
+                    for item in jobs:
+                        if not isinstance(item, dict):
+                            continue
+                        name = str(item.get('customer') or item.get('customer_name') or '').strip()
+                        if not name:
+                            continue
+                        normalized = ' '.join(re.findall(r'[a-z0-9]+', name.casefold()))
+                        score = SequenceMatcher(None, needle_name, normalized).ratio()
+                        if score >= 0.84:
+                            candidates.append((score, item))
+                    candidates.sort(key=lambda pair: pair[0], reverse=True)
+                    if candidates:
+                        best = candidates[0][0]
+                        # Multiple jobs for the same customer are valid; show
+                        # choices. Different similarly named customers require
+                        # user confirmation rather than an arbitrary selection.
+                        possible = [(score, item) for score, item in candidates
+                                    if best - score <= 0.04]
+                        names = {str(item.get('customer') or item.get('customer_name') or '').casefold()
+                                 for _, item in possible}
+                        if len(names) == 1:
+                            matches = [{
+                                'type': 'jobs', 'id': str(item.get('id') or '')[:80],
+                                'name': str(item.get('customer') or item.get('customer_name') or '')[:140],
+                                'status': str(item.get('status') or '')[:60],
+                                'job_number': str(item.get('job_number') or '')[:60],
+                                'date': str(item.get('date') or '')[:30],
+                                'address': str(item.get('address') or '')[:200],
+                                'navigate': 'all_jobs', 'fuzzy_customer_match': True,
+                            } for _, item in possible[:8]]
                 if not matches:
                     return {'answer': ('I could not verify a matching PDS job in the saved job records. '
                                        'Try the exact customer name or job number. '
@@ -1297,6 +1460,8 @@ def chat(payload:Message,request:Request):
                     if candidate.get(key):
                         summary.append(f"{label}: {candidate[key]}")
                 lines = ['I found a saved PDS job for estimate review: ' + ' | '.join(summary) + '.']
+                if candidate.get('fuzzy_customer_match'):
+                    lines.append('The customer name is a close spelling match; verify the job card before continuing.')
                 lines.extend(scope[:12])
                 if job.get('completion_form_count'):
                     lines.append(f"Saved completion forms: {job['completion_form_count']}. Review the forms in the job before pricing.")

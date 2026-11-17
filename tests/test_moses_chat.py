@@ -386,7 +386,8 @@ def test_agent_sdk_tools_are_read_only_or_proposal_only(monkeypatch):
     assert result == 'Done, no records changed'
     assert captured['run_kwargs']['max_turns'] == 5
     assert captured['config']['tracing_disabled'] is True
-    assert len(captured['tools']) == 25
+    assert len(captured['tools']) == 26
+    assert len({tool.__name__ for tool in captured['tools']}) == len(captured['tools'])
     assert {'get_business_briefing', 'get_moses_permissions'} <= {fn.__name__ for fn in captured['tools']}
     assert 'propose_customer_estimate_email' in {fn.__name__ for fn in captured['tools']}
     assert 'propose_draft_purchase_order' in {fn.__name__ for fn in captured['tools']}

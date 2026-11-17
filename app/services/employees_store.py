@@ -157,6 +157,12 @@ class EmployeesStore:
         if "password" in payload:
             item["password"] = str(payload.get("password") or "").strip()
 
+        if "scheduling_profile" in payload:
+            profile = payload["scheduling_profile"]
+            if not isinstance(profile, dict):
+                raise ValueError("Invalid scheduling profile")
+            item["scheduling_profile"] = profile
+
         item["updated_at"] = _now_iso()
         items[idx] = item
         data["items"] = items

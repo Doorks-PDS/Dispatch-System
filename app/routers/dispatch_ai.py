@@ -78,3 +78,88 @@ async def extract(request: Request, file: Optional[UploadFile] = File(default=No
     if fields['address']:warnings.append('Confirm this is the service address, not a billing or signature address.')
     else:warnings.append('Service address not confidently identified; select manually.')
     return {"ok": True, "fields": fields, "review_required": ["customer", "address"], "warnings": warnings, "message": "No job was created. Verify the extracted details before saving."}
+
+
+
+# Moses document-intake existing-job lookup. Read-only and workspace-scoped.
+from pydantic import BaseModel as _MosesBaseModel
+
+class MosesExistingJobLookup(_MosesBaseModel):
+    job_number: str = ''
+    estimate_number: str = ''
+
+
+def _moses_document_ref(value: str):
+    value = str(value or '').strip()
+    if len(value) > 90 or any(ord(char) < 32 for char in value):
+        raise HTTPException(422, 'Invalid document reference')
+    return value.casefold()
+
+
+def _moses_existing_job_lookup(rows, job_number, estimate_number):
+    """Return only exact saved reference matches, never a fuzzy customer guess."""
+    ref_job = _moses_document_ref(job_number)
+    ref_estimate = _moses_document_ref(estimate_number)
+    if not ref_job and not ref_estimate:
+        return {'found': False, 'candidates': [], 'conflict': False, 'match_basis': 'no_references'}
+    if not isinstance(rows, list) or any(not isinstance(j, dict) for j in rows):
+        raise HTTPException(503, 'PDS saved jobs unavailable')
+    found = []
+    for job in rows:
+        is_job = bool(ref_job and str(job.get('job_number') or '').strip().casefold() == ref_job)
+        is_estimate = bool(ref_estimate and (str(job.get('estimate_number') or '').strip().casefold() == ref_estimate
+                    or str(job.get('sent_quote_number') or '').strip().casefold() == ref_estimate))
+        if not (is_job or is_estimate):
+            continue
+        id_value = str(job.get('id') or '').strip()
+        if not id_value:
+            continue
+        found.append({
+            'id': id_value[:90], 'job_number': str(job.get('job_number') or '')[:80],
+            'customer': str(job.get('customer') or '')[:140],
+            'address': str(job.get('address') or '')[:220],
+            'status': str(job.get('status') or '')[:80],
+            'estimate_number': str(job.get('estimate_number') or '')[:80],
+            'matched_job_number': is_job, 'matched_estimate_number': is_estimate,
+            'estimate_reference_unlinked': bool(ref_estimate and is_job and not is_estimate),
+        })
+    found.sort(key=lambda x: (not x['matched_job_number'], not x['matched_estimate_number'], x['job_number']))
+    # Two separate records matching two different references must never be conflated.
+    conflict = len(found) > 1 or (bool(ref_job) and bool(ref_estimate) and bool(found)
+        and any(x['matched_estimate_number'] and not x['matched_job_number'] for x in found))
+    return {'found': bool(found), 'candidates': found[:8], 'count': len(found),
+            'conflict': conflict, 'match_basis': 'exact_saved_reference',
+            'read_only': True, 'records_changed': False}
+
+
+@router.post('/match-existing')
+def match_existing_pds_job(payload: MosesExistingJobLookup, request: Request):
+    if not getattr(request.state, 'auth_user', None) or getattr(request.state, 'auth_role', None) != 'office_admin' or request.session.get('active_platform') != 'pds':
+        raise HTTPException(403, 'PDS office administrator access required')
+    try:
+        rows = request.app.state.calendar_store.list_jobs()
+    except (AttributeError, OSError, TypeError, ValueError) as exc:
+        raise HTTPException(503, 'PDS saved job records unavailable') from exc
+    return _moses_existing_job_lookup(rows, payload.job_number, payload.estimate_number)
+
+
+# Moses PDS document difference review; exact saved job, explicit per-field approval.
+class MosesDocumentCompare(_MosesBaseModel):
+    job_number: str
+    fields: dict
+
+class MosesDocumentApply(_MosesBaseModel):
+    job_number: str
+    expected_version: str
+    changes: dict
+    confirmed: bool = False
+
+@router.post('/compare-existing')
+def compare_existing_pds_document(payload: MosesDocumentCompare, request: Request):
+    from app.services.moses_document_changes import compare
+    return compare(request, payload.job_number, payload.fields)
+
+@router.post('/apply-existing')
+def apply_existing_pds_document(payload: MosesDocumentApply, request: Request):
+    from app.services.moses_document_changes import apply
+    return apply(request, payload.job_number, payload.expected_version, payload.changes, payload.confirmed)

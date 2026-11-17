@@ -89,9 +89,47 @@
         agentStatus.textContent='Enhanced Moses status unavailable for this account.';
       }
     };
+    const priorityPreview=document.createElement('section');
+    priorityPreview.style.cssText='display:grid;gap:8px;margin:8px 0;padding:10px;border:1px solid #d8e3dc;border-radius:12px;background:#f8faf9';
+    const priorityHeader=document.createElement('div');priorityHeader.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:8px';
+    const priorityTitle=document.createElement('strong');priorityTitle.textContent='Moses · Work priorities';
+    const priorityRefresh=document.createElement('button');priorityRefresh.type='button';priorityRefresh.className='btn';priorityRefresh.textContent='Refresh';
+    priorityHeader.append(priorityTitle,priorityRefresh);
+    const priorityContent=document.createElement('div');priorityContent.className='hint';priorityContent.textContent='Open Moses to review saved business priorities.';
+    priorityPreview.append(priorityHeader,priorityContent);
+    let priorityLoadedWorkspace=null,priorityLoading=false;
+    const refreshMosesPriorities=async(force=false)=>{
+      const workspace=document.body.dataset.platform||'';
+      if(priorityLoading||(!force&&priorityLoadedWorkspace===workspace))return;
+      priorityLoading=true;priorityContent.textContent='Reviewing saved '+workspace.toUpperCase()+' work…';
+      try{
+        const report=await fetchJSON('/doorks-assistant/priorities');
+        if((document.body.dataset.platform||'')!==workspace)return;
+        if(report?.workspace!==workspace||report?.verified!==true)throw Error('Workspace priority review not verified');
+        priorityLoadedWorkspace=workspace;priorityContent.replaceChildren();
+        const note=document.createElement('small');note.textContent='Suggested review order · Read-only · '+String(report.total_matched||0)+' matching items';priorityContent.append(note);
+        for(const entry of (report.priorities||[]).slice(0,4)){
+          const record=entry.record||{};
+          const item=document.createElement('div');item.style.cssText='padding:8px 0;border-top:1px solid #e3e9e5;display:grid;gap:3px';
+          const title=document.createElement('strong');title.textContent=[record.job_number||record.order_number||record.document_number||'',record.customer||record.customer_name||record.company||record.name||'',record.status||''].filter(Boolean).join(' · ')||'Saved record';
+          const detail=document.createElement('small');detail.textContent=String(entry.suggestion||'Review saved record');item.append(title,detail);
+          if(workspace==='pds'&&record.id){
+            const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='Find in All Jobs';
+            open.onclick=()=>{panel.hidden=true;renderAllJobsView();const field=document.getElementById('all_jobs_search');if(field){field.value=record.job_number||record.customer||'';document.getElementById('all_jobs_refresh')?.click();}};
+            item.append(open);
+          }
+          priorityContent.append(item);
+        }
+        if(!(report.priorities||[]).length){const empty=document.createElement('small');empty.textContent='No matches in the available queues. Other work may still need attention.';priorityContent.append(empty);}
+      }catch(error){if((document.body.dataset.platform||'')===workspace)priorityContent.textContent='Priorities unavailable for this account: '+(error.message||'Unable to verify records');}
+      finally{priorityLoading=false;}
+    };
+    priorityRefresh.onclick=()=>refreshMosesPriorities(true);
     const history=document.createElement('div');history.style.cssText='min-height:95px;max-height:230px;overflow:auto;display:grid;gap:9px;margin:10px 0';
     const input=document.createElement('textarea');input.className='input';input.rows=2;input.placeholder='Ask Moses a question…';input.style.width='100%';
     const send=document.createElement('button');send.className='btn';send.textContent='Send to Moses';send.style.margin='8px 0';
+    const quoteTriageBtn=document.createElement('button');quoteTriageBtn.type='button';quoteTriageBtn.className='btn';quoteTriageBtn.textContent='Review PDS quotes';quoteTriageBtn.title='Scan saved jobs and recommendation forms without changing records';quoteTriageBtn.hidden=true;
+
     // Moses Voice (opt-in). Browser-local speech synthesis and recognition.
     // Browser speech recognition may use the browser vendor's cloud service.
     // Only recognized text is sent to Moses when the user presses Send.
@@ -177,7 +215,39 @@
       card.append(title);
       const status=document.createElement('small');status.setAttribute('role','status');
       status.textContent=proposal.state==='needs_review'?'Manual review required — not executed.':
+        proposal.state==='executed'?'Saved action executed — checking the next step.':
         'Awaiting your approval — no change executed.';card.append(status);
+       const showNextStep=async(receipt)=>{
+         if(!receipt?.executed || receipt.requires_manual_review ||
+            !['new_work_order','estimate_draft'].includes(kind) ||
+            document.body.dataset.platform!=='doorks')return;
+         const nextUrl='/doorks-assistant/butler/actions/'+encodeURIComponent(kind)+'/'+encodeURIComponent(proposal.id)+'/next-step';
+         let next;
+         try{next=await fetchJSON(nextUrl)}catch(e){return;}
+         if(!next?.available || !next.record_id || card.querySelector('[data-moses-next-step]'))return;
+         const continueBtn=document.createElement('button');continueBtn.className='btn btn-orange';continueBtn.type='button';
+         continueBtn.dataset.mosesNextStep='true';continueBtn.textContent=next.label||'Prepare next step';
+         const note=document.createElement('small');note.textContent=next.note||'New action requires separate approval.';
+         continueBtn.onclick=async()=>{
+           continueBtn.disabled=true;
+           try{
+             const result=await fetchJSON(nextUrl+'/prepare',{method:'POST'});
+             if(!/^[a-f0-9]{32}$/.test(String(result.proposal_id||'')) || result.executed!==false || result.approval_required!==true)
+               throw new Error('Next action proposal was not verified');
+             continueBtn.remove();note.textContent='New approval request created; nothing executed yet.';
+             const actionKind=String(next.next_kind||'');
+             if(!['estimate_draft','estimate_to_invoice'].includes(actionKind))throw new Error('Unexpected next action');
+             showButlerAction({id:result.proposal_id,butler_action:actionKind,
+                               kind:actionKind==='estimate_draft'?'draft_work_order_estimate':'estimate_to_draft_invoice',
+                               record_id:result.record_id,state:'pending',workspace:'doorks'},container);
+           }catch(e){
+             note.textContent='Could not prepare next step: '+e.message+'. Review pending approvals before retrying.';
+             // The request may have reached the server. Do not blindly repeat it.
+           }
+         };
+         card.append(continueBtn,note);
+       };
+      if (proposal.state==='executed') { void showNextStep({executed:true,requires_manual_review:false}); }
       if (proposal.state==='pending') {
         const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px';
         for (const [approve,label] of [[true,'Approve'],[false,'Reject']]) {
@@ -188,18 +258,75 @@
             for(const control of buttons.querySelectorAll('button'))control.disabled=true;
             const path='/doorks-assistant/butler/actions/'+encodeURIComponent(kind)+'/'+encodeURIComponent(proposal.id);
             try {
-              await fetchJSON(path+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve})});
+              // Once a decision reaches the server, a failed receipt lookup is
+              // uncertain, NOT a reason to enable Approve again.
+              const result=await fetchJSON(path+'/decide',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve})});
               const receipt=await fetchJSON(path+'/receipt');
-              status.textContent=receipt.executed?'Confirmed executed and saved · '+receipt.proposal_id:
-                receipt.state==='rejected'?'Rejected — nothing executed.':
-                'Not confirmed: '+receipt.state+'; review the pending queue.';
+              if(receipt?.proposal_id===proposal.id && receipt?.workspace===(document.body.dataset.platform||''))
+                mosesLastAction={kind,proposal_id:proposal.id,workspace:receipt.workspace};
+              status.textContent=receipt.executed
+                ? (receipt.current_record_matches===false
+                    ? 'Saved action executed; current PDS job has changed. Review the ticket.'
+                    : 'Verified saved action receipt · '+receipt.proposal_id)
+                : receipt.state==='rejected'?'Rejected — nothing executed.':
+                  'Not confirmed: '+receipt.state+'; review the pending queue.';
               add('Moses',status.textContent);
+              await showNextStep(receipt);
             } catch(err) {
-              status.textContent='No execution confirmed: '+err.message+'. Refresh approvals before retrying.';
-              for(const control of buttons.querySelectorAll('button'))control.disabled=false;
+              status.textContent='Decision status uncertain: '+err.message+'. Refresh pending actions and check the saved receipt; do not submit again.';
+              // Even a network failure during POST might happen after execution.
+              // An explicit refreshed server state is the only safe retry gate.
+              const refresh=document.createElement('button');refresh.className='btn';refresh.type='button';refresh.textContent='Check saved receipt';
+              refresh.onclick=async()=>{
+                refresh.disabled=true;
+                try{
+                  const receipt=await fetchJSON(path+'/receipt');
+                  status.textContent=receipt.executed
+                    ? (receipt.current_record_matches===false?'Executed previously; current PDS status differs — review ticket.':'Saved action executed · '+receipt.proposal_id)
+                    : receipt.state==='rejected'?'Rejected.':
+                      'Saved state: '+receipt.state+'. Use the pending actions list for a fresh decision.';
+                  refresh.remove();
+                  await showNextStep(receipt);
+                }catch(e){status.textContent='Receipt unavailable: '+e.message+'. Ask an administrator to verify before another attempt.';refresh.disabled=false;}
+              };
+              buttons.after(refresh);
             }
           });buttons.append(button);
         }card.append(buttons);
+      }
+      container.append(card);
+    };
+    const showPdsDocumentEmail=(proposal,container=actionPanel)=>{
+      if(document.body.dataset.platform!=='pds'||proposal?.kind!=='pds_document_email'||
+         !/^[a-f0-9]{32}$/.test(String(proposal.id||'')))return;
+      const kind=String(proposal.document_kind||'');
+      const number=String(proposal.number||'');
+      if(!['estimate','invoice'].includes(kind)||!/^(RE|JS)[0-9]{5,}$/.test(number))return;
+      const card=document.createElement('section');card.style.cssText='border:1px solid #cbd5e1;border-radius:10px;padding:12px;display:grid;gap:8px';
+      const title=document.createElement('strong');title.textContent='PDS '+kind+' '+number+' — approval required';card.append(title);
+      const recipient=document.createElement('div');recipient.textContent='To: '+String(proposal.to||'')+' · From: '+String(proposal.from||'');card.append(recipient);
+      const subject=document.createElement('div');subject.textContent='Attachment: '+String(proposal.filename||'')+' · Subject: '+String(proposal.subject||'');card.append(subject);
+      const status=document.createElement('small');status.setAttribute('role','status');status.textContent='Not sent. Review document and recipient before approving.';card.append(status);
+      if(proposal.state==='pending'){
+        const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px';
+        for(const [approve,label] of [[true,'Approve and send'],[false,'Reject']]){
+          const btn=document.createElement('button');btn.type='button';btn.className='btn';btn.textContent=label;
+          btn.onclick=async()=>{
+            if(document.body.dataset.platform!=='pds'){status.textContent='Workspace changed; refresh approvals.';return;}
+            if(approve&&!window.confirm('Send saved PDS '+kind+' '+number+' to '+String(proposal.to||'')+' with the verified PDF attached?'))return;
+            for(const b of buttons.querySelectorAll('button'))b.disabled=true;
+            try{
+              const result=await fetchJSON('/moses-pds-email/proposals/'+encodeURIComponent(proposal.id)+'/decision',
+                {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve})});
+              status.textContent=result.state==='sent'&&result.sent===true ?
+                'Confirmed sent through Resend.':result.state==='rejected'?
+                'Rejected. No email sent.':'Send not confirmed ('+String(result.state||'unknown')+'). Check delivery history before retrying.';
+              add('Moses',status.textContent);
+            }catch(e){status.textContent='No email confirmed: '+e.message+'. Inspect the saved approval before retrying.';}
+          };
+          buttons.append(btn);
+        }
+        card.append(buttons);
       }
       container.append(card);
     };
@@ -248,6 +375,16 @@
         }
         available++;
       }catch(error){console.warn('Butler inbox unavailable',error);}
+      if(workspace==='pds'){
+        try{
+          const emails=await fetchJSON('/moses-action-center/pds/document-emails/pending');
+          for(const p of emails.proposals||[]){
+            if(seen.has(p.id))continue;
+            showPdsDocumentEmail(p);seen.add(p.id);total++;
+          }
+          available++;
+        }catch(error){console.warn('PDS document approvals unavailable',error);}
+      }
       try {
         // Preserve legacy approvals until all existing action types are mapped.
         const queue=await fetchJSON('/doorks-assistant/'+workspace+'/actions/pending');
@@ -257,12 +394,87 @@
         }
         available++;
       }catch(error){console.warn('Legacy action inbox unavailable',error);}
-      actionNote.textContent=available?(total?total+' Moses approvals to review.':'No pending Moses actions.'):
+      if(workspace==='doorks'){
+        try{
+          const ready=await fetchJSON('/doorks-assistant/butler/actions/continuations');
+          for(const proposal of ready.items||[]){
+            showButlerAction(proposal);
+          }
+        }catch(e){console.warn('Moses continuations unavailable',e);}
+      }
+      actionNote.textContent=available?(total?total+' Moses approvals to review.':'No pending Moses actions. Review available workflow continuations below.'):
         'Approval queue unavailable. No change was made.';
     };
+    // Read-only follow-through desk: verified exceptions, pending approvals, PDS jobs.
+    const followButton=document.createElement('button');followButton.type='button';
+    followButton.className='btn';followButton.textContent='Moses · Follow-through';
+    const followPanel=document.createElement('section');followPanel.hidden=true;
+    followPanel.style.cssText='display:grid;gap:9px;margin:8px 0;padding:12px;border:1px solid #d9dee7;border-radius:12px;background:#fff';
+    const followHeading=document.createElement('strong');followHeading.textContent='Follow-through · saved records';
+    const followStatus=document.createElement('small');followStatus.setAttribute('role','status');
+    followPanel.append(followHeading,followStatus);
+    const followRefresh=document.createElement('button');followRefresh.type='button';followRefresh.className='btn';followRefresh.textContent='Refresh verified items';followPanel.append(followRefresh);
+    const followResults=document.createElement('div');followResults.style.cssText='display:grid;gap:8px';followPanel.append(followResults);
+    let followBusy=false;
+    const followCard=(heading,description)=>{
+      const card=document.createElement('article');card.style.cssText='display:grid;gap:6px;padding:11px;border:1px solid #e0e4e8;border-radius:10px';
+      const title=document.createElement('strong');title.textContent=heading;const detail=document.createElement('small');detail.textContent=description;
+      card.append(title,detail);followResults.append(card);return card;
+    };
+    const followLoad=async()=>{
+      if(followBusy)return;followBusy=true;followRefresh.disabled=true;followResults.replaceChildren();
+      const workspace=document.body.dataset.platform||'';
+      followStatus.textContent='Checking the current workspace…';
+      try{
+        const data=await fetchJSON('/doorks-assistant/butler/followthrough');
+        if(workspace!==document.body.dataset.platform)return;
+        if(data.workspace!==workspace)throw new Error('Workspace changed during refresh');
+        const approvals=data.approvals||{},delivery=data.delivery||{},work=data.work||{},drafts=data.drafts||{};
+        followStatus.textContent='Read-only · '+workspace.toUpperCase()+' · No actions performed';
+        for(const [title,section] of [['Pending approvals',approvals],['Moses saved drafts',drafts],['Email delivery exceptions',delivery],['PDS job follow-ups',work]]){
+          const head=document.createElement('div');head.style.cssText='font-weight:700;margin-top:7px';
+          head.textContent=title+' · '+(section.available?String(section.count??0):'Unavailable');followResults.append(head);
+          if(!section.available){followCard('Not verified',section.note||'Saved source unavailable');continue;}
+          if(!section.items?.length){followCard('No flagged items',section.note||'No matching saved records');continue;}
+          for(const item of section.items){
+            if(title==='Pending approvals'){
+              const card=followCard(item.state==='needs_review'?'Manual review required':'Approval pending',
+                (item.butler_action||item.kind||'Action').replaceAll('_',' ')+' · '+(item.record_id||'Saved record'));
+              if(item.butler_action)showButlerAction(item,card);
+            }else if(title==='Moses saved drafts'){
+              const card=followCard(item.title||'Saved Moses draft',
+                [item.customer,item.job_number?'Job #'+item.job_number:'',item.status].filter(Boolean).join(' · '));
+              const open=document.createElement('button');open.className='btn';open.type='button';
+              open.textContent='Open Moses Drafts';open.onclick=()=>{
+                const launch=document.getElementById('mosesDraftsLaunch');
+                if(launch && !launch.hidden){launch.click();}
+                else followStatus.textContent='Moses Drafts is not available in this workspace or is not installed.';
+              };card.append(open);
+            }else if(title==='Email delivery exceptions'){
+              followCard(item.title||'Delivery issue',
+                (item.kind||'Document')+' · '+(item.record_id||'')+' · '+(item.next_step||'Review saved delivery history'));
+            }else{
+              const card=followCard(item.title||'Job review',
+                [item.customer,item.job_number?'Job #'+item.job_number:'',item.status].filter(Boolean).join(' · '));
+              const button=document.createElement('button');button.className='btn';button.type='button';button.textContent='Open PDS Jobs';
+              button.onclick=()=>{panel.hidden=true;renderAllJobsView();const search=document.getElementById('all_jobs_search');
+                if(search){search.value=item.job_number||item.customer||'';document.getElementById('all_jobs_refresh')?.click();}};
+              card.append(button);
+            }
+          }
+          if(Number(section.count||0)>section.items.length){
+            const more=document.createElement('small');more.textContent='Showing '+section.items.length+' of '+section.count+' · Use the relevant workspace page for the full list';followResults.append(more);
+          }
+        }
+      }catch(error){followStatus.textContent='Follow-through unavailable: '+(error.message||error)+'. No action taken.';
+      }finally{followBusy=false;followRefresh.disabled=false;}
+    };
+    followButton.onclick=()=>{followPanel.hidden=!followPanel.hidden;if(!followPanel.hidden)followLoad();};
+    followRefresh.onclick=followLoad;
+    actionPanel.append(followButton,followPanel);
     pendingButton.onclick=refreshPending;
     history.after(actionPanel);
-    let mosesTurns=[],mosesWorkspace=document.body.dataset.platform||'';
+    let mosesTurns=[],mosesWorkspace=document.body.dataset.platform||'',mosesLastAction=null;
     const mosesJobCards=(groups, fallback=[])=>{
       const results=document.createElement('section');results.className='moses-job-results';
       results.style.cssText='display:grid;gap:10px;margin:10px 0';
@@ -293,6 +505,13 @@
             }catch(e){estimate.disabled=false;add('Moses','Could not open verified PDS estimator: '+(e.message||e));}
           };actions.append(estimate);
         }
+        if(row.id && (mosesWorkspace==='pds'||mosesWorkspace==='doorks')){
+          const update= document.createElement('button');update.type='button';update.className='btn';
+          update.textContent='Customer ETA / Update';
+          update.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-dispatch-email',
+            {detail:{id:row.id,job_number:row.job_number||'',customer:row.customer||''}}));
+          actions.append(update);
+        }
         card.append(actions);results.append(card);
       };
       if(Array.isArray(groups)&&groups.length){
@@ -304,7 +523,32 @@
       }else for(const row of fallback)addCard(row,'');
       history.append(results);history.scrollTop=history.scrollHeight;
     };
-    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10)})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[])showAction(proposal);if((r.queue_cards&&r.queue_cards.length)||(r.matches&&r.matches.length))mosesJobCards(r.queue_cards,r.matches||[]);
+    send.onclick=async()=>{const question=input.value.trim();if(!question)return;const workspace=document.body.dataset.platform||'';if(workspace!==mosesWorkspace){mosesTurns=[];mosesLastAction=null;history.replaceChildren();mosesWorkspace=workspace;}input.value='';add('You',question);send.disabled=true;try{const r=await fetchJSON('/doorks-assistant/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:question,history:mosesTurns.slice(-10),action_context:mosesLastAction||{}})});mosesTurns.push({role:'user',content:question.slice(0,1200)},{role:'assistant',content:String(r.answer||'No response').slice(0,1200)});mosesTurns=mosesTurns.slice(-10);add('Moses',r.answer||'No response');say(r.answer||'No response');for(const proposal of r.action_proposals||[]){
+          showAction(proposal);
+          if(proposal?.butler_action && /^[a-f0-9]{32}$/.test(String(proposal.id||'')))
+            mosesLastAction={kind:proposal.butler_action,proposal_id:proposal.id,workspace};
+        }for(const proposal of r.document_proposals||[])showPdsDocumentEmail(proposal);
+        if(r.next_action?.approval_required && r.action_verified && workspace==='doorks'){
+          const next=r.next_action;
+          if(['estimate_draft','estimate_to_invoice'].includes(next.kind) && typeof next.record_id==='string'){
+            const actionBtn=document.createElement('button');actionBtn.className='btn btn-orange';
+            actionBtn.type='button';actionBtn.textContent=next.kind==='estimate_draft'?'Prepare Unpriced Estimate':'Prepare Draft Invoice';
+            actionBtn.onclick=async()=>{
+              if(!confirm('Create a NEW approval request for '+next.kind.replaceAll('_',' ')+'? No document will be issued or sent.'))return;
+              actionBtn.disabled=true;
+              try{
+                const created=await fetchJSON('/doorks-assistant/butler/actions/prepare',{
+                  method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({kind:next.kind,record_id:next.record_id,details:{}})});
+                if(!created?.proposal_id || created.state!=='pending')throw Error('Approval request was not confirmed');
+                mosesLastAction={kind:next.kind,proposal_id:created.proposal_id,workspace};
+                showButlerAction({id:created.proposal_id,butler_action:next.kind,record_id:next.record_id,state:'pending'});
+                add('Moses','Approval requested for '+next.kind.replaceAll('_',' ')+'. Nothing has been executed.');
+              }catch(err){add('Moses','No new approval confirmed: '+err.message+'. Check pending actions before retrying.');}
+            };
+            history.append(actionBtn);
+          }
+        }
+        if((r.queue_cards&&r.queue_cards.length)||(r.matches&&r.matches.length))mosesJobCards(r.queue_cards,r.matches||[]);
         for(const n of r.navigation||[]){const button=document.createElement('button');button.className='btn';button.textContent=n.label;button.onclick=()=>{panel.hidden=true;const actions={all_jobs:()=>renderAllJobsView(),calendar:()=>renderCalendarView(),payroll:()=>renderPayrollView(),customers:()=>renderCustomersView(),estimates:()=>renderEstimatePage(),invoices:()=>renderInvoicePage(),accounting:()=>navAccounting?.click()};try{actions[n.target]?.()}catch(e){console.error('Navigation failed',e)}};history.append(button)}}catch(e){add('Moses','Unable to answer: '+e.message)}finally{send.disabled=false}};
     // SDC command center: persistent approval queue. No automatic task execution.
     const commandBtn=document.createElement('button');commandBtn.type='button';commandBtn.className='btn';commandBtn.textContent='Command Center';
@@ -370,9 +614,12 @@
     const voiceSummary=document.createElement('summary');voiceSummary.textContent='Voice controls (optional)';
     voiceSummary.style.cssText='font-size:12px;font-weight:700;color:#53665a;cursor:pointer';
     voiceDetails.append(voiceSummary,voiceControls);
-    panel.append(header,help,history,input,send,voiceDetails,command);
+    quoteTriageBtn.onclick=()=>{if((document.body.dataset.platform||'')!=='pds')return;input.value='Review quote readiness for jobs needing quotes';send.click();};
+    quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';
+    panel.append(header,help,history,input,send,quoteTriageBtn,voiceDetails,command);
     panel.insertBefore(agentStatus,history);
-    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{checkAgentReadiness();input.focus()}};
+    panel.insertBefore(priorityPreview,history);
+    launch.onclick=()=>{syncMosesWorkspace();panel.hidden=!panel.hidden;if(panel.hidden){stopSpeaking();stopListening()}else{quoteTriageBtn.hidden=(document.body.dataset.platform||'')!=='pds';checkAgentReadiness();refreshMosesPriorities(true);input.focus()}};
     syncMosesWorkspace();document.body.append(launch,panel);
 
   }
@@ -425,6 +672,14 @@
     badge.textContent = "0";
     navToDoList.appendChild(badge);
   }
+
+  // Every PDS staff member gets a personal assigned-job view. Do not replace
+  // the office's existing quote To-Do List or filter the shared calendar.
+  const navMyAssignments = document.createElement('button');
+  navMyAssignments.className = 'navbtn';
+  navMyAssignments.id = 'navMyAssignments';
+  navMyAssignments.innerHTML = '<span>My To-Do List</span><small>My assigned jobs &amp; leads</small>';
+  if (navJobFlow && navJobFlow.parentElement) navJobFlow.parentElement.appendChild(navMyAssignments);
 
   if (!navAllJobs) {
     const jobsNavCol = navJobFlow && navJobFlow.parentElement;
@@ -542,7 +797,7 @@
   if(pdsFormsCol) [navFormsTimeCard,navFormsReceipts,navFormsTimeOff,navFormsSignOff,navTakeoffs].forEach(b=>{if(b)pdsFormsCol.appendChild(b);});
   const formsHeading=formsToggle?.querySelector('.panel-hd')||formsToggle;
   if(formsHeading && /forms/i.test(formsHeading.textContent||'')) formsHeading.textContent='Resources';
-  if(navFormsReceipts){const label=navFormsReceipts.querySelector('span');if(label)label.textContent='Records Upload';}
+  if(navFormsReceipts){const label=navFormsReceipts.querySelector('span');if(label)label.textContent='Receipt Upload';}
   const workspaceTitle = el("workspaceTitle");
   const workspaceActions = el("workspaceActions");
   const workspaceBody = el("workspaceBody");
@@ -573,11 +828,12 @@
   let currentUser = null;
   let pendingPinUser = null;
  
-  const STATUSES = ["Sales Lead", "Dispatch", "Quote", "Quote Sent", "Parts on Order", "Complete/Quote", "Complete", "Done"];
-  const JOB_STATUS_OPTIONS = ["Dispatch", "Quote", "Parts on Order", "Complete/Quote", "Complete"];
+  const STATUSES = ["Sales Lead", "Dispatch", "Scheduled", "Quote", "Quote Sent", "Parts on Order", "Complete/Quote", "Complete", "Done"];
+  const JOB_STATUS_OPTIONS = ["Dispatch", "Scheduled", "Quote", "Parts on Order", "Complete/Quote", "Complete"];
   const STATUS_META = {
     "Sales Lead": { cls: "s-blue", dot: "#2563eb" },
     "Dispatch": { cls: "s-purple", dot: "#7c3aed" },
+    "Scheduled": { cls: "s-teal", dot: "#0891b2" },
     "Quote": { cls: "s-red", dot: "#ef4444" },
     "Quote Sent": { cls: "s-pink", dot: "#ec4899" },
     "Parts on Order": { cls: "s-brown", dot: "#8b5e3c" },
@@ -2477,7 +2733,22 @@
       const estimates=section('Estimates awaiting invoicing','sales');
       for(const d of (docs.items||[]).filter(x=>String(x.document_type||'').toLowerCase()==='estimate')){
         const row=line(estimates,`${d.document_number||'Estimate'} · ${d.customer||'Customer not specified'} · Status: ${d.status||'Draft'} · Total: $${Number(d.total||d.amount||0).toFixed(2)}`,'Estimate',d);
-        if(String(d.status||'').toLowerCase()!=='approved')action(row,'Approve Estimate',async()=>{if(!confirm('Approve this estimate?'))return;await fetchJSON('/workspaces/doorks/estimates_invoices/'+encodeURIComponent(d.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Approved'}})});});
+        if(String(d.status||'').toLowerCase()!=='approved'){
+          if(d.source_moses_proposal_id){
+            if(String(d.status||'').toLowerCase()==='draft')action(row,'Finalize Reviewed Estimate',async()=>{
+              if(!confirm('Have you reviewed pricing, scope, totals and the customer? Reserve the official estimate number?'))return;
+              await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/finalize-draft',{confirm_pricing:true});
+            });
+            if(String(d.status||'').toLowerCase()==='ready')action(row,'Reconfirm Pricing & Scope',async()=>{
+              if(!confirm('Review the latest scope and pricing. Confirm these exact figures before approval?'))return;
+              await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/finalize-draft',{confirm_pricing:true});
+            });
+            if(String(d.status||'').toLowerCase()==='ready')action(row,'Approve Reviewed Estimate',async()=>{
+              if(!confirm('Approve this numbered and priced estimate? This does not send or invoice it.'))return;
+              await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/approve-reviewed',{approve:true});
+            });
+          }else action(row,'Approve Estimate',async()=>{if(!confirm('Approve this estimate?'))return;await fetchJSON('/workspaces/doorks/estimates_invoices/'+encodeURIComponent(d.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({data:{status:'Approved'}})});});
+        }
         else action(row,'Create / Open Linked Invoice',async()=>{await send('/workspaces/doorks/estimates/'+encodeURIComponent(d.id)+'/convert-to-invoice');});
       }
       const arInvoices=new Set((ar.items||[]).map(x=>String(x.invoice_number||'').trim()).filter(Boolean));
@@ -3068,6 +3339,7 @@
     const styles = {
       "Sales Lead": ["rgba(37,99,235,.10)", "rgba(37,99,235,.28)", "#1d4ed8"],
       "Dispatch": ["rgba(124,58,237,.10)", "rgba(124,58,237,.28)", "#6d28d9"],
+      "Scheduled": ["rgba(8,145,178,.10)", "rgba(8,145,178,.32)", "#0e7490"],
       "Quote": ["rgba(239,68,68,.10)", "rgba(239,68,68,.25)", "#b91c1c"],
       "Quote Sent": ["rgba(236,72,153,.18)", "rgba(236,72,153,.34)", "#be185d"],
       "Parts on Order": ["rgba(139,94,60,.14)", "rgba(139,94,60,.34)", "#7c4a21"],
@@ -4095,6 +4367,7 @@ async function apiListForms() {
     setVisible(navPartsList, false); // Available through Business Hub
     setVisible(navDoorLogs, !!role && perms.parts);
     setVisible(navToDoList, !!role && ["office", "office_admin", "admin"].includes(String(role || "")));
+    setVisible(navMyAssignments, !!role && ['tech', 'lead', 'office', 'office_admin'].includes(String(role || '')) && activePlatform === 'pds');
     setVisible(navPricingSettings, !!role && perms.estimates);
   }
 
@@ -5544,6 +5817,43 @@ function renderAttachmentSection(titleText, items, options = {}) {
     document.head.appendChild(link);
   }
 
+  // Moses draft review links to existing PDS ticket/estimator, not a duplicate editor.
+  document.addEventListener('moses-open-pds-job', async event => {
+    if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
+    const jobId = String(event.detail?.job_id || '');
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) return;
+    try {
+      const job = await apiGetJob(jobId);
+      if (String(job?.id) !== jobId) throw Error('Saved PDS job could not be verified');
+      openDrawer('Job Details', drawerBody => {
+        const local = document.createElement('div');
+        drawerBody.appendChild(local);
+        renderJobDetails(local, job, {});
+      });
+    } catch (error) { alert('Could not open PDS ticket: ' + (error.message || error)); }
+  });
+  document.addEventListener('moses-open-pds-estimator', async event => {
+    if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
+    const jobId = String(event.detail?.job_id || '');
+    const draftId = String(event.detail?.draft_id || '');
+    if (!/^[a-f0-9]{32}$/.test(draftId)) return;
+    if (!/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)) return;
+    try {
+      const job = await apiGetJob(jobId);
+      if (String(job?.id) !== jobId) throw Error('Saved PDS job could not be verified');
+      const handoff = await fetchJSON('/moses-drafts/'+encodeURIComponent(draftId)+'/handoff');
+      if (!handoff.verified || String(handoff.job_id) !== jobId || String(handoff.draft_id) !== draftId) throw Error('Moses review no longer verified');
+      const forms = Array.isArray(job.completion_forms) ? job.completion_forms : [];
+      const sourceIndex = forms.findIndex(form => String(form?.id || form?.created_at || 'legacy') === handoff.source_form_id && form?.ready_to_quote === true);
+      if (sourceIndex < 0) throw Error('Recommendation form has changed; review the ticket');
+      await openEstimateInvoiceDrawer(job, 'estimate', null, {
+        skipHelper: true,
+        helperPrefill: {autoFill: true, sourceIndex, tripQty: 1, fuelQty: 1},
+        mosesDraft: handoff
+      });
+    } catch (error) { alert('Could not open verified PDS estimator: ' + (error.message || error)); }
+  });
+
   function renderJobDetails(container, job, ctx) {
     container.innerHTML = "";
     pdsLoadOfficePolish();
@@ -5570,6 +5880,156 @@ function renderAttachmentSection(titleText, items, options = {}) {
     header.appendChild(left);
     header.appendChild(right);
     card.appendChild(header);
+
+    // Optional assignment is independent of status, date and shared visibility.
+    if (job.id && !String(job.source || '').toUpperCase().startsWith('LEGACY') && ['office','office_admin'].includes(String(currentUser?.role || ''))) {
+      const assignment = document.createElement('section');
+      assignment.className = 'card';
+      assignment.style.cssText = 'margin:12px 0;padding:12px;border:1px solid #d9dee7;border-radius:12px';
+      const title = document.createElement('strong');
+      title.textContent = 'Tentative staff assignment';
+      assignment.append(title);
+      const info = document.createElement('p');
+      info.className = 'hint';
+      info.textContent = 'Optional. Staff will see this job on their personal To-Do Lists; the shared calendar remains unchanged.';
+      assignment.append(info);
+      const field = document.createElement('div');
+      field.style.cssText = 'display:grid;gap:5px;max-height:170px;overflow:auto';
+      assignment.append(field);
+      const feedback = document.createElement('p');
+      feedback.className = 'hint';
+      feedback.setAttribute('role', 'status');
+      assignment.append(feedback);
+      const save = document.createElement('button');
+      save.className = 'btn btn-orange';
+      save.type = 'button';
+      save.textContent = 'Save assignments';
+      save.disabled = true;
+      assignment.append(save);
+      card.append(assignment);
+      fetchJSON('/pds-scheduling/assignable-staff').then(data => {
+        const assigned = new Set([...(job.assigned_employee_ids || []), ...(job.assigned_technician_ids || []), job.assigned_lead_id || ''].filter(Boolean));
+        const staff = data.staff || [];
+        if (!staff.length) { feedback.textContent = 'No active PDS staff found.'; return; }
+        for (const person of staff) {
+          const label = document.createElement('label');
+          label.style.cssText = 'display:flex;align-items:center;gap:8px;padding:3px';
+          const checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.value = person.id;
+          checkbox.checked = assigned.has(person.id);
+          const name = document.createElement('span');
+          name.textContent = person.name + ' (' + person.role.replaceAll('_', ' ') + ')';
+          label.append(checkbox, name);
+          if (person.role === 'tech' || person.role === 'lead') {
+            const skills = document.createElement('button');
+            skills.type = 'button';
+            skills.className = 'btn';
+            skills.textContent = 'Skills';
+            skills.style.cssText = 'margin-left:auto;font-size:12px;padding:3px 9px';
+            skills.onclick = async () => {
+              const editor = document.createElement('div');
+              editor.style.cssText = 'position:fixed;inset:0;z-index:15000;background:#172133aa;display:flex;align-items:center;justify-content:center;padding:15px';
+              const modal = document.createElement('section');
+              modal.className = 'card';
+              modal.style.cssText = 'background:#fff;width:min(480px,100%);max-height:90vh;overflow:auto;padding:20px;display:grid;gap:8px';
+              const heading = document.createElement('h3');
+              heading.textContent = person.name + ' — Technician skills';
+              const message = document.createElement('p');
+              message.className = 'hint';
+              message.textContent = 'Unrated means unknown. Ratings help Moses suggest work; they do not determine assignments.';
+              modal.append(heading,message);
+              const close = document.createElement('button');
+              close.type = 'button';
+              close.className = 'btn';
+              close.textContent = 'Close';
+              close.onclick = () => editor.remove();
+              try {
+                const result = await fetchJSON('/pds-scheduling/technicians/' + encodeURIComponent(person.id) + '/skills');
+                const profile = result.profile || {};
+                const ratingControls = [];
+                const types = ['Automatic Door','Man Door','Storefront Door','Herculite Door','Roll Up','Glass','Roll/Swing Gate','Other'];
+                for (const type of types) {
+                  const row = document.createElement('label');
+                  row.style.cssText = 'display:flex;justify-content:space-between;align-items:center;gap:8px';
+                  const text = document.createElement('span');
+                  text.textContent = type;
+                  const select = document.createElement('select');
+                  select.className = 'input';
+                  select.style.maxWidth = '110px';
+                  const options = [['','Unrated'],...Array.from({length:10},(_,i)=>[String(i+1),String(i+1)+' / 10'])];
+                  for (const [value,label] of options) {
+                    const option = document.createElement('option');
+                    option.value = value;
+                    option.textContent = label;
+                    select.append(option);
+                  }
+                  select.value = String(profile.ratings?.[type] || '');
+                  ratingControls.push([type,select]);
+                  row.append(text,select);
+                  modal.append(row);
+                }
+                const prefs = document.createElement('input');
+                prefs.className = 'input';
+                prefs.placeholder = 'Preferences, separated by commas';
+                prefs.value = (profile.preferences || []).join(', ');
+                const prefLabel = document.createElement('label');
+                prefLabel.textContent = 'Work preferences';
+                prefLabel.append(prefs);
+                modal.append(prefLabel);
+                const leadLabel = document.createElement('label');
+                const lead = document.createElement('input');
+                lead.type = 'checkbox';
+                lead.checked = Boolean(profile.can_lead_crew);
+                leadLabel.append(lead,document.createTextNode(' Can lead a crew'));
+                modal.append(leadLabel);
+                const saveSkills = document.createElement('button');
+                saveSkills.className = 'btn btn-orange';
+                saveSkills.type = 'button';
+                saveSkills.textContent = 'Save skill profile';
+                saveSkills.onclick = async () => {
+                  const ratings = Object.fromEntries(ratingControls.filter(([,ctrl])=>ctrl.value).map(([type,ctrl])=>[type,Number(ctrl.value)]));
+                  const preferences = prefs.value.split(',').map(x=>x.trim()).filter(Boolean).slice(0,20);
+                  saveSkills.disabled = true;
+                  try {
+                    await fetchJSON('/pds-scheduling/technicians/' + encodeURIComponent(person.id) + '/skills',{
+                      method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({ratings,preferences,can_lead_crew:lead.checked})
+                    });
+                    message.textContent = 'Skill profile saved.';
+                  } catch (e) { message.textContent = 'Not saved: '+(e.message||e); }
+                  finally { saveSkills.disabled = false; }
+                };
+                modal.append(saveSkills);
+              } catch (e) { message.textContent = 'Cannot load skill profile: '+(e.message||e); }
+              modal.append(close);
+              editor.append(modal);
+              editor.ondblclick = e => { if(e.target === editor) editor.remove(); };
+              document.body.append(editor);
+            };
+            label.append(skills);
+          }
+          field.append(label);
+        }
+        save.disabled = false;
+      }).catch(e => { feedback.textContent = 'Staff list unavailable: ' + (e.message || e); });
+      save.onclick = async () => {
+        const ids = [...field.querySelectorAll('input:checked')].map(x => x.value);
+        save.disabled = true;
+        feedback.textContent = 'Saving…';
+        try {
+          const result = await fetchJSON('/pds-scheduling/jobs/' + encodeURIComponent(job.id) + '/assignment', {
+            method: 'PUT', headers: {'Content-Type':'application/json'},
+            body: JSON.stringify({employee_ids: ids, lead_id: '', tentative: true})
+          });
+          if (!result.ok || !result.shared_calendar_unchanged || !result.status_unchanged || !result.job_date_unchanged)
+            throw Error('Assignment could not be verified');
+          feedback.textContent = 'Assignments saved. Shared calendar and status unchanged.';
+          job.assigned_employee_ids = ids;
+          job.assigned_lead_id = '';
+        } catch (e) { feedback.textContent = 'Not saved: ' + (e.message || e); }
+        finally { save.disabled = false; }
+      };
+    }
 
     // Match Doorks' quick status workflow: change PDS ticket status without
     // entering Edit. Uses the existing CalendarStore update endpoint.
@@ -5622,7 +6082,62 @@ function renderAttachmentSection(titleText, items, options = {}) {
         }
       });
       statusRow.append(statusLabel, statusSelect, statusNote);
-      // Display this directly beneath the ticket heading.
+      // PDS dispatch-date quick-edit: update the actual calendar date via the
+      // existing one-field job API. This never rewrites the entire ticket.
+      if (job.kind === 'dispatch' && ['office', 'office_admin'].includes(String(currentUser?.role || ''))) {
+        const dateGroup = document.createElement('div');
+        dateGroup.style.cssText = 'display:flex;align-items:center;gap:7px;flex-wrap:wrap';
+        const dateLabel = document.createElement('label');
+        dateLabel.textContent = 'Scheduled date';
+        dateLabel.style.cssText = 'font-weight:700;font-size:13px';
+        const dateInput = document.createElement('input');
+        dateInput.type = 'date';
+        dateInput.className = 'input';
+        dateInput.style.cssText = 'width:auto;min-width:155px;max-width:100%';
+        dateInput.value = /^\d{4}-\d{2}-\d{2}$/.test(String(job.date || '')) ? job.date : '';
+        dateInput.setAttribute('aria-label', 'Edit PDS dispatch scheduled date');
+        const dateSave = document.createElement('button');
+        dateSave.type = 'button';
+        dateSave.className = 'btn';
+        dateSave.textContent = 'Save date';
+        dateSave.disabled = true;
+        const dateNote = document.createElement('small');
+        dateNote.setAttribute('role', 'status');
+        dateNote.style.cssText = 'font-size:12px;color:#64748b';
+        const previousDate = String(job.date || '');
+        dateInput.addEventListener('change', () => {
+          dateSave.disabled = !dateInput.value || dateInput.value === previousDate;
+          dateNote.textContent = dateInput.value !== previousDate ? 'Not saved' : '';
+        });
+        dateSave.addEventListener('click', async () => {
+          const newDate = dateInput.value;
+          if (!/^\d{4}-\d{2}-\d{2}$/.test(newDate) || newDate === previousDate) return;
+          dateInput.disabled = true;
+          dateSave.disabled = true;
+          statusSelect.disabled = true;
+          dateNote.textContent = 'Saving date…';
+          try {
+            const updated = await apiUpdateJob(job.id, { date: newDate });
+            if (!updated || String(updated.date) !== newDate)
+              throw new Error('Scheduled date was not confirmed by the server');
+            job = updated;
+            renderJobDetails(container, updated, ctx);
+            if (ctx?.afterSave) {
+              try { await ctx.afterSave(); }
+              catch (err) { console.warn('Date saved; calendar refresh failed', err); }
+            }
+            refreshBadges();
+          } catch (error) {
+            dateNote.textContent = 'Date not changed: ' + (error.message || error);
+            dateInput.disabled = false;
+            statusSelect.disabled = false;
+            dateSave.disabled = !dateInput.value || dateInput.value === previousDate;
+          }
+        });
+        dateGroup.append(dateLabel, dateInput, dateSave, dateNote);
+        statusRow.append(dateGroup);
+      }
+      // Display these simple controls directly beneath the ticket heading.
       card.appendChild(statusRow);
     }
  
@@ -7097,11 +7612,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const response=await fetch("/dispatch-ai/extract",{method:"POST",credentials:"same-origin",body:fd});
             const result=await response.json();if(!response.ok)throw Error(result.detail||"AI extraction failed");
             const fields=result.fields||{};
-            // Customer and service address are never silently assigned from AI output.
-            // The operator must choose/confirm them using existing saved-record inputs.
-            const identitySuggestions=['customer','address'].map(k=>fields[k]?k+': '+fields[k]:k+': not identified');
-            const verified=confirm('Moses extracted these UNVERIFIED identity suggestions:\n\n'+identitySuggestions.join('\n')+'\n\nPress OK to apply non-identity draft fields only. Select customer and service address manually using saved records.');
-            if(!verified){statusBox.textContent='Draft review cancelled; no fields were applied.';return;}
             const mapping={contact:"#nj_contact",phone:"#nj_phone",email:"#nj_email",po_number:"#nj_po",estimate_number:"#nj_est",invoice_number:"#nj_inv",job_number:"#nj_job_number",office_notes:"#nj_office_notes"};
             let count=0;
             for(const [key,selector] of Object.entries(mapping)){
@@ -7112,7 +7622,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             }
             if(fields.job_notes&&!ta.value.trim()){ta.value=String(fields.job_notes);count++;}
             if(fields.date&&!row0.querySelector("#nj_date").value)row0.querySelector("#nj_date").value=fields.date;
-            statusBox.textContent=`AI suggested ${count} non-identity fields. Customer and service address MUST be selected and verified manually. ${result.message||""}`;
+            statusBox.textContent=`Moses extracted ${count} other field(s). Choose and verify customer/service-location matches below before saving. ${result.message||""}`;
+            if(!window.MosesIdentityReview?.mount)throw Error('Moses identity review component is unavailable; refresh and retry.');
+            window.MosesIdentityReview.mount({host:aiPanel,fields,customers,addresses:knownAddresses,
+              customerInput:newJobCustomerInput,addressInput,statusBox});
+            window.MosesDocumentMatch.mount({host:aiPanel,fields,onOpen:(job)=>{
+              overlay.remove();renderAllJobsView();
+              const search=document.getElementById('all_jobs_search');
+              if(search){search.value=job.job_number||job.customer||'';document.getElementById('all_jobs_refresh')?.click();}
+            }});
             // Preserve the document as a job attachment when Save is clicked.
             if(file){const existing=row4.querySelector("#nj_files");if(existing&&(!existing.files||!existing.files.length)){
               try{const dt=new DataTransfer();dt.items.add(file);existing.files=dt.files;}catch(_){statusBox.textContent+=" Select the document again under Upload to attach it to the saved job.";}
@@ -7295,6 +7813,94 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
  
+  // Personal work tickets; no fabricated mileage. The office can set a
+  // specific visit order later; until then date and job number are authoritative.
+  function renderMyAssignments() {
+    if (!currentUser || !['tech','lead','office','office_admin'].includes(String(currentUser.role || ''))) return;
+    setNavActive(navMyAssignments);
+    setActiveChip('Work Flow');
+    setWorkspace('My To-Do List');
+    clearWorkspaceActions();
+    const root = document.createElement('div');
+    const heading = document.createElement('div');
+    heading.className = 'card';
+    const h = document.createElement('h3');
+    h.textContent = 'My Assigned Jobs & Sales Leads';
+    const hint = document.createElement('p');
+    hint.className = 'hint';
+    hint.textContent = 'Assignments are tentative and may change. All PDS jobs remain on the shared calendar.';
+    const dateField = document.createElement('input');
+    dateField.className = 'input';
+    dateField.type = 'date';
+    dateField.setAttribute('aria-label','Filter assigned jobs by date');
+    dateField.style.maxWidth = '190px';
+    const clear = document.createElement('button');
+    clear.className = 'btn';
+    clear.textContent = 'All Dates';
+    clear.onclick = () => { dateField.value = ''; refresh(); };
+    heading.append(h,hint,dateField,clear);
+    root.append(heading);
+    const list = document.createElement('div');
+    list.style.cssText = 'display:grid;gap:10px;margin:12px 0';
+    root.append(list);
+    workspaceBody.replaceChildren(root);
+    async function refresh() {
+      list.replaceChildren();
+      const loading = document.createElement('p');
+      loading.textContent = 'Loading assignments…';
+      list.append(loading);
+      try {
+        const params = new URLSearchParams();
+        if (dateField.value) params.set('day',dateField.value);
+        const data = await fetchJSON('/pds-scheduling/my-jobs?' + params.toString());
+        list.replaceChildren();
+        if (!data.jobs?.length) {
+          const empty = document.createElement('p');
+          empty.className = 'card';
+          empty.textContent = 'No jobs assigned for this selection. The shared PDS calendar is still available.';
+          list.append(empty);
+        }
+        for (const job of data.jobs || []) {
+          const card = document.createElement('div');
+          card.className = 'jobrow';
+          const top = document.createElement('div');
+          top.className = 'jobrow-top';
+          const name = document.createElement('strong');
+          name.textContent = job.customer || 'Job';
+          top.append(name,statusPill(job.status));
+          const details = document.createElement('p');
+          details.className = 'hint';
+          details.textContent = [job.job_number && 'Job #'+job.job_number,job.date,job.address,job.tentative?'Tentative assignment':'Assigned'].filter(Boolean).join(' · ');
+          const open = document.createElement('button');
+          open.type = 'button';
+          open.className = 'btn';
+          open.textContent = 'Open Ticket';
+          open.onclick = async () => {
+            try {
+              const full = await apiGetJob(job.id);
+              openDrawer('Job Details', drawerBody => {
+                const local = document.createElement('div');
+                drawerBody.append(local);
+                renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh});
+              });
+            } catch(e) { alert('Unable to open job: '+(e.message||e)); }
+          };
+          card.append(top,details,open);
+          list.append(card);
+        }
+        currentView = {refresh};
+      } catch(e) {
+        list.replaceChildren();
+        const err = document.createElement('p');
+        err.className = 'card';
+        err.textContent = 'Unable to load assignments: '+(e.message||e);
+        list.append(err);
+      }
+    }
+    dateField.onchange = refresh;
+    refresh();
+  }
+
   function renderToDoListView() {
     if (!isOfficeUser()) {
       showLoggedOutSplash("You do not have access to the To-Do List.");
@@ -11130,26 +11736,133 @@ function renderEmployeesView() {
  
   
   
-  function openEstimateInvoiceEmail(doc, docType = "invoice") {
-    const typeLabel = docType === "estimate" ? "Estimate" : "Invoice";
-    const number = doc.number || doc.invoice_number || doc.estimate_number || "";
-    const customer = doc.customer || "Customer";
-    const address = doc.address || "";
-    const email = prompt("Customer email address:", doc.email || "");
-    if (email === null) return;
-
-    const subject = `${typeLabel} ${number ? `#${number}` : ""} - ${customer}`.trim();
-    const estimateBody = `Hello,\n\nAttached is estimate ${number || ""} for the recommended work${address ? ` at ${address}` : ""}.\n\nPlease review and let us know if you would like us to proceed. Scheduling will be coordinated upon approval.\n\n***PLEASE NOTE: Invoices 10 days past due will automatically incur a Late Charge of $35 and after 15 days there will be a 22% APR interest charge applied. Estimates are valid for 30 days unless otherwise noted.***\n\nThank you,\nPriority Door Systems\n\n(760) 233-5037\nwww.prioritydoors.com`;
-    const invoiceBody = `Hello,\n\nAttached is invoice ${number || ""} for the completed work${address ? ` at ${address}` : ""}.\n\nPlease remit payment at your earliest convenience. Thank you for your business.\n\nThank you,\nPriority Door Systems\n\nAccounting Department\n(760) 233-5037\nwww.prioritydoors.com`;
-    const body = docType === "estimate" ? estimateBody : invoiceBody;
-
-    // Browser mailto links cannot attach files automatically. Open/download the PDF first,
-    // then open the email draft with the standard response so the user can attach it.
-    if (doc.download_url) {
-      try { window.open(doc.download_url, "_blank", "noopener,noreferrer"); } catch {}
+  // Send saved PDS estimates/invoices from the server, never via the device mail application.
+  async function openEstimateInvoiceEmail(doc, docType = "invoice") {
+    const kind = String(docType).toLowerCase() === "estimate" ? "estimate" : "invoice";
+    const number = String(doc.number || doc[kind + "_number"] || "").trim();
+    if (!number) { alert("Save the document before emailing it."); return; }
+    const overlay = document.createElement("div");
+    overlay.style.cssText = "position:fixed;inset:0;z-index:13050;background:#14203399;display:flex;align-items:center;justify-content:center;padding:16px";
+    const panel = document.createElement("section");
+    panel.className = "card";
+    panel.setAttribute("role", "dialog");
+    panel.setAttribute("aria-modal", "true");
+    panel.setAttribute("aria-label", "Review PDS document email");
+    panel.style.cssText = "width:100%;max-width:520px;max-height:88vh;overflow:auto;padding:20px;background:#fff;color:#172133;border-radius:16px;display:grid;gap:12px";
+    const heading = document.createElement("h3");
+    heading.textContent = "Review & Send " + (kind === "estimate" ? "Estimate" : "Invoice");
+    const details = document.createElement("div");
+    details.style.cssText = "display:grid;gap:8px;overflow-wrap:anywhere";
+    const status = document.createElement("p");
+    status.setAttribute("role", "status");
+    status.textContent = "Checking saved document, customer and PDF…";
+    const deliveryHistory = document.createElement("div");
+    deliveryHistory.style.cssText = "display:grid;gap:6px;font-size:13px";
+    const refreshHistory = document.createElement("button");
+    refreshHistory.type = "button";
+    refreshHistory.className = "btn";
+    refreshHistory.textContent = "Refresh Delivery History";
+    const actions = document.createElement("div");
+    actions.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;justify-content:flex-end";
+    const close = document.createElement("button");
+    close.type = "button"; close.className = "btn"; close.textContent = "Close";
+    close.onclick = () => overlay.remove();
+    const send = document.createElement("button");
+    send.type = "button"; send.className = "btn btn-orange";
+    send.textContent = "Approve & Send via Resend"; send.disabled = true;
+    actions.append(refreshHistory, close, send);
+    panel.append(heading, details, status, deliveryHistory, actions);
+    overlay.append(panel);
+    document.body.append(overlay);
+    const base = "/moses-pds-email/" + kind + "/" + encodeURIComponent(number);
+    const request = async (url, options) => {
+      const response = await fetch(url, { credentials: "same-origin", ...options });
+      let payload = null;
+      try { payload = await response.json(); } catch (_) {}
+      if (!response.ok) throw Error(String(payload?.detail || payload?.message || "Server returned " + response.status));
+      return payload || {};
+    };
+    const showHistory = async () => {
+      refreshHistory.disabled = true;
+      deliveryHistory.replaceChildren();
+      try {
+        const result = await request(base + "/history");
+        const records = Array.isArray(result.items) ? result.items : [];
+        const title = document.createElement("strong");
+        title.textContent = "Delivery History";
+        deliveryHistory.append(title);
+        if (!records.length) {
+          const empty = document.createElement("span");
+          empty.textContent = "No prior email proposals for this document.";
+          deliveryHistory.append(empty);
+        }
+        for (const item of records.slice(-8).reverse()) {
+          const line = document.createElement("div");
+          line.style.cssText = "border:1px solid #e2e8f0;border-radius:8px;padding:9px;overflow-wrap:anywhere";
+          const state = String(item.delivery_status || item.state || "unknown").replaceAll("_", " ");
+          const time = item.delivery_event_at ? " · " + item.delivery_event_at : "";
+          line.textContent = "Email " + String(item.state || "unknown") + " · " + state + time;
+          deliveryHistory.append(line);
+        }
+      } catch (error) {
+        const warning = document.createElement("span");
+        warning.textContent = "Delivery history unavailable: " + String(error.message || error);
+        deliveryHistory.append(warning);
+      } finally { refreshHistory.disabled = false; }
+    };
+    refreshHistory.onclick = showHistory;
+    const row = (label, value) => {
+      const line = document.createElement("div");
+      const strong = document.createElement("strong"); strong.textContent = label + ": ";
+      line.append(strong, document.createTextNode(String(value || "—")));
+      details.append(line);
+    };
+    try {
+      const preview = await request(base + "/preview");
+      row("Document", preview.number);
+      row("Customer", preview.customer);
+      row("Job", preview.job_number);
+      row("To", preview.to);
+      row("From", preview.from);
+      row("Reply-To", preview.reply_to);
+      row("CC", preview.cc);
+      row("Subject", preview.subject);
+      row("Attached PDF", preview.filename);
+      status.textContent = "Recipient and saved PDF verified. Sending requires your approval. To change the recipient, update the saved job contact first.";
+      send.disabled = false;
+      await showHistory();
+      send.onclick = async () => {
+        if (!confirm("Send " + kind + " " + preview.number + " and its PDF to " + preview.to + " through Resend?")) return;
+        send.disabled = true;
+        close.disabled = true;
+        status.textContent = "Preparing approved email…";
+        try {
+          const proposed = await request(base + "/proposal", { method: "POST" });
+          const proposal = proposed.proposal;
+          if (!proposal?.id) throw Error("The email proposal could not be verified");
+          if (proposal.to !== preview.to || proposal.number !== preview.number) {
+            status.textContent = "Email details changed. Close and review the new recipient before sending.";
+            return;
+          }
+          status.textContent = "Submitting to Resend…";
+          const result = await request("/moses-pds-email/proposals/" + encodeURIComponent(proposal.id) + "/decision", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ approve: true })
+          });
+          if (result.state === "sent") {
+            status.textContent = "Resend accepted the email. This is not yet confirmation of inbox delivery. Message ID: " + String(result.provider_message_id || "available in delivery history");
+          } else if (result.state === "uncertain") {
+            status.textContent = "Send outcome uncertain. Check Resend and delivery history before any retry.";
+          } else {
+            status.textContent = "Email was not confirmed. State: " + String(result.state || "unknown");
+          }
+        } catch (error) {
+          status.textContent = "Email not confirmed: " + String(error.message || error) + ". Review delivery history before retrying.";
+        } finally { close.disabled = false; await showHistory(); }
+      };
+    } catch (error) {
+      status.textContent = "Cannot send this document: " + String(error.message || error) + ". Check the saved job contact, document link, and Resend setup.";
     }
-    const mailto = `mailto:${encodeURIComponent((email || "").trim())}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-    setTimeout(() => { window.location.href = mailto; }, 300);
   }
 
 function exportEstimateInvoiceToQuickBooksCSV(payload, docType = "invoice") {
@@ -11565,6 +12278,21 @@ function serializeDocItems(items, laborOnly) {
       }
 
       await applyHelperPrefill();
+      if (ctx?.mosesDraft && !editDoc && docType === 'estimate') {
+        const reviewed = ctx.mosesDraft;
+        dom.work.value = String(reviewed.scope || '');
+        for (const p of reviewed.selected_parts || []) {
+          items.push(createDocLineItem({code: p.part_number, description: p.description || p.part_number,
+            qty: Number(p.quantity || 1), rate: 0, kind: 'part', taxable: true}));
+        }
+        const warning = document.createElement('div');
+        warning.style.cssText = 'border:1px solid #dfb467;background:#fff8e8;border-radius:10px;padding:12px;margin:12px 0;white-space:pre-wrap';
+        warning.textContent = 'Moses reviewed draft (NOT an approved customer estimate).\n' +
+          'Verify every part price, quantity, margin, labor, sales tax and terms. Catalog parts are unpriced.\n' +
+          'Parts: ' + String(reviewed.parts_review || 'not reviewed') + ' · Freight: ' + String(reviewed.freight_review || 'not reviewed') +
+          (reviewed.review_note ? '\nOffice notes: ' + String(reviewed.review_note).slice(0,1200) : '');
+        card.insertBefore(warning, card.querySelector('#doc_generate').parentElement);
+      }
       if (!editDoc) setTaxRateValue("");
       renderItems();
       
@@ -11590,7 +12318,27 @@ function serializeDocItems(items, laborOnly) {
           ship_to: dom.ship.value.trim()
         };
       }
-card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try { if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const lineCheck = window.DoorksSharedTicket?.validateDocumentLines?.(items);
+card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try {
+        if (ctx?.mosesDraft) {
+          const latest = await fetchJSON('/moses-drafts/'+encodeURIComponent(ctx.mosesDraft.draft_id)+'/handoff');
+          if (!latest.verified || latest.job_id !== ctx.mosesDraft.job_id ||
+              latest.scope !== ctx.mosesDraft.scope || latest.freight_review !== ctx.mosesDraft.freight_review ||
+              latest.parts_review !== ctx.mosesDraft.parts_review ||
+              JSON.stringify(latest.selected_parts) !== JSON.stringify(ctx.mosesDraft.selected_parts)) {
+            alert('Moses review has changed. Reopen the latest draft before generating an estimate.');return;
+          }
+        }
+        if (ctx?.mosesDraft && (ctx.mosesDraft.parts_review === 'hold' || ctx.mosesDraft.freight_review === 'hold')) {
+          alert('Moses marked parts or freight ON HOLD. Resolve the hold in Moses Drafts before generating an estimate.');return;
+        }
+        if (ctx?.mosesDraft && ctx.mosesDraft.freight_review === 'required' &&
+            !items.some(it => String(it.code || '').toUpperCase() === 'FREIGHT' && Number(it.qty || 0) > 0 && Number(it.rate || 0) > 0)) {
+          alert('Freight is required. Add and price the freight surcharge before generating this estimate.');return;
+        }
+        if (ctx?.mosesDraft && items.some(it => it.kind === 'part' && Number(it.qty || 0) > 0 && Number(it.rate || 0) <= 0)) {
+          alert('One or more Moses catalog parts have no verified selling price. Review and price each part before generating the estimate.');return;
+        }
+         if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const lineCheck = window.DoorksSharedTicket?.validateDocumentLines?.(items);
       if (!lineCheck) { alert("Shared document validation is unavailable. Please reload before issuing a document."); return; }
       if (!lineCheck.valid) { alert(lineCheck.errors.join("\n")); return; }
       const draftCheck=window.DoorksSharedTicket?.validateDocumentDraft?.({role:'office',items,customer:dom.customer.value,number:dom.number.value,preparedBy:dom.completedBy.value,taxRate:Number(getCurrentTaxRateValue())});
@@ -13455,6 +14203,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
  
   if (navJobFlow) navJobFlow.addEventListener("click", () => renderJobFlowView("Dispatch"));
   if (navToDoList) navToDoList.addEventListener("click", renderToDoListView);
+  navMyAssignments.addEventListener('click',renderMyAssignments);
   if (navAllJobs) navAllJobs.addEventListener("click", renderAllJobsView);
   if (navEstimateInvoice) navEstimateInvoice.addEventListener("click", renderEstimatePage);
   if (navEstimatePage && !navEstimateInvoice) navEstimatePage.addEventListener("click", renderEstimatePage);

@@ -103,6 +103,7 @@ def _mmddyy(yyyy_mm_dd: str) -> str:
 STATUSES = [
     "Sales Lead",
     "Dispatch",
+    "Scheduled",
     "Quote",
     "Quote Sent",
     "Parts on Order",
@@ -613,7 +614,8 @@ class CalendarStore:
             "date", "status", "customer", "contact", "phone", "email", "address",
             "estimate_number", "invoice_number", "po_number", "quote_assigned_to", "sent_quote_number",
             "followup_job_id", "followup_job_number", "source_job_id", "source_job_number", "approved", "approved_at",
-            "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order"
+            "job_notes", "office_notes", "job_number", "kind", "completion_forms", "parts_order",
+            "assigned_lead_id", "assigned_employee_ids", "assigned_technician_ids", "assignment_tentative"
         ]:
             if k in payload:
                 if k == "completion_forms":
@@ -640,6 +642,12 @@ class CalendarStore:
                         j[k] = bool(payload.get(k))
                     elif k == "approved_at":
                         j[k] = str(payload.get(k) or "").strip()
+                    elif k in ("assigned_employee_ids", "assigned_technician_ids"):
+                        if not isinstance(payload[k], list):
+                            raise ValueError("Assigned employees must be a list")
+                        j[k] = list(payload[k])
+                    elif k == "assignment_tentative":
+                        j[k] = bool(payload[k])
                     else:
                         j[k] = str(payload.get(k) or "").strip()
 

@@ -229,16 +229,34 @@ def receipt(request, kind: str, proposal_id: str):
         raise HTTPException(422, 'Invalid proposal identifier')
     p = _proposal(request, platform, kind, proposal_id)
     state = str(p.get('state') or 'unknown')
-    return {'workspace': platform, 'kind': kind, 'proposal_id': proposal_id,
-            'record_id': str(p.get('record_id') or p.get('po_id') or '')[:80],
-            'state': state, 'executed': state == 'executed',
-            'approval_required': state in ('pending', 'needs_review'),
-            'requires_manual_review': state in ('executing', 'uncertain', 'needs_review'),
-            'requested_at': p.get('requested_at') or p.get('created_at'),
-            'decided_at': p.get('decided_at'),
-            'confirmed_at': p.get('confirmed_at'),
-            'note': ('Verified from existing saved proposal ledger; a completed payment or external delivery must be separately confirmed.'
-                     if state == 'executed' else 'No completed execution confirmed')}
+    result = {'workspace': platform, 'kind': kind, 'proposal_id': proposal_id,
+              'record_id': str(p.get('record_id') or p.get('po_id') or '')[:80],
+              'state': state, 'executed': state == 'executed',
+              'approval_required': state in ('pending', 'needs_review'),
+              'requires_manual_review': state in ('executing', 'uncertain', 'needs_review'),
+              'requested_at': p.get('requested_at') or p.get('created_at'),
+              'decided_at': p.get('decided_at'),
+              'confirmed_at': p.get('confirmed_at'),
+              'note': ('Saved proposal ledger confirms execution; external delivery or payment requires separate verification.'
+                       if state == 'executed' else 'No completed execution confirmed')}
+    # A completed proposal is an historical fact. Also show whether the current
+    # PDS job still reflects the change; it may have been edited since approval.
+    # Never assert present-day business state from a ledger entry alone.
+    if platform == 'pds' and kind == 'job_status' and state == 'executed':
+        store = getattr(request.app.state, 'calendar_store', None)
+        try:
+            job = store.get_job(p['record_id']) if store is not None else None
+        except (KeyError, OSError, TypeError, ValueError):
+            job = None
+        actual = str(job.get('status') or '') if isinstance(job, dict) and str(job.get('id')) == p['record_id'] else ''
+        expected = str(p.get('new_status') or '')
+        result['current_record_matches'] = bool(actual and expected and actual == expected)
+        result['current_status'] = actual or None
+        result['approved_status'] = expected or None
+        if not result['current_record_matches']:
+            result['requires_manual_review'] = True
+            result['note'] = 'The saved action was executed, but the current job no longer confirms that status. Review the ticket.'
+    return result
 
 
 def decide(request, kind: str, proposal_id: str, approve: bool):
@@ -246,8 +264,11 @@ def decide(request, kind: str, proposal_id: str, approve: bool):
     platform = _scope(request, kind)
     if not isinstance(approve, bool):
         raise HTTPException(422, 'Approval or rejection must be explicit')
-    # Check the exact proposal and workspace BEFORE the legacy backend decides it.
-    receipt(request, kind, proposal_id)
+    # Only a pending, exact-kind proposal can be decided. A repeat click after
+    # an uncertain response must never invoke a second backend execution.
+    before = receipt(request, kind, proposal_id)
+    if before['state'] != 'pending':
+        raise HTTPException(409, 'Proposal is no longer pending; inspect its receipt before retrying')
     if platform == 'pds':
         from app.services.moses_pds_actions import decide as backend
         outcome = backend(request, proposal_id, approve)
@@ -261,9 +282,155 @@ def decide(request, kind: str, proposal_id: str, approve: bool):
         from app.services.moses_actions import decide as backend
         outcome = backend(request, proposal_id, approve, platform=platform)
     saved = receipt(request, kind, proposal_id)
+    if not isinstance(outcome, dict):
+        raise HTTPException(500, 'Action backend returned no decision result; review saved receipt')
+    if outcome.get('proposal_id') not in (None, proposal_id):
+        raise HTTPException(500, 'Action backend returned a different proposal receipt')
     if outcome.get('executed') is True and saved['executed'] is not True:
         raise HTTPException(500, 'Execution could not be verified against saved ledger')
+    if approve and outcome.get('executed') is True and platform == 'pds' and kind == 'job_status' and saved.get('current_record_matches') is False:
+        raise HTTPException(409, 'Saved action executed, but current PDS job requires manual review')
+    if not approve and (saved['state'] != 'rejected' or saved['executed']):
+        raise HTTPException(500, 'Rejection was not confirmed in saved ledger')
     return saved
+
+
+def next_step(request, kind: str, proposal_id: str):
+    """Verified, read-only continuation for an executed Doorks work-order creation.
+
+    Do not trust a chat claim or a returned ID alone: the existing saved action
+    must have executed, and the actual work order must link to that exact action.
+    """
+    platform = _scope(request, kind)
+    if platform == 'doorks' and kind == 'estimate_draft':
+        # No conversational guesses. Follow the exact executed proposal to the
+        # immutable Moses linkage on the actual saved estimate.
+        saved = receipt(request, kind, proposal_id)
+        if saved['state'] != 'executed' or not saved['executed']:
+            return {'available': False, 'reason': 'Estimate creation is not confirmed executed'}
+        p = _proposal(request, platform, kind, proposal_id)
+        estimate_id = str(p.get('estimate_id') or '')
+        if not 1 <= len(estimate_id) <= 80:
+            return {'available': False, 'reason': 'Saved estimate reference unavailable'}
+        from app.routers.workspaces import location, load
+        from app.services.moses_actions import _locate
+        from decimal import Decimal, InvalidOperation
+        docs = load(location(request, platform, 'estimates_invoices'))
+        estimate = _locate(docs, estimate_id)
+        if (not isinstance(estimate, dict) or str(estimate.get('id') or '') != estimate_id
+                or str(estimate.get('source_moses_proposal_id') or '') != proposal_id
+                or str(estimate.get('source_work_order_id') or '') != str(p.get('record_id') or '')
+                or str(estimate.get('document_type') or '').casefold() != 'estimate'
+                or str(estimate.get('customer_id') or '') != str(p.get('details', {}).get('customer_id') or '')):
+            return {'available': False, 'reason': 'Estimate does not match the executed proposal'}
+        if str(estimate.get('status') or '').casefold() != 'approved':
+            return {'available': False, 'reason': 'Review and approve the estimate before invoicing'}
+        if (estimate.get('requires_number_assignment') or estimate.get('pricing_required')
+                or not re.fullmatch(r'RE[0-9]{5,}', str(estimate.get('document_number') or ''))):
+            return {'available': False, 'reason': 'Estimate pricing or official number is not finalized'}
+        from app.routers.workspaces import _moses_estimate_review_fingerprint
+        if (not estimate.get('pricing_review_fingerprint') or
+                estimate.get('pricing_review_fingerprint') != _moses_estimate_review_fingerprint(estimate)):
+            return {'available': False, 'reason': 'Estimate changed after pricing review'}
+        try:
+            amount = Decimal(str(estimate.get('total', estimate.get('amount', ''))))
+            if not amount.is_finite() or amount <= 0:
+                raise ValueError('nonpositive total')
+        except (ValueError, TypeError, InvalidOperation):
+            return {'available': False, 'reason': 'Estimate total has not been verified'}
+        work_order = _locate(load(location(request, platform, 'work_orders')), str(p.get('record_id') or ''))
+        if (not isinstance(work_order, dict)
+                or str(work_order.get('customer_id') or '') != str(estimate.get('customer_id') or '')):
+            return {'available': False, 'reason': 'Source work-order customer association changed'}
+        if any(isinstance(d, dict) and str(d.get('source_estimate_id') or '') == estimate_id
+               and str(d.get('document_type') or '').casefold() == 'invoice' for d in docs):
+            return {'available': False, 'reason': 'A linked invoice already exists'}
+        from app.services import moses_actions
+        _, proposal_path, _ = moses_actions._paths(request, platform)
+        proposals = moses_actions._read(proposal_path)
+        if any(isinstance(a, dict) and a.get('kind') == 'estimate_to_draft_invoice'
+               and a.get('record_id') == estimate_id
+               and a.get('state') in ('pending', 'executing', 'needs_review') for a in proposals):
+            return {'available': False, 'reason': 'An invoice proposal already awaits review'}
+        return {'available': True, 'workspace': platform, 'next_kind': 'estimate_to_invoice',
+                'record_id': estimate_id, 'label': 'Prepare draft invoice for approval',
+                'approval_required': True, 'automatic_execution': False,
+                'note': 'Approved estimate verified. A separate approval creates an UNSENT draft invoice.'}
+    if platform != 'doorks' or kind != 'new_work_order':
+        return {'available': False, 'reason': 'No automatic continuation for this action'}
+    saved = receipt(request, kind, proposal_id)
+    if saved['state'] != 'executed' or not saved['executed']:
+        return {'available': False, 'reason': 'The prior action is not confirmed executed'}
+    p = _proposal(request, platform, kind, proposal_id)
+    work_order_id = str(p.get('work_order_id') or '')
+    if not 1 <= len(work_order_id) <= 80:
+        return {'available': False, 'reason': 'Saved work order reference unavailable'}
+    from app.routers.workspaces import location, load
+    from app.services.moses_actions import _locate
+    work_order = _locate(load(location(request, platform, 'work_orders')), work_order_id)
+    if (not isinstance(work_order, dict)
+            or str(work_order.get('id') or '') != work_order_id
+            or str(work_order.get('source_moses_proposal_id') or '') != proposal_id):
+        return {'available': False, 'reason': 'Work order does not match the completed action'}
+    if str(work_order.get('customer_id') or '') != str(p.get('record_id') or ''):
+        return {'available': False, 'reason': 'Saved customer association changed'}
+    # Do not offer another AI draft if one was generated, even if the proposal
+    # ledger was recovered, or if a proposal is awaiting review.
+    docs = load(location(request, platform, 'estimates_invoices'))
+    if any(isinstance(d, dict) and d.get('source_work_order_id') == work_order_id
+           and d.get('source_moses_proposal_id') for d in docs):
+        return {'available': False, 'reason': 'An AI-prepared estimate already exists; review it'}
+    from app.services import moses_actions
+    _, proposal_path, _ = moses_actions._paths(request, platform)
+    proposals = moses_actions._read(proposal_path)
+    if any(isinstance(a, dict) and a.get('kind') == 'draft_work_order_estimate'
+           and a.get('record_id') == work_order_id
+           and a.get('state') in ('pending', 'executing', 'needs_review') for a in proposals):
+        return {'available': False, 'reason': 'An estimate proposal already awaits review'}
+    return {'available': True, 'workspace': platform, 'next_kind': 'estimate_draft',
+            'record_id': work_order_id, 'label': 'Prepare unpriced estimate draft',
+            'approval_required': True, 'automatic_execution': False,
+            'note': 'A separate approval creates an unpriced draft. Pricing and issuance require office review.'}
+
+
+def prepare_next_step(request, kind: str, proposal_id: str):
+    """A human-requested second proposal; never approves or executes actions."""
+    next_action = next_step(request, kind, proposal_id)
+    if not next_action.get('available'):
+        raise HTTPException(409, next_action.get('reason') or 'Next step unavailable')
+    # prepare() rechecks the exact existing record and the existing backend
+    # enforces duplicate, customer and record-version protection under its lock.
+    result = prepare(request, next_action['next_kind'], next_action['record_id'], {})
+    return {**result, 'continued_from_proposal_id': proposal_id}
+
+
+def ready_continuations(request):
+    """Discover verified invoice handoffs after Moses has been reopened.
+
+    Reads the existing proposal ledger; never prepares or executes an action.
+    """
+    platform = _scope(request)
+    if platform != 'doorks':
+        return {'items': [], 'count': 0}
+    from app.services import moses_actions
+    _, proposal_path, _ = moses_actions._paths(request, platform)
+    proposals = moses_actions._read(proposal_path)
+    items = []
+    for p in reversed(proposals[-200:]):
+        if not isinstance(p, dict) or p.get('kind') != 'draft_work_order_estimate' or p.get('state') != 'executed':
+            continue
+        pid = str(p.get('id') or '')
+        if not re.fullmatch(r'[a-f0-9]{32}', pid):
+            continue
+        step = next_step(request, 'estimate_draft', pid)
+        if step.get('available'):
+            items.append({'id': pid, 'butler_action': 'estimate_draft',
+                          'kind': 'draft_work_order_estimate', 'record_id': p.get('record_id'),
+                          'state': 'executed', 'workspace': platform,
+                          'next_step': step})
+        if len(items) >= 20:
+            break
+    return {'items': items, 'count': len(items), 'read_only': True}
 
 
 def pending_actions(request):

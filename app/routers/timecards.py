@@ -110,3 +110,14 @@ def delete_timecard(request: Request, item_id: str, x_api_key: Optional[str] = H
             raise HTTPException(status_code=403, detail="You can only delete your own time cards")
     _store(request).delete(item_id)
     return {"ok": True}
+
+
+@router.get("/approvals/summary")
+def pds_timecard_approval_summary(request: Request, month: str = ""):
+    """Office-admin-only monthly totals; excludes individual HR fields.
+
+    Reuses Moses's PDS approval-count adapter, not a second payroll data store.
+    The calendar month is YYYY-MM; omitted month means current Pacific month.
+    """
+    from app.services.moses_pds_timecards import pending_approvals
+    return pending_approvals(request, month)

@@ -226,6 +226,14 @@ def convert_estimate_to_invoice(platform:str,record_id:str,request:Request):
     return {"item":invoice,"already_exists":False}
 
 
+def _moses_estimate_review_fingerprint(item):
+    from hashlib import sha256
+    fields = ("customer_id", "source_work_order_id", "description", "notes",
+              "amount", "total", "line_items", "tax_rate", "terms", "address")
+    fields_json = json.dumps({key: item.get(key) for key in fields}, sort_keys=True, default=str)
+    return sha256(fields_json.encode("utf-8")).hexdigest()
+
+
 @router.post("/doorks/estimates/{record_id}/finalize-draft")
 def finalize_ai_estimate(record_id:str,payload:dict,request:Request):
     """Number a reviewed Moses draft; never approve, issue, or send it.
@@ -243,7 +251,24 @@ def finalize_ai_estimate(record_id:str,payload:dict,request:Request):
         if item is None or str(item.get("document_type","")).casefold()!="estimate" or not item.get("source_moses_proposal_id"):
             raise HTTPException(404,"Moses estimate draft not found")
         if not item.get("requires_number_assignment") and re.fullmatch(r"RE\d{5,}",str(item.get("document_number") or "")):
-            return {"item":item,"already_numbered":True}
+            # A priced Ready estimate may have been edited after finalization.
+            # Explicit reconfirmation re-stamps the reviewed figures without
+            # consuming a new estimate number or approving the document.
+            if str(item.get("status") or "").casefold() != "ready":
+                raise HTTPException(409,"Only Ready estimates can be re-reviewed")
+            from decimal import Decimal, InvalidOperation
+            try:
+                total = Decimal(str(item.get("total", item.get("amount", ""))))
+                if not total.is_finite() or total <= 0: raise ValueError()
+            except (InvalidOperation, ValueError, TypeError):
+                raise HTTPException(409,"Enter a valid positive estimate total before confirming")
+            if not str(item.get("description") or "").strip():
+                raise HTTPException(409,"Review estimate scope before confirming")
+            item["pricing_review_fingerprint"] = _moses_estimate_review_fingerprint(item)
+            item["pricing_reviewed_at"] = datetime.now(timezone.utc).isoformat()
+            item["updated_at"] = item["pricing_reviewed_at"]
+            save(path,items)
+            return {"item":item,"already_numbered":True,"review_updated":True}
         if str(item.get("status","")).casefold()!="draft":
             raise HTTPException(409,"Only draft estimates can be finalized")
         if not str(item.get("description") or "").strip():
@@ -273,8 +298,72 @@ def finalize_ai_estimate(record_id:str,payload:dict,request:Request):
                     requires_number_assignment=False,pricing_reviewed_at=datetime.now(timezone.utc).isoformat(),
                     pricing_reviewed_by=str(getattr(request.state,"auth_user",{}).get("id") or "office_admin"),
                     updated_at=datetime.now(timezone.utc).isoformat())
+        item["pricing_review_fingerprint"] = _moses_estimate_review_fingerprint(item)
         save(path,items)
         return {"item":item,"already_numbered":False,"sent":False,"approved":False}
+
+@router.post("/doorks/estimates/{record_id}/approve-reviewed")
+def approve_reviewed_ai_estimate(record_id: str, payload: dict, request: Request):
+    """Explicit office-admin approval of a numbered, priced Moses estimate.
+
+    This does not create an invoice or send a document. The next Moses action
+    remains another independently reviewed/approved proposal.
+    """
+    guard(request, "doorks", "estimates_invoices")
+    if payload.get("approve") is not True or not isinstance(record_id, str) or not 1 <= len(record_id) <= 80:
+        raise HTTPException(422, "Explicit approval and exact estimate ID required")
+    from decimal import Decimal, InvalidOperation
+    with _lock:
+        path = location(request, "doorks", "estimates_invoices")
+        items = load(path)
+        matches = [row for row in items if isinstance(row, dict) and row.get("id") == record_id]
+        if len(matches) != 1:
+            raise HTTPException(404, "Estimate not found")
+        item = matches[0]
+        if (str(item.get("document_type") or "").casefold() != "estimate"
+                or not item.get("source_moses_proposal_id")):
+            raise HTTPException(409, "This approval route is for Moses estimates only")
+        if str(item.get("status") or "").casefold() != "ready":
+            raise HTTPException(409, "Finalize the reviewed draft before approval")
+        if (item.get("requires_number_assignment") or item.get("pricing_required")
+                or not re.fullmatch(r"RE[0-9]{5,}", str(item.get("document_number") or ""))
+                or not item.get("pricing_reviewed_at")
+                or not item.get("pricing_review_fingerprint")
+                or item.get("pricing_review_fingerprint") != _moses_estimate_review_fingerprint(item)):
+            raise HTTPException(409, "Pricing or scope changed since last review; reconfirm the estimate")
+        try:
+            amount = Decimal(str(item.get("total", item.get("amount", ""))))
+            if not amount.is_finite() or amount <= 0: raise ValueError()
+        except (ValueError, TypeError, InvalidOperation):
+            raise HTTPException(409, "Estimate total must be positive and verified")
+        work = load(location(request, "doorks", "work_orders"))
+        source = next((w for w in work if isinstance(w, dict)
+                       and w.get("id") == item.get("source_work_order_id")), None)
+        if (not source or not item.get("customer_id") or
+                str(source.get("customer_id") or "") != str(item.get("customer_id") or "")):
+            raise HTTPException(409, "Source work order or customer has changed")
+        from app.services import moses_actions
+        _, proposal_path, _ = moses_actions._paths(request, "doorks")
+        proposals = moses_actions._read(proposal_path)
+        parent = next((p for p in proposals if isinstance(p, dict)
+                       and p.get("id") == item.get("source_moses_proposal_id")
+                       and p.get("kind") == "draft_work_order_estimate"
+                       and p.get("state") == "executed"
+                       and p.get("estimate_id") == record_id
+                       and p.get("record_id") == source.get("id")), None)
+        if not parent:
+            raise HTTPException(409, "Original Moses estimate approval could not be verified")
+        if any(isinstance(d, dict) and d.get("source_estimate_id") == record_id
+               and str(d.get("document_type") or "").casefold() == "invoice" for d in items):
+            raise HTTPException(409, "A linked invoice already exists")
+        actor = getattr(request.state, "auth_user", {})
+        item["status"] = "Approved"
+        item["approved_by"] = str(actor.get("id") or actor.get("username") or "office_admin") if isinstance(actor, dict) else "office_admin"
+        item["approved_at"] = datetime.now(timezone.utc).isoformat()
+        item["updated_at"] = item["approved_at"]
+        save(path, items)
+        return {"item": item, "approved": True, "invoice_created": False, "sent": False}
+
 
 @router.patch("/{platform}/{kind}/{record_id}")
 def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
@@ -324,7 +413,7 @@ def update(platform:str,kind:str,record_id:str,payload:Record,request:Request):
                 if platform=="doorks" and kind=="estimates_invoices" and item.get("source_moses_proposal_id") and str(item.get("document_type", "")).casefold()=="estimate":
                     # AI-prepared quotes cannot self-issue, self-number, or erase the review flags
                     # through the generic editor's PATCH endpoint.
-                    for protected in ("document_number", "requires_number_assignment", "pricing_required", "source_moses_proposal_id", "source_work_order_id", "document_type", "source_estimate_id"):
+                    for protected in ("document_number", "requires_number_assignment", "pricing_required", "source_moses_proposal_id", "source_work_order_id", "document_type", "source_estimate_id", "pricing_review_fingerprint", "pricing_reviewed_at", "pricing_reviewed_by"):
                         data.pop(protected, None)
                     next_status=str(data.get("status", item.get("status", "Draft"))).casefold()
                     if next_status not in ("draft", "ready"):

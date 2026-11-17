@@ -51,7 +51,19 @@ def test_pds_agent_has_search_and_proposal_only(monkeypatch):
         Agent=FakeAgent, Runner=FakeRunner, RunConfig=lambda **kwargs: None,
         function_tool=lambda fn: fn))
     assert 'no changes' in moses_agent.answer(req(), 'Find Acme', []).lower()
-    assert [tool.__name__ for tool in captured['tools']] == ['get_moses_permissions', 'prepare_moses_action', 'get_moses_action_receipt', 'get_moses_pending_actions', 'get_business_briefing', 'review_purchase_order_receiving', 'propose_purchase_order_receipt', 'search_pds_jobs', 'get_pds_job_details', 'get_pds_work_queue', 'get_pds_estimate_context', 'get_pds_estimate_preview', 'propose_pds_job_status', 'inspect_product_page', 'propose_pds_catalog_part', 'preview_dispatch_customer_email', 'propose_vendor_po_email']
+    assert [tool.__name__ for tool in captured['tools']] == [
+        'get_moses_permissions', 'prepare_moses_action', 'get_moses_action_receipt',
+        'get_moses_pending_actions', 'get_moses_action_center', 'get_business_briefing',
+        'review_purchase_order_receiving', 'propose_purchase_order_receipt',
+        'search_pds_jobs', 'get_pds_job_details', 'get_pds_work_queue',
+        'get_verified_pds_draft', 'get_verified_pds_job_context', 'prepare_pds_job_quote_review',
+        'review_pds_document_delivery', 'prepare_pds_document_delivery',
+        'get_pending_pds_document_emails', 'prepare_customer_dispatch_update',
+        'get_pds_estimate_context', 'get_pds_estimate_preview', 'propose_pds_job_status',
+        'inspect_product_page', 'propose_pds_catalog_part', 'preview_dispatch_customer_email',
+        'propose_vendor_po_email'
+    ]
+    assert all('delete' not in tool.__name__ and 'send' not in tool.__name__ for tool in captured['tools'])
     assert 'PDS' in captured['name']
     with pytest.raises(HTTPException):
         moses_agent.answer(req('sdc', 'technician'), 'Find Acme', [])

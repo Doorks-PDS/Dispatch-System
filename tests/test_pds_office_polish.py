@@ -22,3 +22,14 @@ def test_pds_business_hub_reuses_existing_ledger():
     assert 'className=\'card pds-office-business-hub\'' in source
     assert "renderManualAccountingLedger('pds','bills')" in source
     assert (ROOT/'static/pds_office_ticket_polish.css').is_file()
+
+
+def test_pds_ticket_quick_date_uses_existing_api_and_receipt_label():
+    source=(ROOT/'static/app.js').read_text(encoding='utf-8')
+    assert "label.textContent='Receipt Upload'" in source
+    assert "label.textContent='Records Upload'" not in source
+    assert "dateInput.setAttribute('aria-label', 'Edit PDS dispatch scheduled date')" in source
+    assert "['office', 'office_admin'].includes(String(currentUser?.role || ''))" in source
+    assert 'apiUpdateJob(job.id, { date: newDate })' in source
+    assert 'String(updated.date) !== newDate' in source
+    assert "dateSave.textContent = 'Save date'" in source

@@ -36,6 +36,7 @@ from app.services.calendar_store import CalendarStore
 from app.services.legacy_store import LegacyStore
 from app.routers.pds_purchase_orders import router as pds_purchase_orders_router
 from app.routers.calendar import router as calendar_router
+from app.routers.pds_scheduling import router as pds_scheduling_router
 
 from app.services.notifications_store import NotificationsStore
 from app.routers.notifications import router as notifications_router
@@ -215,6 +216,7 @@ from app.routers.accounting_ledger import router as accounting_ledger_router
 app.include_router(document_vault_router)
 app.include_router(accounting_ledger_router)
 app.include_router(calendar_router)
+app.include_router(pds_scheduling_router)
 app.include_router(data_router)
 app.include_router(notifications_router)
 app.include_router(timecards_router)
@@ -235,6 +237,8 @@ from app.routers.dispatch_ai import router as dispatch_ai_router
 app.include_router(dispatch_ai_router)
 app.include_router(moses_router)
 app.include_router(moses_command_router)
+from app.routers.moses_pds_document_email import router as moses_pds_document_email_router
+app.include_router(moses_pds_document_email_router)
 from app.routers.accounting import router as accounting_router
 app.include_router(accounting_router)
 from app.routers.platforms import router as platforms_router
@@ -259,6 +263,10 @@ from app.routers.doorks_portals import router as doorks_portals_router
 app.include_router(doorks_portals_router)
 from app.routers.doorks_assistant import router as doorks_assistant_router
 app.include_router(doorks_assistant_router)
+from app.routers.moses_action_center import router as moses_action_center_router
+app.include_router(moses_action_center_router)
+from app.routers.moses_drafts import router as moses_drafts_router
+app.include_router(moses_drafts_router)
 from app.routers.doorks_packages import router as doorks_packages_router
 app.include_router(doorks_packages_router)
 from app.routers.ai_data_import import router as ai_data_import_router

@@ -206,8 +206,9 @@ def preview_dispatch_eta(request, platform: str, record_id: str, mode: str,
         lines.append('Your service visit is scheduled for '+
                      (visit_date or '(date not confirmed)')+
                      ((' at '+visit_time) if visit_time else '')+'.')
+        if eta_time: lines.append('Our estimated arrival time is '+eta_time+'.')
     elif mode == 'en_route':
-        lines.append('Our technician is preparing to head your way.'+
+        lines.append('Our technician is on the way.'+
                      ((' The estimated arrival time is '+eta_time+'.') if eta_time else ''))
     elif mode == 'delay':
         lines.append('Your expected arrival time has changed.'+
