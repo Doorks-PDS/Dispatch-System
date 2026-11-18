@@ -171,6 +171,8 @@ def _view(request: Request):
             target = settings.get('target')
             items.append({'part_id': part_id, 'part_number': part.get('part_number', ''), 'description': part.get('description', ''),
                           'quantity': count, 'minimum': minimum, 'target': target,
+                          'image_url': part.get('image_url', ''), 'product_url': part.get('product_url', ''),
+                          'manufacturer': part.get('manufacturer', part.get('Manufacturer', '')),
                           'low': _low(count, minimum), 'needed': max(0, (target if target is not None else minimum or 0) - count) if _low(count, minimum) else 0,
                           'catalog_missing': not bool(part)})
         rows.append({'employee_id': employee_id, 'employee_name': employee.get('name') or config.get('employee_name') or 'Unknown employee',
@@ -184,6 +186,8 @@ def _view(request: Request):
         count = warehouse.get(part_id)
         catalog.append({'id': part_id, 'part_number': part.get('part_number', ''), 'description': part.get('description', ''),
                         'warehouse': count, 'stock_recorded': recorded, 'minimum': threshold,
+                        'image_url': part.get('image_url', ''), 'product_url': part.get('product_url', ''),
+                        'manufacturer': part.get('manufacturer', part.get('Manufacturer', '')),
                         'low': recorded and _low(count, threshold), 'needed': max(0, threshold-count) if recorded and _low(count, threshold) else 0})
     return {'ok': True, 'vans': rows, 'template': data['template'], 'catalog': catalog,
             'alerts': {'vans': sum(v['low_count'] for v in rows if v['enabled']), 'warehouse': sum(1 for c in catalog if c['low'])}}

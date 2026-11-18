@@ -14289,58 +14289,106 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     setNavActive(navFormsVanStock);
     setActiveChip('Work Flow');
     setWorkspace('Van Stock');clearWorkspaceActions();
-    workspaceBody.innerHTML='<div class="card"><h2>Van Stock</h2><p class="hint">Loading technician van inventory…</p></div>';
+    workspaceBody.innerHTML='<div class="card"><h2>Van Stock</h2><p class="hint">Loading van tickets…</p></div>';
     let state,people;
     try{[state,people]=await Promise.all([fetchJSON('/pds-van-stock'),apiListEmployees()]);}
     catch(error){workspaceBody.innerHTML=`<div class="card">Van Stock unavailable: ${escapeHtml(String(error.message||error))}</div>`;return;}
     const main=document.createElement('div');main.style.cssText='display:grid;gap:14px;max-width:1240px;margin:0 auto';
-    const header=document.createElement('section');header.className='card';
-    header.innerHTML=`<h2 style="margin-top:0">Technician Van Stock</h2><p class="hint">Tracked per employee using the PDS Parts List. Warehouse stock decreases only for a verified transfer; initial physical van counts do not change warehouse stock. Empty minimum means no alert.</p><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><strong>${state.vans.length} vans</strong><strong>${state.alerts.vans} van shortages</strong><strong>${state.alerts.warehouse} warehouse shortages</strong><button class="btn" id="van-refresh">Refresh</button></div>`;
-    header.querySelector('#van-refresh').onclick=renderVanStockView;main.append(header);
-    const feedback=document.createElement('div');feedback.setAttribute('role','status');feedback.className='hint';main.append(feedback);
+    const panel=(title,subtitle)=>{const card=document.createElement('section');card.className='card';const h=document.createElement('h3');h.style.margin='0 0 6px';h.textContent=title;card.append(h);if(subtitle){const p=document.createElement('p');p.className='hint';p.style.margin='0 0 12px';p.textContent=subtitle;card.append(p);}return card;};
+    const actionButton=(text,fn,orange=false)=>{const b=document.createElement('button');b.type='button';b.className='btn'+(orange?' btn-orange':'');b.textContent=text;b.onclick=fn;return b;};
+    const rowStyle='display:flex;gap:9px;align-items:center;flex-wrap:wrap';
+    const safeImage=url=>typeof url==='string'&&(/^https:\/\//i.test(url)||url.startsWith('/moses/part-image/pds/'));
+    const partLabel=p=>(p.part_number||'Unnumbered part')+' — '+(p.description||'No description');
+    const feedback=document.createElement('p');feedback.className='hint';feedback.setAttribute('role','status');
     async function submit(url,method,body){
       feedback.textContent='Saving…';
       try{await fetchJSON(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await renderVanStockView();}
-      catch(e){feedback.textContent='Could not save: '+(e.message||e);}
+      catch(error){feedback.textContent='Could not save: '+(error.message||error);}
     }
-    const employees=(Array.isArray(people)?people:people?.items||[]).filter(e=>e.id && ['tech','lead','technician'].includes(String(e.role||'tech').toLowerCase()));
-    const add=document.createElement('section');add.className='card';
-    add.innerHTML='<h3 style="margin-top:0">Van Setup</h3><p class="hint">Choose employees who have vans; employees without vans do not need a setup.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><select class="input" id="van-person" style="max-width:320px"></select><button type="button" class="btn btn-orange" id="van-add">Create / Enable Van</button></div>';
-    const employeeSelect=add.querySelector('#van-person');
-    for(const employee of employees){const opt=document.createElement('option');opt.value=String(employee.id);opt.textContent=employee.name||employee.id;employeeSelect.append(opt);}
-    add.querySelector('#van-add').onclick=()=>{if(employeeSelect.value)submit('/pds-van-stock/vans','POST',{employee_id:employeeSelect.value,enabled:true,use_template:true});};main.append(add);
-    const parts=state.catalog.slice().sort((a,b)=>String(a.part_number).localeCompare(String(b.part_number)));
-    function selectPart(id){const select=document.createElement('select');select.className='input';select.style.maxWidth='380px';for(const p of parts){const option=document.createElement('option');option.value=p.id;option.textContent=(p.part_number||'No part number')+' — '+(p.description||'');select.append(option);}if(id)select.value=id;return select;}
-    function numeric(label,placeholder){const wrap=document.createElement('label');wrap.style.cssText='display:grid;gap:3px;font-size:12px';wrap.textContent=label;const input=document.createElement('input');input.className='input';input.type='number';input.min='0';input.max='100000';input.step='1';input.placeholder=placeholder||'Blank = no alert';input.style.maxWidth='150px';wrap.append(input);return [wrap,input];}
-    function thresholdBox(title,url){
-      const card=document.createElement('section');card.className='card';card.innerHTML='<h3 style="margin-top:0"></h3><p class="hint">Set a minimum to trigger a warning and a target quantity for restocking. Existing van-specific levels are preserved.</p>';
-      card.querySelector('h3').textContent=title;
-      const form=document.createElement('form');form.style.cssText='display:flex;gap:10px;align-items:end;flex-wrap:wrap';const select=selectPart();const [minWrap,minimum]=numeric('Low-stock minimum');const [targetWrap,target]=numeric('Restock target');const save=document.createElement('button');save.className='btn btn-orange';save.textContent='Save part level';save.type='submit';form.append(select,minWrap,targetWrap,save);card.append(form);
-      form.onsubmit=e=>{e.preventDefault();if(!select.value)return;submit(url,'PUT',{part_id:select.value,minimum:minimum.value===''?null:Number(minimum.value),target:target.value===''?null:Number(target.value)});};
-      return card;
+    const parts=(state.catalog||[]).slice().sort((a,b)=>String(a.part_number||'').localeCompare(String(b.part_number||'')));
+    const peopleList=(Array.isArray(people)?people:people?.items||[]).filter(e=>e.id&&['tech','lead','technician'].includes(String(e.role||'tech').toLowerCase()));
+    const summary=panel('🚐 Technician Van Stock');
+    summary.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'Manage each vehicle as a ticket. Counts, transfers and shortages use the existing PDS Parts List and warehouse inventory.'}));
+    const stats=document.createElement('div');stats.style.cssText=rowStyle+';margin:12px 0';
+    for(const [label,value] of [['Active vans',(state.vans||[]).filter(v=>v.enabled).length],['Van shortages',state.alerts?.vans||0],['Warehouse alerts',state.alerts?.warehouse||0]]){
+      const box=document.createElement('div');box.style.cssText='border:1px solid #e2e8f0;border-radius:12px;padding:10px 16px;min-width:130px';
+      const number=document.createElement('strong');number.style.cssText='display:block;font-size:24px';number.textContent=String(value);
+      const caption=document.createElement('small');caption.className='hint';caption.textContent=label;box.append(number,caption);stats.append(box);
     }
-    if(parts.length)main.append(thresholdBox('Standard Van Stock Template','/pds-van-stock/template'));
-    else {const missing=document.createElement('p');missing.className='hint';missing.textContent='Add parts to the PDS Parts List before configuring van inventory.';main.append(missing);}
-    for(const van of state.vans){
-      const section=document.createElement('section');section.className='card';
-      const title=document.createElement('h3');title.style.marginTop='0';title.textContent=van.employee_name+(van.enabled?'':' (van disabled)');section.append(title);
-      const sub=document.createElement('p');sub.className='hint';sub.textContent=van.low_count+' item(s) below minimum';section.append(sub);
-      const toggle=document.createElement('button');toggle.className='btn';toggle.textContent=van.enabled?'Disable Van':'Enable Van';toggle.onclick=()=>submit('/pds-van-stock/vans','POST',{employee_id:van.employee_id,enabled:!van.enabled,use_template:false});section.append(toggle);
-      const rows=document.createElement('div');rows.style.cssText='display:grid;gap:6px;margin:12px 0';
-      for(const item of van.items){const row=document.createElement('div');row.className='jobrow';row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap';const text=document.createElement('div');const label=document.createElement('strong');label.textContent=(item.part_number||'Missing catalog part')+' — '+(item.description||'');const info=document.createElement('div');info.className='hint';info.textContent=`On van: ${item.quantity} · Minimum: ${item.minimum??'not set'} · Target: ${item.target??'not set'}${item.low?' · NEED '+item.needed:''}`;text.append(label,info);row.append(text);if(item.low){const warning=document.createElement('span');warning.className='badge';warning.textContent='Low stock';row.append(warning);}rows.append(row);}
-      if(!van.items.length)rows.innerHTML='<p class="hint">No parts assigned to this van yet. Use the standard template or add a van-specific part below.</p>';
-      section.append(rows);
-      if(parts.length){const controls=thresholdBox('Van-specific part / threshold','/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/items');section.append(controls);}
-      const movement=document.createElement('form');movement.style.cssText='display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:16px';
-      const movementTitle=document.createElement('strong');movementTitle.textContent='Record Stock';movementTitle.style.width='100%';movement.append(movementTitle);
-      const mp=selectPart();const action=document.createElement('select');action.className='input';for(const [key,label] of [['load','Transfer warehouse → van'],['return','Return van → warehouse'],['used','Used on job'],['count','Physical van count (set total)']]){const option=document.createElement('option');option.value=key;option.textContent=label;action.append(option);}
-      const qty=document.createElement('input');qty.className='input';qty.type='number';qty.min='0';qty.max='100000';qty.step='1';qty.required=true;qty.placeholder='Qty / count';qty.style.maxWidth='125px';
-      const reason=document.createElement('input');reason.className='input';reason.required=true;reason.minLength=3;reason.maxLength=300;reason.placeholder='Reason or job #';reason.style.maxWidth='220px';
-      const commit=document.createElement('button');commit.type='submit';commit.className='btn btn-orange';commit.textContent='Record';movement.append(mp,action,qty,reason,commit);
-      movement.onsubmit=e=>{e.preventDefault();if(!mp.value||qty.value==='')return;if(action.value!=='count'&&Number(qty.value)<1){alert('Enter at least one item for this movement');return;}if(action.value==='count'&&!confirm('This sets the physically counted van quantity. It will not change warehouse inventory. Continue?'))return;const request_id=(globalThis.crypto?.randomUUID?.()||String(Date.now())+'-'+Math.random());submit('/pds-van-stock/movements','POST',{employee_id:van.employee_id,part_id:mp.value,quantity:Number(qty.value),movement:action.value,reason:reason.value.trim(),request_id});};section.append(movement);main.append(section);
+    summary.append(stats);
+    const summaryControls=document.createElement('div');summaryControls.style.cssText=rowStyle;
+    summaryControls.append(actionButton('✨ Add Part with Moses',()=>{renderPartsListView();document.querySelector('#parts_add')?.click();},true));
+    summaryControls.append(actionButton('View PDS Parts List',renderPartsListView));
+    summaryControls.append(actionButton('Refresh',renderVanStockView));summary.append(summaryControls);main.append(summary,feedback);
+    const setup=panel('Van Setup','Choose a technician or lead to create a van ticket. Employees without a van can be left out.');
+    const setupControls=document.createElement('div');setupControls.style.cssText=rowStyle;
+    const person=document.createElement('select');person.className='input';person.style.maxWidth='330px';person.setAttribute('aria-label','Select technician or lead');
+    const existingIds=new Set((state.vans||[]).filter(v=>v.enabled).map(v=>String(v.employee_id)));
+    for(const employee of peopleList){const o=document.createElement('option');o.value=String(employee.id);o.textContent=(employee.name||employee.id)+(existingIds.has(String(employee.id))?' · Existing van':'');person.append(o);}
+    setupControls.append(person,actionButton('Create / Enable Van',()=>{if(person.value)submit('/pds-van-stock/vans','POST',{employee_id:person.value,enabled:true,use_template:true});},true));setup.append(setupControls);main.append(setup);
+    const choosePart=(selected='')=>{const select=document.createElement('select');select.className='input';select.style.maxWidth='370px';select.setAttribute('aria-label','Select part from PDS Parts List');
+      const blank=document.createElement('option');blank.value='';blank.textContent='Select a PDS part';select.append(blank);
+      for(const part of parts){const opt=document.createElement('option');opt.value=part.id;opt.textContent=partLabel(part);select.append(opt);}if(selected)select.value=selected;return select;};
+    const numeric=(placeholder,required=false)=>{const i=document.createElement('input');i.className='input';i.type='number';i.min='0';i.max='100000';i.step='1';i.placeholder=placeholder;i.required=required;i.style.maxWidth='135px';return i;};
+    function partForm(endpoint,caption){
+      const form=document.createElement('form');form.style.cssText=rowStyle+';margin-top:10px';
+      const select=choosePart(),minimum=numeric('Min (optional)'),target=numeric('Target (optional)');
+      minimum.setAttribute('aria-label','Low-stock minimum');target.setAttribute('aria-label','Restock target');
+      const submitButton=document.createElement('button');submitButton.className='btn btn-orange';submitButton.type='submit';submitButton.textContent='Save';
+      form.append(select,minimum,target,submitButton);
+      form.onsubmit=event=>{event.preventDefault();if(!select.value){feedback.textContent='Select a part first.';return;}
+        const min=minimum.value===''?null:Number(minimum.value),goal=target.value===''?null:Number(target.value);
+        if(min!==null&&goal!==null&&goal<min){feedback.textContent='Restock target must be at least the minimum.';return;}
+        submit(endpoint,'PUT',{part_id:select.value,minimum:min,target:goal});};
+      const wrap=document.createElement('div');const label=document.createElement('p');label.className='hint';label.textContent=caption;wrap.append(label,form);return wrap;
     }
-    const warehouse=document.createElement('section');warehouse.className='card';warehouse.innerHTML='<h3 style="margin-top:0">Warehouse Stock Alerts</h3><p class="hint">Only parts with a configured minimum and a verified warehouse stock count can trigger alerts.</p>';
-    const lows=parts.filter(p=>p.low);if(!lows.length){const okay=document.createElement('p');okay.className='hint';okay.textContent='No warehouse shortages currently flagged.';warehouse.append(okay);}else for(const p of lows){const line=document.createElement('div');line.className='jobrow';line.textContent=`${p.part_number} — ${p.description}: ${p.warehouse} on hand, minimum ${p.minimum}, order ${p.needed}`;warehouse.append(line);}main.append(warehouse);
+    const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:14px';
+    for(const van of state.vans||[]){
+      const ticket=panel('🚐 '+van.employee_name+(van.enabled?'':' · Inactive'));
+      const count=document.createElement('div');count.className='hint';count.textContent=`${van.items.length} assigned parts · ${van.low_count} low-stock item(s)`;ticket.append(count);
+      const toolbar=document.createElement('div');toolbar.style.cssText=rowStyle+';margin:12px 0';
+      toolbar.append(actionButton(van.enabled?'Disable Van':'Enable Van',()=>submit('/pds-van-stock/vans','POST',{employee_id:van.employee_id,enabled:!van.enabled,use_template:false})));
+      ticket.append(toolbar);
+      const body=document.createElement('details');body.className='van-stock-ticket';body.style.cssText='border-top:1px solid #e2e8f0;padding-top:12px';
+      const heading=document.createElement('summary');heading.style.cssText='cursor:pointer;font-weight:700;color:#274056';heading.textContent='Open Van Ticket — inventory, movements & settings';body.append(heading);
+      const items=document.createElement('div');items.style.cssText='display:grid;gap:8px;margin:14px 0';
+      for(const item of van.items){
+        const line=document.createElement('div');line.style.cssText='border:1px solid #e2e8f0;border-radius:12px;padding:10px;display:flex;align-items:center;gap:10px';
+        const photo=document.createElement('div');photo.style.cssText='width:52px;height:52px;flex-shrink:0;border-radius:9px;background:#f2f5f8;display:grid;place-items:center;font-size:22px';
+        if(safeImage(item.image_url)){const img=document.createElement('img');img.src=item.image_url;img.alt='Part photo';img.style.cssText='width:52px;height:52px;object-fit:contain;border-radius:9px';img.onerror=()=>{photo.textContent='📦';};photo.append(img);}else photo.textContent='📦';
+        const info=document.createElement('div');info.style.minWidth='0';const label=document.createElement('strong');label.textContent=partLabel(item);info.append(label);
+        const small=document.createElement('div');small.className='hint';small.textContent=`On van: ${item.quantity} · Min: ${item.minimum??'—'} · Target: ${item.target??'—'}`;info.append(small);
+        if(item.low){const warn=document.createElement('strong');warn.style.color='#a94d00';warn.textContent=`⚠ Need ${item.needed} to restock`;info.append(warn);}
+        if(safeImage(item.product_url)&&item.product_url.startsWith('https://')){const a=document.createElement('a');a.href=item.product_url;a.target='_blank';a.rel='noopener noreferrer';a.textContent='Product link';info.append(a);}
+        line.append(photo,info);items.append(line);
+      }
+      if(!van.items.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No parts assigned yet. Add standard stock or a van-specific part below.';items.append(empty);}
+      body.append(items);
+      if(parts.length)body.append(partForm('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/items','Add a part or adjust the minimum and target for this van.'));
+      const record=panel('Record Stock','Transfers affect warehouse inventory; physical counts do not.');
+      const move=document.createElement('form');move.style.cssText=rowStyle;
+      const part=choosePart(),type=document.createElement('select');type.className='input';type.setAttribute('aria-label','Stock movement type');
+      for(const [key,label] of [['load','Warehouse → Van'],['return','Van → Warehouse'],['used','Used on job'],['count','Physical van count']]){const opt=document.createElement('option');opt.value=key;opt.textContent=label;type.append(opt);}
+      const qty=numeric('Quantity',true),reason=document.createElement('input');reason.className='input';reason.placeholder='Job # / reason';reason.minLength=3;reason.maxLength=300;reason.required=true;reason.style.maxWidth='210px';reason.setAttribute('aria-label','Job number or reason');
+      const save=document.createElement('button');save.type='submit';save.className='btn btn-orange';save.textContent='Record Movement';move.append(part,type,qty,reason,save);
+      move.onsubmit=event=>{event.preventDefault();if(!part.value){feedback.textContent='Select a part first.';return;}
+        if(type.value!=='count'&&Number(qty.value)<1){feedback.textContent='Enter a quantity of at least one.';return;}
+        if(type.value==='count'&&!confirm('Set the physically counted van quantity? This does not affect warehouse stock.'))return;
+        const request_id=(globalThis.crypto?.randomUUID?.()||String(Date.now())+'-'+Math.random());
+        submit('/pds-van-stock/movements','POST',{employee_id:van.employee_id,part_id:part.value,quantity:Number(qty.value),movement:type.value,reason:reason.value.trim(),request_id});};
+      record.append(move);body.append(record);ticket.append(body);grid.append(ticket);
+    }
+    if(!(state.vans||[]).length){const empty=panel('No van tickets yet','Select a technician above to create the first vehicle.');grid.append(empty);}
+    main.append(grid);
+    if(parts.length){const template=document.createElement('details');template.className='card';
+      const head=document.createElement('summary');head.style.cssText='font-size:17px;font-weight:700;cursor:pointer';head.textContent='Standard Van Stock Template · Configure default parts';template.append(head);
+      template.append(partForm('/pds-van-stock/template','Add standard parts and optional stock levels. Van-specific quantities remain independent.'));main.append(template);
+    }else{main.append(panel('Parts List is empty','Use “Add Part with Moses” above to create and review a part before adding it to van stock.'));}
+    const low=parts.filter(p=>p.low);const warehouse=document.createElement('details');warehouse.className='card';
+    const whTitle=document.createElement('summary');whTitle.style.cssText='font-size:17px;font-weight:700;cursor:pointer';whTitle.textContent=`Warehouse Stock Alerts · ${low.length}`;warehouse.append(whTitle);
+    if(!low.length){warehouse.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'No warehouse shortages currently flagged.'}));}
+    for(const p of low){const line=document.createElement('div');line.className='jobrow';line.textContent=`${partLabel(p)} · ${p.warehouse} on hand · minimum ${p.minimum} · need ${p.needed}`;warehouse.append(line);}
+    main.append(warehouse);
     workspaceBody.replaceChildren(main);currentView={refresh:renderVanStockView};refreshVanStockBadge();
   }
 

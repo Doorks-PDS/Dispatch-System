@@ -1,0 +1,18 @@
+{
+  "base_version": "5.38 (with prior test compatibility fixes)",
+  "target_version": "5.40",
+  "before": {
+    "static/app.js": "63f03c0e010358a57ecb4ce0f0816457532541a3d9bad88a346803a817254b59",
+    "app/routers/pds_van_stock.py": "9c101aa9368279115e19c1be0603c55a4d3f258fd0e77b54b9e668b80e15a880",
+    "app/services/moses_agent.py": "ebfc736706270f4f507bf40e7a69803ff9a603fb4b0090bd61e0fbdaf4476a63",
+    "tests/test_moses_platform_boundaries.py": "1814fe76e3d09cd94b2040ec0896ac061944a25c5fc2bfeee6fa005911d9d0f7"
+  },
+  "after": {
+    "static/app.js": "41cc84b4331b208f9d4e4f7becdfc22cfad2d8ee816963ea59198b9670ca6d70",
+    "app/routers/pds_van_stock.py": "6391c065458a3c40c901e5c1e5d8469c069a0908dec9d636275e36510c97ba6a",
+    "app/services/moses_agent.py": "605d51b3b23b5feada02fada8512bab09ad5a9b4bc1f4a525975fcadb2e1e727",
+    "tests/test_moses_platform_boundaries.py": "0b8331ec866150a510fb278f4b70c65782baac9e4b0bc31d625562eaa0de177c",
+    "tests/test_pds_van_stock_ticket_ui.py": "b4f7d9594c85bfecd06b82add1d47a498c879cd3431bc0d61b9e5fb8e5d17463",
+    "tests/test_moses_540_scheduler_agent.py": "aa24e0075e82c114f7ce5c6a833ce9702477df5b039cfd204714fef4eb55ad4f"
+  }
+}
