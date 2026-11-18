@@ -69,6 +69,7 @@
   function installWorkspaceMoses(){
     if(document.getElementById('workspaceMosesBubble'))return;
     const launch=document.createElement('button');launch.id='workspaceMosesBubble';launch.type='button';launch.innerHTML='<span aria-hidden="true" class="moses-launch-glow"></span><span> Moses</span>';launch.setAttribute('aria-label','Open Moses assistant');launch.style.cssText='position:fixed;right:24px;bottom:22px;z-index:11000;background:#395c3e;color:white;border:0;border-radius:28px;padding:14px 18px;box-shadow:0 5px 24px #0004;font-weight:800;cursor:pointer';
+    launch.hidden=true;launch.style.display='none'; // Never show Moses on the login page.
     const panel=document.createElement('section');panel.id='workspaceMosesPanel';panel.className='moses-chat-shell';panel.hidden=true;panel.style.cssText='position:fixed;right:20px;bottom:85px;z-index:11001;width:min(560px,calc(100vw - 24px));background:white;border:1px solid #d9dee7;border-radius:22px;padding:18px;box-shadow:0 18px 52px #0003;max-height:min(83vh,820px);overflow-y:auto';
     const header=document.createElement('div');header.className='moses-chat-header';header.style.cssText='display:flex;align-items:center;justify-content:space-between';const title=document.createElement('strong');title.textContent='Moses';const close=document.createElement('button');close.textContent='✕';close.className='btn';close.title='Close Moses';close.setAttribute('aria-label','Close Moses');close.onclick=()=>{stopSpeaking();stopListening();panel.hidden=true;launch.focus()};const draftsButton=document.createElement('button');draftsButton.type='button';draftsButton.className='btn';draftsButton.textContent='Drafts';draftsButton.title='Open saved Moses PDS quote-review drafts';draftsButton.onclick=()=>{if(typeof window.openMosesDrafts==='function')window.openMosesDrafts();else input.value='Show my saved quote drafts';};const headerActions=document.createElement('div');headerActions.className='moses-header-actions';
     const expandChat=document.createElement('button');expandChat.type='button';expandChat.className='btn moses-expand-btn';expandChat.textContent='⛶';expandChat.title='Expand Moses chat';expandChat.setAttribute('aria-label','Expand Moses chat');expandChat.setAttribute('aria-pressed','false');
@@ -859,6 +860,18 @@
   const pdsOfficeCol=navDataCenter?.parentElement;
   if(pdsJobCol) [navJobFlow,navAllJobs,navMyAssignments,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
   if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
+  // Admin-only PRIO Coin design preview. This is intentionally not a live ledger.
+  const navPrioCoinPreview = document.createElement('button');
+  navPrioCoinPreview.type = 'button';
+  navPrioCoinPreview.className = 'navbtn';
+  navPrioCoinPreview.id = 'navPrioCoinPreview';
+  navPrioCoinPreview.innerHTML = '<span>PRIO Coin</span><small>Admin Preview Only</small>';
+  navPrioCoinPreview.hidden = true;
+  if (pdsOfficeCol) pdsOfficeCol.appendChild(navPrioCoinPreview);
+  navPrioCoinPreview.addEventListener('click', () => {
+    if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
+    window.open('/pds/prio-coin-preview', '_blank', 'noopener,noreferrer');
+  });
   const pdsFormsCol=document.querySelector('#formsBody .navcol');
   if(pdsFormsCol) [navFormsTimeCard,navFormsReceipts,navFormsTimeOff,navFormsSignOff,navTakeoffs].forEach(b=>{if(b)pdsFormsCol.appendChild(b);});
   const formsHeading=formsToggle?.querySelector('.panel-hd')||formsToggle;
@@ -4427,6 +4440,7 @@ async function apiListForms() {
     setVisible(navPayroll, !!role && perms.payroll);
     setVisible(navEmployees, false); // Available through Accounting Hub
     setVisible(navDataUpload, role === "office_admin" && !!perms.dataUpload);
+    setVisible(navPrioCoinPreview, role === "office_admin" && activePlatform === "pds");
     setVisible(navSaddleback, false); // Use workspace switcher
     setVisible(navAtlas, !!role && perms.atlas);
     setVisible(navMoses, !!role && perms.moses);
@@ -4441,6 +4455,11 @@ async function apiListForms() {
 
   function updateLoginUi(message = "") {
     const loggedIn = !!currentUser;
+    // Moses is an authenticated workspace tool, never part of the login UI.
+    const mosesLauncher=document.getElementById('workspaceMosesBubble');
+    const mosesPanel=document.getElementById('workspaceMosesPanel');
+    if(mosesLauncher){mosesLauncher.hidden=!loggedIn;mosesLauncher.style.display=loggedIn?'':'none';}
+    if(!loggedIn && mosesPanel)mosesPanel.hidden=true;
     document.body.classList.toggle("doorks-logged-out",!loggedIn);
     if(loggedIn){const aside=document.querySelector("main.layout > aside.sidebar");if(aside)for(const panel of aside.querySelectorAll(".panel"))panel.style.removeProperty("display");}
     const awaitingPin = !loggedIn && !!pendingPinUser;
@@ -5958,7 +5977,12 @@ function renderAttachmentSection(titleText, items, options = {}) {
       const handoff = await fetchJSON('/moses-drafts/'+encodeURIComponent(draftId)+'/handoff');
       if (!handoff.verified || String(handoff.job_id) !== jobId || String(handoff.draft_id) !== draftId) throw Error('Moses review no longer verified');
       const forms = Array.isArray(job.completion_forms) ? job.completion_forms : [];
-      const sourceIndex = forms.findIndex(form => String(form?.id || form?.created_at || 'legacy') === handoff.source_form_id && form?.ready_to_quote === true);
+      const sourceIndex = Number.isInteger(handoff.source_form_index)
+        ? handoff.source_form_index
+        : forms.findIndex(form => String(form?.id || form?.created_at || 'legacy') === handoff.source_form_id && form?.ready_to_quote === true);
+      if(sourceIndex < 0 || sourceIndex >= forms.length ||
+          String(forms[sourceIndex]?.id || forms[sourceIndex]?.created_at || 'legacy') !== handoff.source_form_id ||
+          forms[sourceIndex]?.ready_to_quote !== true) throw Error('Exact recommendation form changed; review the ticket');
       if (sourceIndex < 0) throw Error('Recommendation form has changed; review the ticket');
       await openEstimateInvoiceDrawer(job, 'estimate', null, {
         skipHelper: true,
@@ -6325,19 +6349,19 @@ function renderAttachmentSection(titleText, items, options = {}) {
     const ticketHeading=document.createElement('h3');ticketHeading.textContent='Job & contact information';
     ticketInfo.append(ticketHeading,fields);
     card.appendChild(ticketInfo);
-    // High-visibility PDS job context belongs before scheduling.
-    card.append(notes, officeNotes);
+    // Keep ticket action buttons visible immediately before Scheduler.
+    card.append(notes, officeNotes, actions);
     // Compact office scheduling plan: intentionally separate from the job date.
     // An unfinished visit plan does not move the calendar or assign a To-Do.
     if (job.id && !String(job.source||'').toUpperCase().startsWith('LEGACY') &&
         ['office','office_admin'].includes(String(currentUser?.role||''))) {
       const plan=document.createElement('section');plan.className='pds-office-group';
-      plan.style.cssText='margin:9px 0;padding:10px 12px;border:1px solid #d9dee7;border-radius:10px';
-      const heading=document.createElement('strong');heading.textContent='Staff & scheduling';
-      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(155px,1fr));gap:8px;margin-top:6px';
+      plan.style.cssText='margin:7px 0;padding:8px 10px;border:1px solid #d9dee7;border-radius:10px';
+      const heading=document.createElement('strong');heading.textContent='Scheduler';heading.style.cssText='display:block;font-size:14px;margin-bottom:3px';
+      const row=document.createElement('div');row.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px;margin-top:4px';
       const employeeLabel=document.createElement('div');employeeLabel.style.cssText='grid-column:1/-1';
       const caption=document.createElement('strong');caption.textContent='Technicians';employeeLabel.append(caption);
-      const employeeRows=document.createElement('div');employeeRows.style.cssText='display:grid;gap:6px;margin-top:5px';employeeLabel.append(employeeRows);
+      const employeeRows=document.createElement('div');employeeRows.style.cssText='display:grid;gap:4px;margin-top:3px';employeeLabel.append(employeeRows);
       let staffOptions=[];
       const selectRow=(value='')=>{
         const line=document.createElement('div');line.style.cssText='display:flex;gap:6px;align-items:center';
@@ -6349,7 +6373,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       };
       const knownIds=(Array.isArray(job.planned_employee_ids)&&job.planned_employee_ids.length?job.planned_employee_ids:job.assigned_employee_ids?.length?job.assigned_employee_ids:[job.planned_employee_id||'']).map(String);
       for(const id of knownIds)selectRow(id);
-      const addTech=document.createElement('button');addTech.type='button';addTech.className='btn';addTech.textContent='+ Technician';addTech.style.marginTop='5px';addTech.onclick=()=>{if(employeeRows.children.length<30)selectRow()};employeeLabel.append(addTech);row.append(employeeLabel);
+      const addTech=document.createElement('button');addTech.type='button';addTech.className='btn';addTech.textContent='+ Technician';addTech.style.marginTop='3px';addTech.style.padding='5px 8px';addTech.onclick=()=>{if(employeeRows.children.length<30)selectRow()};employeeLabel.append(addTech);row.append(employeeLabel);
       const selectedIds=()=>[...employeeRows.querySelectorAll('select')].map(x=>x.value).filter(Boolean);
       const dateLabel=document.createElement('label');dateLabel.textContent='Date';
       const dateInput=document.createElement('input');dateInput.type='date';dateInput.className='input';
@@ -6357,7 +6381,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       const timeLabel=document.createElement('label');timeLabel.textContent='Time';
       const timeInput=document.createElement('input');timeInput.type='time';timeInput.className='input';
       timeInput.value=String(job.scheduled_time||'');timeLabel.append(timeInput);row.append(timeLabel);
-      const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap;margin-top:7px';
+      const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:5px;flex-wrap:wrap;margin-top:4px';
       const savePlan=document.createElement('button');savePlan.type='button';savePlan.className='btn';savePlan.textContent='Save plan';
       const moveDate=document.createElement('button');moveDate.type='button';moveDate.className='btn';moveDate.textContent='Move Date';
       const update=document.createElement('button');update.type='button';update.className='btn btn-orange';update.textContent='Update to Schedule';
@@ -6417,6 +6441,95 @@ function renderAttachmentSection(titleText, items, options = {}) {
           if(ctx?.afterSave)await ctx.afterSave();
         }catch(err){note.textContent='Move could not be verified: '+(err.message||err);moveDate.disabled=false;}
       };
+      // Customer notifications are independent approval requests. Never send when scheduling.
+      const notify=document.createElement('details');notify.style.cssText='margin-top:6px;border-top:1px solid #e6e9ed;padding-top:6px';
+      const notifySummary=document.createElement('summary');notifySummary.textContent='Notify Customer';notifySummary.style.cssText='cursor:pointer;font-size:13px;font-weight:600';notify.append(notifySummary);
+      const notifyBody=document.createElement('div');notifyBody.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:7px';notify.append(notifyBody);
+      const makeNotifyField=(caption,control)=>{const label=document.createElement('label');label.style.cssText='font-size:12px';label.textContent=caption;control.className='input';control.style.cssText='width:100%;margin-top:3px';label.append(control);notifyBody.append(label);return control};
+      const method=makeNotifyField('Send by',document.createElement('select'));
+      for(const [value,name] of [['email','Email'],['text','Text'],['both','Email & Text']])method.add(new Option(name,value));
+      const kind=makeNotifyField('Update type',document.createElement('select'));
+      for(const [value,name] of [['appointment','Appointment confirmation'],['schedule_change','Schedule change'],['eta','Technician ETA'],['custom','Custom message']])kind.add(new Option(name,value));
+      const recipientEmail=makeNotifyField('Customer email',document.createElement('input'));recipientEmail.type='email';recipientEmail.value=String(job.contact_email||job.email||job.customer_email||'');recipientEmail.autocomplete='off';
+      const recipientPhone=makeNotifyField('Customer phone',document.createElement('input'));recipientPhone.type='tel';recipientPhone.value=String(job.contact_phone||job.phone||job.customer_phone||'');recipientPhone.autocomplete='off';
+      const subject=document.createElement('input');subject.type='text';subject.maxLength=140;
+      const subjectLabel=makeNotifyField('Email subject',subject);subjectLabel.parentElement.style.gridColumn='1/-1';
+      const message=document.createElement('textarea');message.rows=4;message.maxLength=320;
+      const msgLabel=makeNotifyField('Message (review before requesting approval)',message);msgLabel.parentElement.style.gridColumn='1/-1';
+      const notifyStatus=document.createElement('small');notifyStatus.setAttribute('role','status');notifyStatus.style.gridColumn='1/-1';
+      const requestApproval=document.createElement('button');requestApproval.type='button';requestApproval.className='btn';requestApproval.textContent='Prepare notification';
+      requestApproval.style.gridColumn='1/-1';
+      const approvalList=document.createElement('div');approvalList.style.cssText='grid-column:1/-1;display:grid;gap:5px';
+      notifyBody.append(requestApproval,approvalList,notifyStatus);
+      const seeHistory=document.createElement('button');seeHistory.type='button';seeHistory.className='btn';seeHistory.textContent='Notification History';seeHistory.style.gridColumn='1/-1';
+      const historyView=document.createElement('div');historyView.style.cssText='grid-column:1/-1;display:grid;gap:4px;font-size:12px';
+      seeHistory.onclick=async()=>{
+        seeHistory.disabled=true;historyView.replaceChildren();
+        try{
+          const [emails,texts]=await Promise.all([
+            fetchJSON('/pds-schedule-notifications/jobs/'+encodeURIComponent(job.id)+'/email-history'),
+            fetchJSON('/moses-action-center/pds/sms/jobs/'+encodeURIComponent(job.id)+'/history')
+          ]);
+          const rows=[...(emails.items||[]).map(x=>({...x,method:'Email',recipient:x.recipient})),
+                      ...(texts.items||[]).map(x=>({...x,method:'Text',recipient:x.phone}))]
+                      .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,25);
+          if(!rows.length){historyView.textContent='No saved customer notifications for this job.';return;}
+          for(const item of rows){
+            const line=document.createElement('div');line.style.cssText='border-bottom:1px solid #edf0f3;padding:4px 0;white-space:pre-wrap';
+            line.textContent=[item.method, item.status||'unknown', item.recipient||'',String(item.created_at||'').slice(0,16),item.message||''].join(' · ');
+            historyView.append(line);
+          }
+        }catch(err){historyView.textContent='Notification history unavailable: '+(err.message||err)}
+        finally{seeHistory.disabled=false;}
+      };
+      notifyBody.append(seeHistory,historyView);
+
+      const preset=()=>{
+        const selected=kind.options[kind.selectedIndex]?.textContent||'Service update';
+        subject.value='Priority Door Systems — '+selected+' — '+(job.job_number||'service');
+        const time=dateInput.value?(' on '+dateInput.value+(timeInput.value?' at '+timeInput.value:'')):'';
+        message.value='Priority Door Systems: '+selected+' for '+String(job.customer||'your location')+time+'. Please contact our office with any questions.';
+      };
+      kind.addEventListener('change',preset);preset();
+      const showMethod=()=>{recipientEmail.parentElement.hidden=method.value==='text';recipientPhone.parentElement.hidden=method.value==='email';subject.parentElement.hidden=method.value==='text'};
+      method.addEventListener('change',showMethod);showMethod();
+      requestApproval.onclick=async()=>{
+        if(!['office_admin'].includes(String(currentUser?.role||''))){notifyStatus.textContent='Office administrator approval is required to prepare customer notifications.';return;}
+        const modes=method.value==='both'?['email','text']:[method.value];
+        if(!message.value.trim()||!message.value.startsWith('Priority Door Systems:')){notifyStatus.textContent='Enter a message beginning with Priority Door Systems:';return;}
+        if(message.value.length>320){notifyStatus.textContent='Message must be 320 characters or fewer for SMS.';return;}
+        if(!confirm('Create '+modes.join(' and ')+' approval request(s) for this saved PDS job? Nothing will be sent yet.'))return;
+        requestApproval.disabled=true;approvalList.replaceChildren();notifyStatus.textContent='Verifying recipients and preparing approval…';
+        let prepared=0;
+        for(const mode of modes){
+          try{
+            const route=mode==='text'?'/moses-action-center/pds/sms/proposals':'/pds-schedule-notifications/email/proposals';
+            const payload=mode==='text'?{job_id:String(job.id),phone:recipientPhone.value.trim(),message:message.value.trim()}:{job_id:String(job.id),recipient:recipientEmail.value.trim(),category:kind.value,subject:subject.value.trim(),message:message.value.trim()};
+            const result=await fetchJSON(route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+            if(!result?.proposal?.id||result?.sent!==false)throw Error('Approval request not verified');
+            prepared++;
+            const line=document.createElement('div');line.style.cssText='display:flex;gap:6px;align-items:center;flex-wrap:wrap';
+            const caption=document.createElement('small');caption.textContent=(mode==='text'?'Text':'Email')+' draft prepared — not sent';
+            const approve=document.createElement('button');approve.type='button';approve.className='btn';approve.textContent='Approve & send '+mode;
+            const reject=document.createElement('button');reject.type='button';reject.className='btn';reject.textContent='Reject';
+            const receipt=document.createElement('small');receipt.setAttribute('role','status');
+            const decision=async(allowed)=>{
+              if(!confirm(allowed?'Send the exact prepared '+mode+' notification now?':'Reject this '+mode+' notification?'))return;
+              approve.disabled=reject.disabled=true;
+              try{
+                const decisionRoute=mode==='text'?'/moses-action-center/pds/sms/proposals/'+encodeURIComponent(result.proposal.id)+'/decision':'/pds-schedule-notifications/email/proposals/'+encodeURIComponent(result.proposal.id)+'/decision';
+                const response=await fetchJSON(decisionRoute,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:allowed})});
+                receipt.textContent=allowed?'Provider status: '+String(response.status||'unconfirmed')+' (not proof of delivery)':'Rejected';
+              }catch(error){receipt.textContent='Not confirmed: '+(error.message||error);}
+            };
+            approve.onclick=()=>decision(true);reject.onclick=()=>decision(false);
+            line.append(caption,approve,reject,receipt);approvalList.append(line);
+          }catch(error){const failure=document.createElement('small');failure.textContent=(mode==='text'?'Text':'Email')+' not prepared: '+(error.message||error);approvalList.append(failure)}
+        }
+        notifyStatus.textContent=prepared+' approval request(s) prepared. Review each before sending.';
+        requestApproval.disabled=false;
+      };
+      plan.append(notify);
       savePlan.onclick=()=>submit(false);update.onclick=()=>submit(true);
     }
     const noteHeading=document.createElement('h3');noteHeading.className='pds-office-section-label';noteHeading.textContent='Notes & history';
@@ -6435,7 +6548,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.appendChild(poCard);
     }
     if (createdBy || modifiedBy) card.appendChild(audit);
-    card.appendChild(actions);
     card.appendChild(renderAttachmentSection(job.kind === "sales_lead" ? "Lead Attachments" : "Job Attachments", job.attachments || [], {
       urlBuilder: (file) => buildJobAttachmentUrl(job.id, file.filename),
     }));
@@ -7647,6 +7759,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
         card.appendChild(buildCustomerDatalist(customerListId, customers));
         card.appendChild(buildContactDatalist(contactListId, contacts));
+        // Refresh suggestions on focus for desktop browsers that defer datalist paint.
+        const dispatchCustomerField=row1.querySelector('#nj_customer');
+        dispatchCustomerField.addEventListener('focus',()=>{
+          const list=card.querySelector('#'+customerListId);
+          if(!list)return;
+          const fragment=document.createDocumentFragment();
+          for(const customer of customers){
+            const name=String(customer.company_name||customer.name||customer.customer_name||customer.company||'').trim();
+            if(name){const option=document.createElement('option');option.value=name;fragment.appendChild(option);}
+          }
+          list.replaceChildren(fragment);
+        });
         const newJobCustomerInput = row1.querySelector("#nj_customer");
         const newJobContactInput = row2.querySelector("#nj_contact");
         const newJobPhoneInput = row2.querySelector("#nj_phone");
@@ -7700,27 +7824,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           knownAddresses,
           extraAddresses: existingAddresses,
         });
-        // Optional saved-site shortcut. A manually entered address is always valid
-        // and stays untouched unless a user explicitly chooses a saved location.
-        const locationRow=document.createElement('div');locationRow.style.cssText='grid-column:1/-1;display:grid;gap:5px';
-        const locationLabel=document.createElement('label');locationLabel.className='label';locationLabel.textContent='Saved customer locations';
-        const locationSelect=document.createElement('select');locationSelect.className='input';locationSelect.setAttribute('aria-label','Saved customer locations');
-        const updateLocations=()=>{
-          const customer=String(newJobCustomerInput.value||'').trim();
-          const selected=locationSelect.value;locationSelect.replaceChildren();
-          const blank=document.createElement('option');blank.value='';blank.textContent='Select a saved location or enter a new address below';locationSelect.append(blank);
-          if(!customer)return;
-          const matching=filteredAddressObjectsForCustomer(knownAddresses,customer);
-          const exactCustomer=customers.find(item=>normalizeText(item.company_name)===normalizeText(customer));
-          const values=combinedAddressStrings(exactCustomer?[exactCustomer.address||'']:[],matching);
-          for(const address of values){if(!address)continue;const opt=document.createElement('option');opt.value=address;opt.textContent=address;locationSelect.append(opt);}
-          if(values.includes(selected))locationSelect.value=selected;
-        };
-        locationSelect.addEventListener('change',()=>{if(!locationSelect.value)return;addressInput.value=locationSelect.value;addressInput.dispatchEvent(new Event('change',{bubbles:true}));});
-        addressInput.addEventListener('input',()=>{if(locationSelect.value!==addressInput.value)locationSelect.value='';});
-        ['input','change'].forEach(evt=>newJobCustomerInput.addEventListener(evt,updateLocations));
-        locationRow.append(locationLabel,locationSelect);
-        row1.append(locationRow);updateLocations();
+        // Saved addresses remain available through the Street Address autocomplete.
         addressInput.addEventListener("change", () => {
           const match = findMatchingAddress(knownAddresses, addressInput.value);
           if (!match) return;
@@ -8936,6 +9040,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div style="margin-top:10px;"><div class="label">Description</div><textarea id="part_desc">${escapeHtml(part.Description || part.description || "")}</textarea></div>
           <div style="margin-top:10px;"><div class="label">Supplier</div><input class="input" id="part_supplier" placeholder="Preferred supplier" value="${escapeHtml(part.supplier || part.Supplier || "")}" /></div>
           <div style="margin-top:10px;"><div class="label">Customer Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Warehouse Low-Stock Alert (optional)</div><input class="input" id="part_min_stock" type="number" min="0" step="1" placeholder="Leave blank to disable alerts" value="${escapeHtml(part.min_stock==null?'':String(part.min_stock))}" /></div>
           <div style="margin-top:10px;"><div class="label">Supplier Rate (optional)</div><input class="input" id="part_supplier_rate" type="number" step="0.01" min="0" value="${escapeHtml(String(part.supplier_rate??''))}" /></div>
           <div style="margin-top:10px;"><div class="label">Product Website URL</div><input class="input" id="part_product_url" type="url" placeholder="https://supplier.com/product" value="${escapeHtml(part.product_url || "")}" /></div>
           <div style="margin-top:10px;"><div class="label">Photo URL</div><input class="input" id="part_image_url" placeholder="https://... or uploaded photo" value="${escapeHtml(part.image_url || "")}" /></div>
@@ -8967,6 +9072,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             price: Number(wrap.querySelector("#part_price").value || 0),
             supplier: wrap.querySelector("#part_supplier").value.trim(),
             supplier_rate: wrap.querySelector("#part_supplier_rate").value.trim(),
+            min_stock: wrap.querySelector("#part_min_stock").value.trim()===""?null:Number(wrap.querySelector("#part_min_stock").value),
             product_url: wrap.querySelector("#part_product_url").value.trim(),
             image_url: wrap.querySelector("#part_image_url").value.trim(),
           });
@@ -8985,7 +9091,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row = document.createElement("div");
         row.className = "jobrow";
         row.style.cursor = "pointer";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}</div><div class="hint">${p.stock_recorded?Number(p.stock_on_hand||0)+" in Stock":"Stock not counted"} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}${p.stock_low?" ⚠️ Low stock":""}</div><div class="hint">${p.stock_recorded?Number(p.stock_on_hand||0)+" in Stock":"Stock not counted"} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
         if(p.image_url&&(/^https:\/\//i.test(p.image_url)||p.image_url.startsWith('/moses/part-image/pds/'))){const img=document.createElement('img');img.src=p.image_url;img.alt='Part photo';img.style.cssText='width:64px;height:64px;object-fit:contain;border-radius:8px;float:left;margin-right:12px';img.onerror=()=>img.remove();row.prepend(img);}
         if(p.product_url&&/^https:\/\//i.test(p.product_url)){const link=document.createElement('a');link.href=p.product_url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Product Website';link.onclick=e=>e.stopPropagation();row.append(link);}
         const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;margin:8px 0;flex-wrap:wrap';
@@ -14146,6 +14252,98 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     load();
   }
 
+  // PDS Van Stock: same Parts List IDs and the verified warehouse stock ledger.
+  let navFormsVanStock = null;
+  function installVanStockNav(){
+    const column=document.querySelector('#formsBody .navcol');
+    if(!column)return;
+    navFormsVanStock=document.getElementById('navFormsVanStock');
+    if(!navFormsVanStock){
+      navFormsVanStock=document.createElement('button');
+      navFormsVanStock.type='button';navFormsVanStock.className='navbtn';navFormsVanStock.id='navFormsVanStock';
+      navFormsVanStock.innerHTML='<span>Van Stock</span><small>Technicians / Parts</small><span class="badge" id="badgeVanStock" style="display:none">0</span>';
+      if(navFormsTimeOff?.nextSibling)column.insertBefore(navFormsVanStock,navFormsTimeOff.nextSibling);
+      else column.appendChild(navFormsVanStock);
+    }
+    navFormsVanStock.addEventListener('click',renderVanStockView);
+    refreshVanStockBadge();
+  }
+  async function refreshVanStockBadge(){
+    const badge=document.getElementById('badgeVanStock');
+    if(!badge)return;
+    try{
+      const response=await fetchJSON('/pds-van-stock');
+      const total=Number(response.alerts?.vans||0)+Number(response.alerts?.warehouse||0);
+      badge.textContent=String(total);badge.style.display=total?'':'none';
+      navFormsVanStock?.setAttribute('aria-label',`Van Stock: ${total} low stock alerts`);
+      if(navPartsList){
+        let stockBadge=navPartsList.querySelector('#badgePartsLowStock');
+        if(!stockBadge){stockBadge=document.createElement('span');stockBadge.id='badgePartsLowStock';stockBadge.className='badge';navPartsList.append(stockBadge);}
+        const warehouseLow=Number(response.alerts?.warehouse||0);
+        stockBadge.textContent=String(warehouseLow);stockBadge.style.display=warehouseLow?'':'none';
+        navPartsList.setAttribute('aria-label',`Parts List: ${warehouseLow} warehouse stock alerts`);
+      }
+    }catch(e){badge.style.display='none';}
+  }
+  async function renderVanStockView(){
+    setNavActive(navFormsVanStock);
+    setActiveChip('Work Flow');
+    setWorkspace('Van Stock');clearWorkspaceActions();
+    workspaceBody.innerHTML='<div class="card"><h2>Van Stock</h2><p class="hint">Loading technician van inventory…</p></div>';
+    let state,people;
+    try{[state,people]=await Promise.all([fetchJSON('/pds-van-stock'),apiListEmployees()]);}
+    catch(error){workspaceBody.innerHTML=`<div class="card">Van Stock unavailable: ${escapeHtml(String(error.message||error))}</div>`;return;}
+    const main=document.createElement('div');main.style.cssText='display:grid;gap:14px;max-width:1240px;margin:0 auto';
+    const header=document.createElement('section');header.className='card';
+    header.innerHTML=`<h2 style="margin-top:0">Technician Van Stock</h2><p class="hint">Tracked per employee using the PDS Parts List. Warehouse stock decreases only for a verified transfer; initial physical van counts do not change warehouse stock. Empty minimum means no alert.</p><div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center"><strong>${state.vans.length} vans</strong><strong>${state.alerts.vans} van shortages</strong><strong>${state.alerts.warehouse} warehouse shortages</strong><button class="btn" id="van-refresh">Refresh</button></div>`;
+    header.querySelector('#van-refresh').onclick=renderVanStockView;main.append(header);
+    const feedback=document.createElement('div');feedback.setAttribute('role','status');feedback.className='hint';main.append(feedback);
+    async function submit(url,method,body){
+      feedback.textContent='Saving…';
+      try{await fetchJSON(url,{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});await renderVanStockView();}
+      catch(e){feedback.textContent='Could not save: '+(e.message||e);}
+    }
+    const employees=(Array.isArray(people)?people:people?.items||[]).filter(e=>e.id && ['tech','lead','technician'].includes(String(e.role||'tech').toLowerCase()));
+    const add=document.createElement('section');add.className='card';
+    add.innerHTML='<h3 style="margin-top:0">Van Setup</h3><p class="hint">Choose employees who have vans; employees without vans do not need a setup.</p><div style="display:flex;gap:8px;flex-wrap:wrap"><select class="input" id="van-person" style="max-width:320px"></select><button type="button" class="btn btn-orange" id="van-add">Create / Enable Van</button></div>';
+    const employeeSelect=add.querySelector('#van-person');
+    for(const employee of employees){const opt=document.createElement('option');opt.value=String(employee.id);opt.textContent=employee.name||employee.id;employeeSelect.append(opt);}
+    add.querySelector('#van-add').onclick=()=>{if(employeeSelect.value)submit('/pds-van-stock/vans','POST',{employee_id:employeeSelect.value,enabled:true,use_template:true});};main.append(add);
+    const parts=state.catalog.slice().sort((a,b)=>String(a.part_number).localeCompare(String(b.part_number)));
+    function selectPart(id){const select=document.createElement('select');select.className='input';select.style.maxWidth='380px';for(const p of parts){const option=document.createElement('option');option.value=p.id;option.textContent=(p.part_number||'No part number')+' — '+(p.description||'');select.append(option);}if(id)select.value=id;return select;}
+    function numeric(label,placeholder){const wrap=document.createElement('label');wrap.style.cssText='display:grid;gap:3px;font-size:12px';wrap.textContent=label;const input=document.createElement('input');input.className='input';input.type='number';input.min='0';input.max='100000';input.step='1';input.placeholder=placeholder||'Blank = no alert';input.style.maxWidth='150px';wrap.append(input);return [wrap,input];}
+    function thresholdBox(title,url){
+      const card=document.createElement('section');card.className='card';card.innerHTML='<h3 style="margin-top:0"></h3><p class="hint">Set a minimum to trigger a warning and a target quantity for restocking. Existing van-specific levels are preserved.</p>';
+      card.querySelector('h3').textContent=title;
+      const form=document.createElement('form');form.style.cssText='display:flex;gap:10px;align-items:end;flex-wrap:wrap';const select=selectPart();const [minWrap,minimum]=numeric('Low-stock minimum');const [targetWrap,target]=numeric('Restock target');const save=document.createElement('button');save.className='btn btn-orange';save.textContent='Save part level';save.type='submit';form.append(select,minWrap,targetWrap,save);card.append(form);
+      form.onsubmit=e=>{e.preventDefault();if(!select.value)return;submit(url,'PUT',{part_id:select.value,minimum:minimum.value===''?null:Number(minimum.value),target:target.value===''?null:Number(target.value)});};
+      return card;
+    }
+    if(parts.length)main.append(thresholdBox('Standard Van Stock Template','/pds-van-stock/template'));
+    else {const missing=document.createElement('p');missing.className='hint';missing.textContent='Add parts to the PDS Parts List before configuring van inventory.';main.append(missing);}
+    for(const van of state.vans){
+      const section=document.createElement('section');section.className='card';
+      const title=document.createElement('h3');title.style.marginTop='0';title.textContent=van.employee_name+(van.enabled?'':' (van disabled)');section.append(title);
+      const sub=document.createElement('p');sub.className='hint';sub.textContent=van.low_count+' item(s) below minimum';section.append(sub);
+      const toggle=document.createElement('button');toggle.className='btn';toggle.textContent=van.enabled?'Disable Van':'Enable Van';toggle.onclick=()=>submit('/pds-van-stock/vans','POST',{employee_id:van.employee_id,enabled:!van.enabled,use_template:false});section.append(toggle);
+      const rows=document.createElement('div');rows.style.cssText='display:grid;gap:6px;margin:12px 0';
+      for(const item of van.items){const row=document.createElement('div');row.className='jobrow';row.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap';const text=document.createElement('div');const label=document.createElement('strong');label.textContent=(item.part_number||'Missing catalog part')+' — '+(item.description||'');const info=document.createElement('div');info.className='hint';info.textContent=`On van: ${item.quantity} · Minimum: ${item.minimum??'not set'} · Target: ${item.target??'not set'}${item.low?' · NEED '+item.needed:''}`;text.append(label,info);row.append(text);if(item.low){const warning=document.createElement('span');warning.className='badge';warning.textContent='Low stock';row.append(warning);}rows.append(row);}
+      if(!van.items.length)rows.innerHTML='<p class="hint">No parts assigned to this van yet. Use the standard template or add a van-specific part below.</p>';
+      section.append(rows);
+      if(parts.length){const controls=thresholdBox('Van-specific part / threshold','/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/items');section.append(controls);}
+      const movement=document.createElement('form');movement.style.cssText='display:flex;gap:8px;align-items:end;flex-wrap:wrap;margin-top:16px';
+      const movementTitle=document.createElement('strong');movementTitle.textContent='Record Stock';movementTitle.style.width='100%';movement.append(movementTitle);
+      const mp=selectPart();const action=document.createElement('select');action.className='input';for(const [key,label] of [['load','Transfer warehouse → van'],['return','Return van → warehouse'],['used','Used on job'],['count','Physical van count (set total)']]){const option=document.createElement('option');option.value=key;option.textContent=label;action.append(option);}
+      const qty=document.createElement('input');qty.className='input';qty.type='number';qty.min='0';qty.max='100000';qty.step='1';qty.required=true;qty.placeholder='Qty / count';qty.style.maxWidth='125px';
+      const reason=document.createElement('input');reason.className='input';reason.required=true;reason.minLength=3;reason.maxLength=300;reason.placeholder='Reason or job #';reason.style.maxWidth='220px';
+      const commit=document.createElement('button');commit.type='submit';commit.className='btn btn-orange';commit.textContent='Record';movement.append(mp,action,qty,reason,commit);
+      movement.onsubmit=e=>{e.preventDefault();if(!mp.value||qty.value==='')return;if(action.value!=='count'&&Number(qty.value)<1){alert('Enter at least one item for this movement');return;}if(action.value==='count'&&!confirm('This sets the physically counted van quantity. It will not change warehouse inventory. Continue?'))return;const request_id=(globalThis.crypto?.randomUUID?.()||String(Date.now())+'-'+Math.random());submit('/pds-van-stock/movements','POST',{employee_id:van.employee_id,part_id:mp.value,quantity:Number(qty.value),movement:action.value,reason:reason.value.trim(),request_id});};section.append(movement);main.append(section);
+    }
+    const warehouse=document.createElement('section');warehouse.className='card';warehouse.innerHTML='<h3 style="margin-top:0">Warehouse Stock Alerts</h3><p class="hint">Only parts with a configured minimum and a verified warehouse stock count can trigger alerts.</p>';
+    const lows=parts.filter(p=>p.low);if(!lows.length){const okay=document.createElement('p');okay.className='hint';okay.textContent='No warehouse shortages currently flagged.';warehouse.append(okay);}else for(const p of lows){const line=document.createElement('div');line.className='jobrow';line.textContent=`${p.part_number} — ${p.description}: ${p.warehouse} on hand, minimum ${p.minimum}, order ${p.needed}`;warehouse.append(line);}main.append(warehouse);
+    workspaceBody.replaceChildren(main);currentView={refresh:renderVanStockView};refreshVanStockBadge();
+  }
+
   function renderTimeOffView() {
     setNavActive(navFormsTimeOff);
     setActiveChip("Forms");
@@ -14821,6 +15019,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
 
   if (headerCalendarBtn) headerCalendarBtn.addEventListener("click", () => { if (activePlatform === "doorks" || activePlatform === "sdc") showPlatformShell(activePlatform); else renderCalendarView(); });
 
+  installVanStockNav();
   if (navFormsTimeCard) navFormsTimeCard.addEventListener("click", renderTimeCardView);
   if (navFormsTimeOff) navFormsTimeOff.addEventListener("click", renderTimeOffView);
   if (navTakeoffs) navTakeoffs.addEventListener("click", renderTakeoffsView);

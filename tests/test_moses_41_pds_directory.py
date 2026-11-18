@@ -13,12 +13,12 @@ def test_pds_directory_reuses_existing_records_and_vendor_directory():
     assert "renderPdsServiceVendors" in SOURCE
 
 
-def test_new_dispatch_saved_site_is_explicit_but_address_remains_free_text():
-    assert "locationSelect.setAttribute('aria-label','Saved customer locations')" in SOURCE
-    assert 'Select a saved location or enter a new address below' in SOURCE
-    assert "row1.append(locationRow);updateLocations();" in SOURCE
-    assert "if(!locationSelect.value)return;addressInput.value=locationSelect.value" in SOURCE
-    assert "addressInput.addEventListener('input',()=>{if(locationSelect.value!==addressInput.value)locationSelect.value='';});" in SOURCE
+def test_new_dispatch_uses_address_autocomplete_without_redundant_dropdown():
+    assert "locationSelect.setAttribute('aria-label','Saved customer locations')" not in SOURCE
+    assert 'Select a saved location or enter a new address below' not in SOURCE
+    assert 'customerSpecificAddressStrings([], (knownAddresses || []), company)' in SOURCE
+    assert 'combinedAddressStrings((extraAddresses || []), (knownAddresses || []))' in SOURCE
+    assert 'addressInput.addEventListener("change", () => {' in SOURCE
 
 
 def test_customer_bound_suggestions_without_blocking_new_sites():

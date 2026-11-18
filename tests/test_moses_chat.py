@@ -420,7 +420,11 @@ def test_sdc_agent_failure_does_not_fall_back_to_legacy(monkeypatch):
     monkeypatch.setattr(moses_agent, 'answer', lambda *_: (_ for _ in ()).throw(RuntimeError('offline')))
     monkeypatch.setattr(assistant, '_request_model', lambda *_: pytest.fail('legacy model called'))
     result = assistant.chat(assistant.Message(message='Analyze business trends'), request('sdc'))
-    assert 'could not connect to the AI service' in result['answer']
+    # Both supported Moses failure paths must fail closed without legacy fallback.
+    assert ('could not connect to the AI service' in result['answer']
+            or 'could not complete the live AI request' in result['answer'])
+    assert ('No changes were made' in result['answer']
+            or 'no action is confirmed' in result['answer'])
 
 
 def test_agent_service_rejects_unknown_workspace_and_non_admin():

@@ -285,6 +285,15 @@ def _pds_stock_balances(request: Request) -> dict[str, int]:
         balances[part_id] = balances.get(part_id, 0) + delta
         if balances[part_id] < 0:
             raise HTTPException(503, 'PDS inventory ledger contains negative stock')
+    # Van loads/returns affect the warehouse count, not the original receipt ledger.
+    # Import locally to avoid circular import at module initialization.
+    from app.routers.pds_van_stock import warehouse_transfer_deltas
+    for part_id, delta in warehouse_transfer_deltas(request).items():
+        if part_id not in balances and delta < 0:
+            raise HTTPException(503, 'Unverified warehouse transfer found')
+        balances[part_id] = balances.get(part_id, 0) + delta
+        if balances[part_id] < 0:
+            raise HTTPException(503, 'Warehouse inventory reconciliation required')
     return balances
 
 
@@ -352,6 +361,7 @@ class PartPayload(BaseModel):
     image_url: str = ""
     product_url: str = ""
     supplier_rate: float | str = ""  # new optional field; legacy catalog prices retained
+    min_stock: Optional[int] = Field(default=None, ge=0, le=100000)
 
 
 def _part_https_url(value: str) -> str:
@@ -396,6 +406,8 @@ def list_parts(
             "supplier_rate": item.get("supplier_rate", ""),
             "stock_on_hand": balances.get(_norm(item.get("id"))),
             "stock_recorded": _norm(item.get("id")) in balances,
+            "min_stock": item.get("min_stock"),
+            "stock_low": item.get("min_stock") is not None and _norm(item.get("id")) in balances and balances[_norm(item.get("id"))] < item["min_stock"],
             # compatibility with existing estimate lookup
             "Item": _norm(item.get("part_number")),
             "Description": _norm(item.get("description")),
@@ -425,6 +437,7 @@ def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str]
         "description": _norm(payload.description),
         "price": payload.price,
         "supplier_rate": payload.supplier_rate,
+        "min_stock": payload.min_stock,
         "image_url": _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url,
         "product_url": _part_https_url(payload.product_url),
     }
@@ -448,6 +461,7 @@ def update_part(request: Request, part_id: str, payload: PartPayload, x_api_key:
             item["description"] = _norm(payload.description)
             item["price"] = payload.price
             item["supplier_rate"] = payload.supplier_rate
+            item["min_stock"] = payload.min_stock
             item["image_url"] = _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url
             item["product_url"] = _part_https_url(payload.product_url)
             items[i] = item
@@ -462,6 +476,10 @@ def delete_part(request: Request, part_id: str, x_api_key: Optional[str] = Heade
     path = _parts_path(request)
     data = _read_json_file(path, {"items": []})
     items = data.get("items", []) if isinstance(data, dict) else []
+    from app.routers.pds_van_stock import _read as _read_van_stock, _path as _van_stock_path
+    van_data = _read_van_stock(_van_stock_path(request))
+    if any(part_id in v.get('items', {}) for v in van_data['vans'].values()) or any(ev.get('part_id') == part_id for ev in van_data['events']):
+        raise HTTPException(409, 'Cannot delete a part linked to van stock')
     if _norm(part_id) in _pds_stock_balances(request):
         raise HTTPException(409, "Cannot delete a part with inventory history; retain the master record")
     items = [x for x in items if _norm(x.get("id")) != _norm(part_id)]

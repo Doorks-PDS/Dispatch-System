@@ -47,3 +47,5 @@ websockets==16.0
 openai-agents>=0.4,<1
 openai>=2.0,<3
 pydantic>=2.10,<3
+
+twilio>=9.0,<10

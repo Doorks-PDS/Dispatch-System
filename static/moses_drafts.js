@@ -119,6 +119,7 @@ async function openDelivery(ticket){
    const data=await request('/'+encodeURIComponent(ticket.id)+'/delivery');
    if(generation!==refreshGeneration)return;
    status.textContent=data.count?`${data.count} saved linked estimate(s). Choose the correct document.`:'No saved estimate is linked to this job yet. Open the estimator, finish review, and generate the official PDF first.';
+   if(data.requires_scope_link && !data.linked_estimate_number)status.textContent='This separate scope needs an explicit estimate link before delivery.';
    for(const doc of data.items||[]){
      const block=h('article');block.style.cssText='border:1px solid #d9e1dc;padding:13px;border-radius:12px;display:grid;gap:9px';
      block.append(h('strong',doc.number+' · '+doc.filename));
@@ -128,6 +129,26 @@ async function openDelivery(ticket){
      const preview=h('button','Verify recipient & PDF','btn');
      const history=h('button','Delivery history','btn');
      controls.append(preview,history);
+     if(data.requires_scope_link){
+       const isLinked=doc.number===data.linked_estimate_number;
+       preview.disabled=!isLinked;
+       if(isLinked){details.textContent='Linked to this specific Moses scope. Verify the recipient and PDF before sending.';}
+       else if(data.linked_estimate_number){details.textContent='This document belongs to the job, but not to this Moses scope.';}
+       else{
+         details.textContent='Not linked to this specific scope. Office admin must select the correct issued estimate.';
+         const link=h('button','Link to this scope','btn');controls.append(link);
+         link.onclick=async()=>{
+           if(!window.confirm('Associate saved estimate '+doc.number+' with this one Moses scope? This cannot be switched automatically. No email will be sent.'))return;
+           link.disabled=true;
+           try{
+             const current=(await request('')).items.find(row=>row.id===ticket.id);
+             if(!current||current.state!=='ready_for_estimator')throw Error('Draft changed; refresh before linking');
+             await request('/'+encodeURIComponent(ticket.id)+'/link-estimate','POST',{version:current.version,estimate_number:doc.number});
+             await load();
+           }catch(error){details.textContent='Estimate was not linked: '+error.message;link.disabled=false}
+         };
+       }
+     }
      const path='/estimate/'+encodeURIComponent(doc.number);
      const showHistory=async()=>{
        try{const events=await emailApi(path+'/history');outcomes.replaceChildren();

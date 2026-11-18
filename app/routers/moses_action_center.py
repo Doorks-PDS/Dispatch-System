@@ -27,3 +27,29 @@ def job_context(job_id: str, request: Request):
 def pending_document_emails(request: Request):
     from app.services.moses_pds_document_actions import pending
     return pending(request)
+
+
+@router.get('/pds/operations/board')
+def operations_board(request:Request):
+    from app.services.moses_pds_operations_plan import board
+    return board(request)
+
+@router.get('/pds/operations/receipts')
+def saved_operation_receipts(request:Request):
+    from app.services.moses_pds_operations_plan import receipts
+    return receipts(request)
+
+@router.get('/pds/operations/invoice-handoff/{job_id}')
+def verified_invoice_handoff(job_id:str,request:Request):
+    from app.services.moses_pds_invoice_plan import inspect
+    return inspect(request,job_id)
+
+@router.post('/pds/operations/prepare-invoice-handoffs')
+def prepare_invoice_handoffs(request:Request):
+    from app.services.moses_pds_invoice_plan import prepare
+    return prepare(request)
+
+@router.get('/pds/jobs/{job_id}/estimate-scopes')
+def pds_estimate_scopes(job_id: str, request: Request):
+    from app.services.moses_pds_estimate_scopes import inspect
+    return inspect(request, job_id)

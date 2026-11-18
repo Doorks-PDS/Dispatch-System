@@ -69,7 +69,9 @@ def test_pds_ui_has_po_and_safe_import_preview():
     assert 'qb_import_kind' in js and '/pds-purchase-orders/import/preview' in js
     assert '/pds-purchase-orders/import/commit' in js
     assert 'My Scheduled Tasks' in js
-    assert 'card.append(notes, officeNotes)' in js
+    assert 'card.append(notes, officeNotes, actions)' in js
+    assert "heading.textContent='Scheduler'" in js
+    assert js.index('card.append(notes, officeNotes, actions)') < js.index("heading.textContent='Scheduler'")
 
 
 def test_live_agent_schema_validation_recovers_as_read_only(monkeypatch):

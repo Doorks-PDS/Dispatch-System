@@ -6,6 +6,8 @@ local check cannot establish Render disk durability or provider connectivity.
 from __future__ import annotations
 
 import os
+import re
+from pathlib import Path
 
 from app.services.moses_agent import readiness as agent_readiness
 from app.services.moses_storage_readiness import inspect as storage_inspect
@@ -28,6 +30,33 @@ ACTION_FLAGS = (
 )
 
 
+def _sms_readiness(data_dir: str) -> dict:
+    """Static configuration check only; no requests, DB initialization, or sends."""
+    root = os.getenv('PDS_SMS_PUBLIC_BASE_URL', '').strip().rstrip('/')
+    sid = os.getenv('TWILIO_ACCOUNT_SID', '').strip()
+    sender = os.getenv('PDS_TWILIO_NUMBER', '').strip()
+    token_present = bool(os.getenv('TWILIO_AUTH_TOKEN', '').strip())
+    enabled = os.getenv('PDS_SMS_SEND_ENABLED', '').strip().lower() == 'true'
+    base_ok = bool(re.fullmatch(r'https://[^\s/]+(?:/[^\s]*)?', root))
+    sender_ok = bool(re.fullmatch(r'\+1[2-9]\d{9}', sender))
+    account_ok = bool(re.fullmatch(r'AC[a-fA-F0-9]{32}', sid))
+    storage = Path(data_dir) / 'pds_sms'
+    return {
+        'outbound_enabled': enabled,
+        'sender_format_valid': sender_ok,
+        'account_sid_format_valid': account_ok,
+        'auth_token_configured': token_present,
+        'public_https_origin_configured': base_ok,
+        'consent_ledger_exists': (storage / 'consent.sqlite3').is_file(),
+        'send_receipts_ledger_exists': (storage / 'send_approvals.sqlite3').is_file(),
+        'a2p_approved_verified': False,
+        'signed_callback_verified': False,
+        'end_to_end_delivery_verified': False,
+        'provider_configuration_complete': all((sender_ok, account_ok, token_present, base_ok)),
+        'note': 'Configuration and file existence do not establish A2P approval, valid consent, or delivery.',
+    }
+
+
 def assess(data_dir: str) -> dict:
     """Return explicit local preflight facts, never a fabricated production pass."""
     storage = storage_inspect(data_dir, expected_disk_mount=os.getenv('MOSES_EXPECTED_RENDER_DISK_MOUNT') or None)
@@ -35,6 +64,7 @@ def assess(data_dir: str) -> dict:
     provider = os.getenv('MOSES_EMAIL_PROVIDER', 'smtp').strip().lower()
     email_configured = (bool(os.getenv('RESEND_API_KEY', '').startswith('re_'))
                         and bool(os.getenv('MOSES_DOCUMENTS_FROM', '').strip())) if provider == 'resend' else False
+    sms = _sms_readiness(data_dir)
     stripe_enabled = os.getenv('MOSES_STRIPE_TEST_ENABLED', '').strip().lower() == 'true'
     stripe_test_key = os.getenv('STRIPE_SECRET_KEY', '').startswith('sk_test_')
     webhook_configured = os.getenv('RESEND_WEBHOOK_SECRET', '').startswith('whsec_')
@@ -50,6 +80,7 @@ def assess(data_dir: str) -> dict:
             'resend_webhook_secret_configured': webhook_configured,
             'live_delivery_verified': False,
         },
+        'sms': sms,
         'payments': {
             'test_mode_enabled': stripe_enabled,
             'test_key_configured': stripe_test_key,
@@ -62,6 +93,7 @@ def assess(data_dir: str) -> dict:
             'Confirm production Render durable storage and recoverable backup.',
             'Verify authenticated live agent conversation, approval, and saved action.',
             'Verify Resend test email and signed delivery event.',
+            'Verify Twilio A2P approval, signup proof, opted-in consent and signed SMS callbacks.',
             'Verify Stripe sandbox checkout and signed webhook separately from legacy portal.',
             'Verify office and field browser smoke tests in PDS, Doorks, and SDC.',
         ],

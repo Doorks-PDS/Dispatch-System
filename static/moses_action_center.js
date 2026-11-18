@@ -121,7 +121,60 @@
             const input=q('#mosesChatMessage',panel);if(!input){status.textContent='Moses message input unavailable.';return;}
             input.value=prompt;area.hidden=true;area.style.display='none';panel.classList.remove('moses-action-view');input.focus();
             // User explicitly chose an action; never auto-execute financial changes.
-          };buttons.append(task);card.append(buttons);
+          };buttons.append(task);
+          if (!isInvoice) {
+            const split = text('button','Separate estimate scopes','btn');split.type='button';
+            split.onclick=async()=>{
+              split.disabled=true;
+              try {
+                const data=await request('/moses-action-center/pds/jobs/'+encodeURIComponent(item.record_id)+'/estimate-scopes');
+                const old=card.querySelector('[data-moses-scopes-editor]');if(old)old.remove();
+                const editor=document.createElement('section');editor.dataset.mosesScopesEditor='1';
+                editor.style.cssText='display:grid;gap:10px;padding:10px;border:1px solid #dbe4ea;border-radius:10px';
+                editor.append(text('strong','Review separate estimate scopes'));
+                editor.append(text('small','Each scope is an unpriced Moses draft. No estimate will be issued. Select only the recommendations that need separate quotes.'));
+                const rows=document.createElement('div');rows.style.cssText='display:grid;gap:10px';
+                editor.append(rows);
+                const addRow=(source,title='',description='')=>{
+                  const section=document.createElement('div');section.style.cssText='display:grid;gap:5px;padding:8px;border-top:1px solid #e3e7eb';
+                  section.dataset.sourceIndex=String(source.source_form_index);
+                  section.append(text('small','Completion Form #'+source.source_form_number+' · '+(source.door_location||'Location not recorded')));
+                  const heading=document.createElement('input');heading.placeholder='Scope title / opening';heading.maxLength=140;
+                  heading.value=title;heading.setAttribute('aria-label','Estimate scope title');
+                  const body=document.createElement('textarea');body.rows=3;body.maxLength=3000;body.placeholder='Describe exactly which work belongs in this estimate';
+                  body.value=description;body.setAttribute('aria-label','Estimate scope description');
+                  const remove=text('button','Remove this scope','btn');remove.type='button';remove.onclick=()=>section.remove();
+                  const another=text('button','Add another scope from this form','btn');another.type='button';
+                  another.onclick=()=>addRow(source,source.door_location||'Separate opening','');
+                  section.append(heading,body,remove,another);rows.append(section);
+                };
+                for(const source of data.proposed_scopes||[]){
+                  const details=source.scope||{};
+                  addRow(source,source.door_location||('Completion Form #'+source.source_form_number),
+                    [details.recommendations,details.additional_recommendations,details.parts_required].filter(Boolean).join('\n'));
+                }
+                const save=text('button','Save separate Moses review drafts','btn');save.type='button';
+                save.onclick=async()=>{
+                  const scopes=[...rows.children].map(row=>({source_form_index:Number(row.dataset.sourceIndex),
+                    title:row.querySelector('input')?.value.trim()||'',scope:row.querySelector('textarea')?.value.trim()||''}));
+                  if(!scopes.length){status.textContent='Select at least one source scope.';return;}
+                  if(!window.confirm('Save '+scopes.length+' separate unpriced draft reviews for this job?'))return;
+                  save.disabled=true;
+                  try{
+                    const response=await fetch('/moses-drafts/prepare-job-scopes',{method:'POST',credentials:'same-origin',
+                      headers:{'Content-Type':'application/json'},body:JSON.stringify({record_id:item.record_id,scopes})});
+                    const result=await response.json().catch(()=>({}));
+                    if(!response.ok)throw new Error(result.detail||'Unable to save scopes');
+                    status.textContent=result.created+' new scope reviews saved. Open Moses Drafts for separate approvals.';
+                    editor.remove();
+                  }catch(error){status.textContent='Scope drafts not saved: '+error.message;save.disabled=false;}
+                };
+                editor.append(save);card.append(editor);
+              }catch(error){status.textContent='Cannot load saved completion scopes: '+error.message;}
+              finally{split.disabled=false;}
+            };buttons.append(split);
+          }
+          card.append(buttons);
         }
         if (actionType === 'approval') {
           const open = text('button', 'Review existing approvals', 'btn');
@@ -150,6 +203,49 @@
         }
         lastWorkspace = workspace;
         contents.replaceChildren();
+        if (workspace === 'pds') {
+          // Separate human-approved SMS decisions. No click can send without a
+          // fresh confirmation, server-side session, active consent, and provider gate.
+          try {
+            const sms = await request('/moses-action-center/pds/sms/proposals');
+            const rows = Array.isArray(sms.proposals) ? sms.proposals : [];
+            const section = document.createElement('details');
+            const heading = text('summary', 'PDS text approvals (' + rows.length + ')');
+            heading.style.cssText='padding:12px;font-weight:700;cursor:pointer;background:#fff1de';
+            section.style.cssText='border:1px solid #e3e7eb;border-radius:12px;overflow:hidden';
+            section.append(heading);
+            const inside = document.createElement('div');
+            inside.style.cssText='display:grid;gap:10px;padding:12px';
+            if (!rows.length) inside.append(text('small','No text messages awaiting approval.'));
+            for (const entry of rows) {
+              const card = document.createElement('article');
+              card.style.cssText='display:grid;gap:8px;border-top:1px solid #e5e8eb;padding:10px 0';
+              card.append(text('strong', 'Job ' + (entry.job_id || '') + ' · ' + (entry.status || '')));
+              card.append(text('small', entry.phone || ''));
+              const body = text('div', entry.message || '');body.style.whiteSpace='pre-wrap';card.append(body);
+              if (entry.status === 'pending') {
+                const actions = document.createElement('div');actions.style.cssText='display:flex;gap:8px';
+                for (const approved of [true,false]) {
+                  const act = text('button',approved?'Approve & send text':'Decline','btn');act.type='button';
+                  act.onclick = async () => {
+                    if (!window.confirm(approved ? 'Send this exact service text to '+entry.phone+'?' : 'Decline this text request?')) return;
+                    act.disabled=true;
+                    try {
+                      const response=await fetch('/moses-action-center/pds/sms/proposals/'+encodeURIComponent(entry.id)+'/decision',{
+                        method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:approved})});
+                      const result=await response.json().catch(()=>({}));
+                      if(!response.ok)throw new Error(result.detail||'Request failed');
+                      status.textContent=approved?'Text submitted to Twilio; delivery not yet confirmed.':'Text declined.';
+                      await load();
+                    } catch (error) { status.textContent='SMS decision not confirmed: '+error.message;act.disabled=false; }
+                  };actions.append(act);
+                }card.append(actions);
+              } else {card.append(text('small','Requires provider log reconciliation; no automatic retry.'));}
+              inside.append(card);
+            }
+            section.append(inside);contents.append(section);
+          } catch (error) {status.textContent='SMS approval inbox unavailable: '+error.message;}
+        }
         if (workspace === 'pds') renderCards(data.drafts, 'Moses draft reviews', 'draft');
         renderCards(data.approvals, 'Awaiting your approval', 'approval');
         if (workspace === 'pds') renderCards(data.work, 'PDS job follow-ups', 'work');

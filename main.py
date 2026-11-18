@@ -35,6 +35,7 @@ except Exception:
 from app.services.calendar_store import CalendarStore
 from app.services.legacy_store import LegacyStore
 from app.routers.pds_purchase_orders import router as pds_purchase_orders_router
+from app.routers.pds_van_stock import router as pds_van_stock_router
 from app.routers.calendar import router as calendar_router
 from app.routers.pds_scheduling import router as pds_scheduling_router
 
@@ -211,6 +212,7 @@ app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 app.include_router(pds_purchase_orders_router)
+app.include_router(pds_van_stock_router)
 from app.routers.document_vault import router as document_vault_router
 from app.routers.accounting_ledger import router as accounting_ledger_router
 app.include_router(document_vault_router)
@@ -271,6 +273,14 @@ from app.routers.doorks_packages import router as doorks_packages_router
 app.include_router(doorks_packages_router)
 from app.routers.ai_data_import import router as ai_data_import_router
 app.include_router(ai_data_import_router)
+
+# PDS Twilio SMS signup, policies and validated inbound keyword consent
+from app.routers.pds_sms import router as pds_sms_router
+app.include_router(pds_sms_router)
+from app.routers.moses_pds_sms import router as moses_pds_sms_router
+app.include_router(moses_pds_sms_router)
+from app.routers.pds_schedule_notifications import router as pds_schedule_notifications_router
+app.include_router(pds_schedule_notifications_router)
 
 
 class AuthContextMiddleware(BaseHTTPMiddleware):
@@ -420,3 +430,14 @@ def atlas_chat(payload: ChatRequest, x_api_key: Optional[str] = Header(default=N
 @app.get("/health")
 def health():
     return {"ok": True, "service": "doorks", "version": "6.6.0"}
+
+# PRIO Coin admin-only *prototype*: browser-session illustration, not financial records.
+@app.get('/pds/prio-coin-preview', response_class=HTMLResponse, include_in_schema=False)
+def pds_prio_preview(request: Request):
+    from fastapi import HTTPException
+    if not getattr(request.state, 'auth_user', None) or getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(status_code=403, detail='PDS office admin access required')
+    if (getattr(request, 'session', {}) or {}).get('active_platform', 'pds') not in ('pds', None):
+        raise HTTPException(status_code=403, detail='PDS workspace required')
+    prototype = PROJECT_ROOT / 'app' / 'resources' / 'prio_coin_admin_preview.html'
+    return HTMLResponse(prototype.read_text(encoding='utf-8'), headers={'Cache-Control':'no-store'})

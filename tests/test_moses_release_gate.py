@@ -10,7 +10,7 @@ def test_gate_is_fail_closed_with_empty_config(tmp_path, monkeypatch):
     result = moses_release_gate.assess(str(tmp_path / 'missing'))
     assert not result['deployment_authorized']
     assert not result['storage']['directory_exists']
-    assert len(result['release_blockers']) == 5
+    assert len(result['release_blockers']) == 6
     assert not (tmp_path / 'missing').exists()
 
 
@@ -73,3 +73,36 @@ def test_gate_reports_all_live_action_flags_without_secrets(tmp_path, monkeypatc
     assert set(flagged['enabled_external_or_write_actions']) == {
         'MOSES_PO_SEND_ENABLED', 'MOSES_SUPPLIER_BILL_ACTIONS_ENABLED'}
     assert flagged['deployment_authorized'] is False
+
+
+def test_sms_gate_is_read_only_and_never_certifies_a2p(tmp_path, monkeypatch):
+    for name in ('PDS_SMS_SEND_ENABLED', 'TWILIO_ACCOUNT_SID', 'TWILIO_AUTH_TOKEN',
+                 'PDS_TWILIO_NUMBER', 'PDS_SMS_PUBLIC_BASE_URL'):
+        monkeypatch.delenv(name, raising=False)
+    result = moses_release_gate.assess(str(tmp_path / 'uncreated'))
+    sms = result['sms']
+    assert not sms['outbound_enabled']
+    assert not sms['provider_configuration_complete']
+    assert not sms['a2p_approved_verified']
+    assert not (tmp_path / 'uncreated').exists()
+
+
+def test_sms_gate_does_not_expose_credentials_or_enable_sending(tmp_path, monkeypatch):
+    monkeypatch.setenv('TWILIO_ACCOUNT_SID', 'AC' + 'a' * 32)
+    monkeypatch.setenv('TWILIO_AUTH_TOKEN', 'sensitive_test_token')
+    monkeypatch.setenv('PDS_TWILIO_NUMBER', '+17606421131')
+    monkeypatch.setenv('PDS_SMS_PUBLIC_BASE_URL', 'https://example.test')
+    monkeypatch.setenv('PDS_SMS_SEND_ENABLED', 'true')
+    state = moses_release_gate.assess(str(tmp_path))
+    assert state['sms']['provider_configuration_complete']
+    assert state['sms']['outbound_enabled']
+    assert not state['sms']['a2p_approved_verified']
+    assert not state['sms']['end_to_end_delivery_verified']
+    assert not state['deployment_authorized']
+    assert 'sensitive_test_token' not in json.dumps(state)
+    assert ('AC' + 'a' * 32) not in json.dumps(state)
+
+
+def test_sms_gate_refuses_non_https_callback(tmp_path, monkeypatch):
+    monkeypatch.setenv('PDS_SMS_PUBLIC_BASE_URL', 'http://example.test')
+    assert not moses_release_gate.assess(str(tmp_path))['sms']['public_https_origin_configured']

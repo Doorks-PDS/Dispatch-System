@@ -1,0 +1,210 @@
+{
+  "paths": {
+    "CUMULATIVE_RELEASE_REVIEW.md": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "RELEASE_SIGNOFF_536.md": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "RELEASE_SIGNOFF_538.md": {
+      "baseline_sha256": null
+    },
+    "app/resources/prio_coin_admin_preview.html": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/routers/data.py": {
+      "baseline_sha256": "541fb417ab00cbff05408466c0e9031628468c90c7caad31e3fdbd69595cdf80",
+      "type": "modified"
+    },
+    "app/routers/moses_action_center.py": {
+      "baseline_sha256": "11c15897b047aaa84a6cc906864b9fde4d3ae274ed81d89531139f05ccec5938",
+      "type": "modified"
+    },
+    "app/routers/moses_drafts.py": {
+      "baseline_sha256": "552703cbcca975087b9c8bb8c2b3e40203c6768b247e635deabb98410ff47b17",
+      "type": "modified"
+    },
+    "app/routers/moses_pds_sms.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/routers/pds_schedule_notifications.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/routers/pds_sms.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/routers/pds_van_stock.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_agent.py": {
+      "baseline_sha256": "bcf479a6fd7cc9a1c002d3837ea125602de99d8a7e9ac28a048178f7510947c3",
+      "type": "modified"
+    },
+    "app/services/moses_pds_estimate_scopes.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_pds_invoice_plan.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_pds_operations_plan.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_pds_quote_plan.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_pds_twilio.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_pds_workflow.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/moses_release_gate.py": {
+      "baseline_sha256": "20bfec948c51e38c3bb21eaa72b68279c0db863c7af18d98ef8cc1f26f4f9152",
+      "type": "modified"
+    },
+    "app/services/pds_schedule_notifications.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "app/services/pds_sms_consent.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "main.py": {
+      "baseline_sha256": "94c5a70a2764b7732410303e4b08c0b0e411864b8397ad935cd3287b26dec89b",
+      "type": "modified"
+    },
+    "requirements.txt": {
+      "baseline_sha256": "36911d8f3382c05518cae5ccdd978bfeb6ecfe097b493a3ae3da902ec5802c3d",
+      "type": "modified"
+    },
+    "scripts/check_cumulative_baseline.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "scripts/pds_storage_preflight.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "scripts/release_538_payload.json": {
+      "baseline_sha256": null
+    },
+    "scripts/verify_cumulative_release_538.py": {
+      "baseline_sha256": null
+    },
+    "static/app.js": {
+      "baseline_sha256": "3f63d276760b124efa2d554bf10b29ae80f5fc134d974e3b7d6d7f8fc996f90c",
+      "type": "modified"
+    },
+    "static/moses_action_center.js": {
+      "baseline_sha256": "cbb2140e36661d2ba2b8cfaa387d5c8ed21aabb5a8e310cb4a86375335d6f0ed",
+      "type": "modified"
+    },
+    "static/moses_drafts.js": {
+      "baseline_sha256": "69777351bf326cf2739d8ee41491c0830f2c5ad7e3058d67d8b43d20c372d9a5",
+      "type": "modified"
+    },
+    "tests/test_cumulative_baseline_check.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_moses_41_pds_directory.py": {
+      "baseline_sha256": "17278d3b318693868249b19d4c866ac6aafd0096e5246e29df1849e6056f3cbf",
+      "type": "modified"
+    },
+    "tests/test_moses_526_estimate_scope_agent.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_moses_chat.py": {
+      "baseline_sha256": "236dc9b4c5621b0a37f0f835838b6ac8df4aca92f9f01580aadc6dc6e8c72424",
+      "type": "modified"
+    },
+    "tests/test_moses_pds_estimate_scopes.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_moses_pds_invoice_review_packets.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_moses_pds_separate_scope_drafts.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_moses_pds_twilio_approval.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_moses_platform_boundaries.py": {
+      "baseline_sha256": "75907d18eb1cf2bd70c9098dd66e3a0dd15208394eb7838d350b930cc888173c",
+      "type": "modified"
+    },
+    "tests/test_moses_release_gate.py": {
+      "baseline_sha256": "fded866489ad4a996fde3f4b70feeb555edbe5dda8566c5f9999bddb1359df38",
+      "type": "modified"
+    },
+    "tests/test_moses_scope_estimate_linking.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_cumulative_http_smoke.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_messaging_connection_lifecycle.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_messaging_end_to_end_http.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_schedule_notifications.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_sms_consent.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_sms_signed_http_flow.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_sms_webhook_security.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_storage_preflight.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_van_stock.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_pds_van_stock_http_acceptance.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    },
+    "tests/test_prio_coin_admin_navigation.py": {
+      "baseline_sha256": null,
+      "type": "added"
+    }
+  },
+  "source": "user-uploaded doorks-deploy-edit(6).zip, Nov 18 2026"
+}
