@@ -37,6 +37,13 @@ def inspect(request, job_id: str):
         if not isinstance(form, dict):
             continue
         details = {key: str(form.get(key) or '').strip()[:1200] for key in _SCOPE_FIELDS}
+        technician_notes = str(form.get('tech_notes') or form.get('technician_notes') or '').strip()[:1200]
+        # A technician may record separate-quote instructions only in Tech Notes.
+        # Keep those source words for office review, but don't promote every
+        # routine PM completion into an estimate scope.
+        if technician_notes and (_SEPARATE.search(technician_notes) or re.search(
+                r'\b(?:recommend(?:ed)?|leaking|worn|replace|corrective repair)\b', technician_notes, re.I)):
+            details['technician_observations'] = technician_notes
         if not any(details.values()):
             continue
         notes = ' '.join(details.values())

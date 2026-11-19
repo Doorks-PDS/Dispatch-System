@@ -28,11 +28,15 @@ router = APIRouter(tags=['pds-sms'])
 BRAND = 'Priority Door Systems'
 
 
-def _urls(request):
+def _urls(request, *, require_config=True):
     # Use an administrator-configured, publicly accessible HTTPS root; do not use Host header.
     root = os.getenv('PDS_SMS_PUBLIC_BASE_URL', '').rstrip('/')
     if not root.startswith('https://'):
-        raise HTTPException(503, 'PDS_SMS_PUBLIC_BASE_URL must be a public HTTPS URL')
+        if require_config:
+            raise HTTPException(503, 'PDS_SMS_PUBLIC_BASE_URL must be a public HTTPS URL')
+        # Public policy pages must remain readable during configuration; inbound
+        # signed webhooks still require an explicitly verified HTTPS base URL.
+        root = ''
     return root, root + '/pds/sms/privacy', root + '/pds/sms/terms'
 
 
@@ -52,7 +56,7 @@ header{font-weight:750;color:#113a66}h1{font-size:30px;line-height:1.2}a{color:#
 
 @router.get('/pds/sms', response_class=HTMLResponse)
 def signup(request: Request):
-    root, privacy, terms = _urls(request)
+    root, privacy, terms = _urls(request, require_config=False)
     phone = html.escape(NUMBER)
     return _page('SMS Service Updates', f'''<p>To request SMS service updates from Priority Door Systems,
 text <strong>START</strong> to <strong>{phone}</strong> from your mobile phone.</p>
@@ -70,7 +74,7 @@ Customer: YES<br>Priority Door Systems: Subscription confirmed; STOP to cancel, 
 
 @router.get('/pds/sms/privacy', response_class=HTMLResponse)
 def privacy(request: Request):
-    _urls(request)
+    _urls(request, require_config=False)
     return _page('Privacy Policy', '''<p><strong>Effective November 18, 2026.</strong> Priority Door Systems collects
 mobile telephone numbers and SMS consent records when customers request service notifications.
 We use this data for appointment confirmations, technician ETAs, service updates, opt-out handling,
@@ -86,7 +90,7 @@ You may opt out any time by replying STOP; reply HELP for support.</p>
 
 @router.get('/pds/sms/terms', response_class=HTMLResponse)
 def terms(request: Request):
-    _urls(request)
+    _urls(request, require_config=False)
     return _page('Terms & Conditions', f'''<p><strong>Effective November 18, 2026.</strong> By texting START to
 <strong>{html.escape(NUMBER)}</strong> and confirming with YES, you consent to receive service-related
 texts from Priority Door Systems, including appointment confirmations, technician arrival estimates,

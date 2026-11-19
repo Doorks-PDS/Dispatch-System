@@ -7108,19 +7108,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       card.querySelector("#cf_time_out")?.addEventListener("change", syncTimeOnsite);
 
       let doorRecordLogs = [];
-      const doorRecordPanel = document.createElement("div");
+      const doorRecordPanel = document.createElement("details");
       doorRecordPanel.className = "card";
       doorRecordPanel.style.marginTop = "12px";
       doorRecordPanel.style.background = "#f8fafc";
       doorRecordPanel.innerHTML = `
-        <div style="display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap;">
-          <div>
-            <div style="font-weight:1000;">Door Records</div>
-            <div class="hint">Optionally link this ${isSalesLead ? "recommendation" : "completion"} form to an existing door or create a new door record.</div>
-          </div>
-          <button type="button" class="btn" id="cf_door_record_toggle">Add to Door Records</button>
-        </div>
-        <div id="cf_door_record_body" style="display:none; margin-top:12px;">
+          <summary id="cf_door_record_toggle" style="font-weight:800;cursor:pointer;font-size:16px">🚪 Door Records (optional)</summary>
+          <div class="hint">Link this ${isSalesLead ? "recommendation" : "completion"} to an existing door or create a new door record.</div>
+        <div id="cf_door_record_body" style="margin-top:12px;">
           <div class="grid2">
             <div>
               <div class="label">Record Action</div>
@@ -7169,11 +7164,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         }).join("");
       };
 
-      doorToggle.addEventListener("click", async () => {
-        const opening = doorBody.style.display === "none";
-        doorBody.style.display = opening ? "block" : "none";
-        doorToggle.textContent = opening ? "Hide Door Records" : "Add to Door Records";
-        if (opening && !doorRecordLogs.length) {
+      doorRecordPanel.addEventListener("toggle", async () => {
+        if (doorRecordPanel.open && !doorRecordLogs.length) {
           doorRecordLogs = await apiListDoorLogs().catch(() => []);
           renderDoorChoices();
         }
@@ -9142,6 +9134,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     async function refresh() {
       const q = controls.querySelector("#parts_search").value.trim();
       const items = await apiListParts({ q, limit: 500 }).catch(() => []);
+      let tracked = new Map();
+      if(activePlatform==='pds' && isOfficeUser()){
+        try{const report=await fetchJSON('/pds-van-stock/reconciliation');tracked=new Map((report.items||[]).map(item=>[String(item.id),item]));}
+        catch(error){list.textContent='Inventory reconciliation unavailable: '+(error.message||error);return;}
+      }
       list.innerHTML = "";
       if (!items.length) { list.innerHTML = `<div class="hint">No saved parts yet.</div>`; return; }
       items.forEach(p => {
@@ -9149,6 +9146,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row.className = "jobrow";
         row.style.cursor = "pointer";
         row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}${p.stock_low?" ⚠️ Low stock":""}</div><div class="hint">${p.stock_recorded?Number(p.stock_on_hand||0)+" in Stock":"Stock not counted"} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
+        if(activePlatform==='pds' && tracked.has(String(p.id))){
+          const saved=tracked.get(String(p.id));const quantities=document.createElement('div');quantities.className='hint';quantities.style.cssText='padding:6px 0 2px;font-weight:650';
+          quantities.textContent='PDS quantities · Warehouse: '+(saved.stock_recorded?saved.warehouse:'not counted')+' · Vans: '+saved.van_total+' · Total physically tracked: '+saved.total_tracked;
+          row.append(quantities);
+        }
         if(p.image_url&&(/^https:\/\//i.test(p.image_url)||p.image_url.startsWith('/moses/part-image/pds/'))){const img=document.createElement('img');img.src=p.image_url;img.alt='Part photo';img.style.cssText='width:64px;height:64px;object-fit:contain;border-radius:8px;float:left;margin-right:12px';img.onerror=()=>img.remove();row.prepend(img);}
         if(p.product_url&&/^https:\/\//i.test(p.product_url)){const link=document.createElement('a');link.href=p.product_url;link.target='_blank';link.rel='noopener noreferrer';link.textContent='Product Website';link.onclick=e=>e.stopPropagation();row.append(link);}
         const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;margin:8px 0;flex-wrap:wrap';
@@ -13718,15 +13720,20 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   async function renderPoReceiving(platform,backAction=null){
     if(platform!=='pds'&&activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Inventory & Receiving');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Doorks on-hand stock includes receiving and recorded adjustments; supplier bills and accounting valuation remain separate.</p></div><button class="btn" id="receiveBack">← Back</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips / AI Upload</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Stock by SKU</h3><div id="receiveStock" class="hint"></div><h3>Stock Movement History</h3><div id="receiveAdjustments" class="hint"></div></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Stock quantities combine the PDS Parts List, warehouse adjustments and assigned van balances; receiving and accounting values remain separate.</p></div><button class="btn" id="receiveBack">← Back</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips / AI Upload</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Stock by SKU / Location</h3><div id="receiveStock" class="hint"></div><h3>Stock Movement History</h3><div id="receiveAdjustments" class="hint"></div></div>';
     el('receiveBack').onclick=()=>backAction?backAction():platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
     el('receivePacking').onclick=()=>renderDocumentVault(platform,'packing_slip',()=>renderPoReceiving(platform,backAction));
     el('receiveReceipts').onclick=()=>renderDocumentVault(platform,'receipt',()=>renderPoReceiving(platform,backAction));
-    let data={orders:[],events:[],received_stock_by_sku:{}},liveStock=null,stockAdjustments=[];
+    let data={orders:[],events:[],received_stock_by_sku:{}},liveStock=null,stockAdjustments=[],pdsStock=null;
     async function reload(){
       try{
         const errors=[];
         try{data=await fetchJSON('/pds-purchase-orders/receiving/'+platform);}catch(e){errors.push('Receiving: '+e.message);data={orders:[],events:[],received_stock_by_sku:{}};}
+        if(platform==='pds'){
+          try{pdsStock=await fetchJSON('/pds-van-stock/reconciliation');
+            stockAdjustments=(pdsStock.recent_movements||[]).map(e=>({created_at:e.created_at,sku:(pdsStock.items||[]).find(x=>String(x.id)===String(e.part_id))?.part_number||e.part_id,quantity_delta:e.delta,job_number:'',reason:(e.movement||'movement')+' · '+(e.reason||''),reference:e.actor||''}));
+          }catch(e){errors.push('PDS inventory reconciliation: '+e.message);pdsStock=null;stockAdjustments=[];}
+        }
         if(platform==='doorks'){
           try{liveStock=await fetchJSON('/doorks-operations/stock');}catch(e){errors.push('Stock service: '+e.message);liveStock={items:[]};}
           try{stockAdjustments=(await fetchJSON('/doorks-operations/stock/adjustments')).items||[];}catch(e){errors.push('Adjustments: '+e.message);stockAdjustments=[];}
@@ -13770,9 +13777,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       }
       if(!history.children.length)history.textContent='No receiving events yet.';
       const stock=el('receiveStock');stock.replaceChildren();
-      const entries=liveStock?(liveStock.items||[]).map(x=>[x.sku,x.on_hand,x]):Object.entries(data.received_stock_by_sku||{});
+      const entries=platform==='pds'&&pdsStock?(pdsStock.items||[]).map(x=>[x.part_number||x.id,x.warehouse,x]):liveStock?(liveStock.items||[]).map(x=>[x.sku,x.on_hand,x]):Object.entries(data.received_stock_by_sku||{});
       stock.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px';
-      for(const [sku,qty,part] of entries){const row=document.createElement('div');row.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;background:#fff';const title=document.createElement('strong');title.textContent=sku;const label=document.createElement('div');label.className='hint';label.style.marginTop='8px';label.textContent=liveStock?[(part?.manufacturer?'Manufacturer: '+part.manufacturer:''),(part?.description||'Part number')].filter(Boolean).join(' · '):'Total quantity received';label.style.cssText='font-size:12px;line-height:1.4;margin-top:5px;max-width:260px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical';const value=document.createElement('div');value.style.cssText='font-size:26px;font-weight:800;margin-top:4px';value.textContent=String(qty);if(part?.image_url&&/^(https:\/\/|\/moses\/part-image\/)/i.test(part.image_url)){const img=document.createElement('img');img.src=part.image_url;img.alt='Part image';img.style.cssText='width:54px;height:54px;object-fit:contain;float:left;margin-right:12px;border-radius:8px';img.onerror=()=>img.remove();row.append(img);}const manufacturer=document.createElement('div');manufacturer.className='hint';manufacturer.textContent='Manufacturer: '+(part?.manufacturer||'Not entered');const supplier=document.createElement('div');supplier.className='hint';supplier.textContent='Supplier: '+(part?.supplier||'Not entered');const count=document.createElement('div');count.style.cssText='font-size:22px;font-weight:800;color:#355a38;margin-top:9px';count.textContent=qty+' in Stock';value.remove();row.append(title,label,manufacturer,supplier,count);const qtyAvailable=qty;
+      for(const [sku,qty,part] of entries){const row=document.createElement('div');row.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;background:#fff';const title=document.createElement('strong');title.textContent=sku;const label=document.createElement('div');label.className='hint';label.style.marginTop='8px';label.textContent=liveStock?[(part?.manufacturer?'Manufacturer: '+part.manufacturer:''),(part?.description||'Part number')].filter(Boolean).join(' · '):'Total quantity received';label.style.cssText='font-size:12px;line-height:1.4;margin-top:5px;max-width:260px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical';const value=document.createElement('div');value.style.cssText='font-size:26px;font-weight:800;margin-top:4px';value.textContent=String(qty);if(part?.image_url&&/^(https:\/\/|\/moses\/part-image\/)/i.test(part.image_url)){const img=document.createElement('img');img.src=part.image_url;img.alt='Part image';img.style.cssText='width:54px;height:54px;object-fit:contain;float:left;margin-right:12px;border-radius:8px';img.onerror=()=>img.remove();row.append(img);}const manufacturer=document.createElement('div');manufacturer.className='hint';manufacturer.textContent='Manufacturer: '+(part?.manufacturer||'Not entered');const supplier=document.createElement('div');supplier.className='hint';supplier.textContent='Supplier: '+(part?.supplier||'Not entered');const count=document.createElement('div');count.style.cssText='font-size:22px;font-weight:800;color:#355a38;margin-top:9px';count.textContent=platform==='pds'&&part?('Warehouse: '+(part.stock_recorded?qty:'not counted')+' · Vans: '+part.van_total+' · Total tracked: '+part.total_tracked):qty+' in Stock';value.remove();row.append(title,label,manufacturer,supplier,count);const qtyAvailable=qty;
         if(platform==='doorks'){
           const adjust=document.createElement('button');adjust.className='btn';adjust.style.marginTop='10px';adjust.textContent='Record Usage / Adjustment';row.append(adjust);
           adjust.onclick=()=>{
@@ -13790,7 +13797,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
           };
         }
         stock.append(row);}
-      const movement=el('receiveAdjustments');if(movement){movement.replaceChildren();for(const a of stockAdjustments.slice(0,60)){const line=document.createElement('div');line.style.cssText='padding:9px 12px;border-bottom:1px solid #e1e5ea';line.textContent=[(a.created_at||'').slice(0,16),a.sku,(Number(a.quantity_delta)>0?'+':'')+a.quantity_delta,a.job_number?'Job '+a.job_number:'',a.reason,a.reference||''].filter(Boolean).join(' · ');movement.append(line);}if(!movement.children.length)movement.textContent=platform==='doorks'?'No manual stock movements recorded.':'Stock movement journal is available in Doorks.';}
+      const movement=el('receiveAdjustments');if(movement){movement.replaceChildren();for(const a of stockAdjustments.slice(0,60)){const line=document.createElement('div');line.style.cssText='padding:9px 12px;border-bottom:1px solid #e1e5ea';line.textContent=[(a.created_at||'').slice(0,16),a.sku,(Number(a.quantity_delta)>0?'+':'')+a.quantity_delta,a.job_number?'Job '+a.job_number:'',a.reason,a.reference||''].filter(Boolean).join(' · ');movement.append(line);}if(!movement.children.length)movement.textContent=platform==='doorks'?'No manual stock movements recorded.':platform==='pds'?'No recorded PDS van stock movements.':'Stock movement journal is available in Doorks.';}
+      if(platform==='pds'&&pdsStock){const note=document.createElement('p');note.className='hint';note.textContent='Warehouse and van counts are quantities, not automatic cost, expense or tax entries. Opening counts with unknown purchase history require source review ('+pdsStock.counts.pending_source_review+' pending).';stock.prepend(note);}
       if(!entries.length)stock.textContent='No stock or saved parts yet.';
     }
     el('receiveSearch').oninput=draw;await reload();
@@ -14403,6 +14411,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const panel=(title,subtitle)=>{const card=document.createElement('section');card.className='card';const h=document.createElement('h3');h.style.margin='0 0 6px';h.textContent=title;card.append(h);if(subtitle){const p=document.createElement('p');p.className='hint';p.style.margin='0 0 12px';p.textContent=subtitle;card.append(p);}return card;};
     const actionButton=(text,fn,orange=false)=>{const b=document.createElement('button');b.type='button';b.className='btn'+(orange?' btn-orange':'');b.textContent=text;b.onclick=fn;return b;};
     const rowStyle='display:flex;gap:9px;align-items:center;flex-wrap:wrap';
+    const officeVanAccess=['office_admin','office'].includes(String(currentUser?.role||''));
     const safeImage=url=>typeof url==='string'&&(/^https:\/\//i.test(url)||url.startsWith('/moses/part-image/pds/'));
     const partLabel=p=>(p.part_number||'Unnumbered part')+' — '+(p.description||'No description');
     const feedback=document.createElement('p');feedback.className='hint';feedback.setAttribute('role','status');
@@ -14439,14 +14448,14 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const slot=document.createElement('span');slot.style.cssText='position:relative';slot.append(matches);wrap.append(input,slot);
       let chosen=parts.find(p=>String(p.id)===String(selected))||null;
       if(chosen)input.value=partLabel(chosen);
-      function draw(){chosen=null;matches.replaceChildren();const query=input.value.trim().toLowerCase();if(!query){matches.style.display='none';input.setAttribute('aria-expanded','false');return;}
-        const found=parts.filter(p=>[p.part_number,p.description,p.manufacturer].some(v=>String(v||'').toLowerCase().includes(query))).slice(0,15);
+      function draw(){matches.replaceChildren();const query=input.value.trim().toLowerCase();
+        const found=(query?parts.filter(p=>[p.part_number,p.description,p.manufacturer].some(v=>String(v||'').toLowerCase().includes(query))):parts).slice(0,35);
         for(const p of found){const b=document.createElement('button');b.type='button';b.textContent=partLabel(p);b.style.cssText='display:block;text-align:left;padding:9px 11px;width:100%;background:white;border:0;border-bottom:1px solid #edf0f3;cursor:pointer';b.onmousedown=e=>e.preventDefault();b.onclick=()=>{chosen=p;input.value=partLabel(p);matches.style.display='none';input.setAttribute('aria-expanded','false');};matches.append(b);}
         if(!found.length){const empty=document.createElement('div');empty.textContent='No matching part. Add it in the Parts List with Moses.';empty.className='hint';matches.append(empty);}
         matches.style.display='block';input.setAttribute('aria-expanded','true');
       }
-      input.addEventListener('input',draw);input.addEventListener('focus',()=>{if(input.value)draw();});input.addEventListener('blur',()=>setTimeout(()=>{matches.style.display='none';input.setAttribute('aria-expanded','false');},180));
-      return {element:wrap,get value(){return chosen?.id||'';},get label(){return chosen?partLabel(chosen):'';}};
+      input.addEventListener('input',()=>{chosen=null;draw();});input.addEventListener('focus',draw);input.addEventListener('keydown',event=>{if(event.key==='Escape'){matches.style.display='none';input.setAttribute('aria-expanded','false');}});input.addEventListener('blur',()=>setTimeout(()=>{matches.style.display='none';input.setAttribute('aria-expanded','false');},180));
+      return {element:wrap,setPart(id){chosen=parts.find(p=>String(p.id)===String(id))||null;input.value=chosen?partLabel(chosen):'';},get value(){return chosen?.id||'';},get label(){return chosen?partLabel(chosen):'';}};
     };
     const numeric=(placeholder,required=false)=>{const i=document.createElement('input');i.className='input';i.type='number';i.min='0';i.max='100000';i.step='1';i.placeholder=placeholder;i.required=required;i.style.maxWidth='135px';return i;};
     function partForm(endpoint,caption){
@@ -14459,7 +14468,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         const min=minimum.value===''?null:Number(minimum.value),goal=target.value===''?null:Number(target.value);
         if(min!==null&&goal!==null&&goal<min){feedback.textContent='Restock target must be at least the minimum.';return;}
         submit(endpoint,'PUT',{part_id:select.value,minimum:min,target:goal});};
-      const wrap=document.createElement('div');const label=document.createElement('p');label.className='hint';label.textContent=caption;wrap.append(label,form);return wrap;
+      const wrap=document.createElement('div');const label=document.createElement('p');label.className='hint';label.textContent=caption;wrap.append(label,form);wrap.editItem=(item)=>{select.setPart(item.part_id);minimum.value=item.minimum??'';target.value=item.target??'';form.scrollIntoView({behavior:'smooth',block:'nearest'});};return wrap;
     }
     const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:14px';
     for(const van of state.vans||[]){
@@ -14483,7 +14492,25 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       }
       if(!van.items.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No parts assigned yet. Add standard stock or a van-specific part below.';items.append(empty);}
       body.append(items);
-      if(parts.length)body.append(partForm('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/items','Add a part or adjust the minimum and target for this van.'));
+      const vanPartEditor=parts.length?partForm('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/items','Add a part or edit an assigned part. Select from PDS Parts List.'):null;
+      if(vanPartEditor)body.append(vanPartEditor);
+      for(const [index,item] of van.items.entries()){
+        const line=items.children[index];if(!line||!vanPartEditor||!officeVanAccess)continue;
+        const actions=document.createElement('div');actions.style.cssText='display:flex;gap:5px;flex-wrap:wrap;margin-left:auto';
+        actions.append(actionButton('Edit',()=>vanPartEditor.editItem(item)));
+        actions.append(actionButton('Remove',()=>{if(confirm('Remove this part from the van setup? Existing stock must be zero. History is preserved.'))submit('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/items/'+encodeURIComponent(item.part_id),'DELETE');}));
+        line.append(actions);
+      }
+      if(officeVanAccess){
+        const vehicleDetails=document.createElement('details');vehicleDetails.className='card';vehicleDetails.style.cssText='margin-top:12px;padding:12px';
+        const head=document.createElement('summary');head.style.cssText='cursor:pointer;font-weight:700';head.textContent='🚐 Vehicle Information · Registration, insurance & maintenance';vehicleDetails.append(head);
+        const vehicleForm=document.createElement('form');vehicleForm.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin-top:12px';
+        const vehicleFields=[['label','Vehicle ID / Fleet #'],['year','Year'],['make','Make'],['model','Model'],['license_plate','License Plate'],['vin','VIN'],['insurance_carrier','Insurance Carrier'],['insurance_policy','Policy Reference'],['insurance_expires','Insurance Expiration'],['registration_expires','Registration Expiration'],['next_service','Next Service Due'],['odometer','Odometer'],['notes','Vehicle Notes']];
+        for(const [key,label] of vehicleFields){const wrap=document.createElement('label');wrap.style.cssText='font-size:12px;font-weight:700;display:grid;gap:5px';wrap.textContent=label;const field=document.createElement(key==='notes'?'textarea':'input');field.className='input';field.name=key;field.maxLength=key==='notes'?1500:180;if(key==='insurance_expires'||key==='registration_expires'||key==='next_service')field.type='date';field.value=van.vehicle?.[key]||'';wrap.append(field);vehicleForm.append(wrap);}
+        const saveVehicle=document.createElement('button');saveVehicle.type='submit';saveVehicle.className='btn btn-orange';saveVehicle.textContent='Save Vehicle Details';vehicleForm.append(saveVehicle);
+        vehicleForm.onsubmit=event=>{event.preventDefault();const values=Object.fromEntries(vehicleFields.map(([key])=>[key,vehicleForm.elements[key].value]));submit('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/vehicle','PUT',values);};
+        vehicleDetails.append(vehicleForm);body.append(vehicleDetails);
+      }
       const record=document.createElement('details');record.className='card';record.style.cssText='margin-top:12px;padding:12px';const recordTitle=document.createElement('summary');recordTitle.textContent='Record Stock Movement · Transfers, adjustments & missed usage';recordTitle.style.cssText='font-weight:700;cursor:pointer';record.append(recordTitle);const recordHint=document.createElement('p');recordHint.className='hint';recordHint.textContent='Use this for warehouse loads, returns, physical counts, or parts missed on a completion form.';record.append(recordHint);
       const move=document.createElement('form');move.style.cssText=rowStyle;
       const part=choosePart(),type=document.createElement('select');type.className='input';type.setAttribute('aria-label','Stock movement type');
@@ -14492,7 +14519,12 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const destination=document.createElement('select');destination.className='input';destination.style.display='none';destination.setAttribute('aria-label','Destination technician van');
       destination.append(new Option('Select destination van',''));
       for(const other of state.vans||[]){if(other.enabled&&other.employee_id!==van.employee_id)destination.append(new Option(other.employee_name,other.employee_id));}
+      const movementModes=document.createElement('div');movementModes.style.cssText='display:flex;gap:6px;flex-wrap:wrap;margin:10px 0';
+      for(const [key,label] of [['load','📦 Load'],['return','↩ Return'],['used','🧰 Used'],['transfer','🚐 Transfer'],['count','✓ Physical Count']]){
+        const choice=actionButton(label,()=>{type.value=key;type.onchange();movementModes.querySelectorAll('button').forEach(b=>b.style.outline='');choice.style.outline='2px solid #f58224';});choice.setAttribute('aria-label',label);movementModes.append(choice);
+      }
       type.onchange=()=>{destination.style.display=type.value==='transfer'?'':'none';};
+      record.append(movementModes);
       const save=document.createElement('button');save.type='submit';save.className='btn btn-orange';save.textContent='Record';move.append(part.element,type,destination,qty,reason,save);
       move.onsubmit=event=>{event.preventDefault();if(!part.value){feedback.textContent='Select a part first.';return;}
         if(type.value!=='count'&&Number(qty.value)<1){feedback.textContent='Enter a quantity of at least one.';return;}
@@ -14509,13 +14541,30 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     main.append(grid);
     if(parts.length){const template=document.createElement('details');template.className='card';
       const head=document.createElement('summary');head.style.cssText='font-size:17px;font-weight:700;cursor:pointer';head.textContent='Standard Van Stock Template · Configure default parts';template.append(head);
-      template.append(partForm('/pds-van-stock/template','Add standard parts and optional stock levels. Van-specific quantities remain independent.'));main.append(template);
+      const templateEditor=partForm('/pds-van-stock/template','Standard template sets preferred parts and levels for future vans. It does not transfer, purchase or count inventory.');
+      const templateRows=document.createElement('div');templateRows.style.cssText='display:grid;gap:8px;margin:12px 0';
+      for(const item of state.template_items||[]){const line=document.createElement('div');line.style.cssText='padding:10px;border:1px solid #dce3eb;border-radius:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';const description=document.createElement('span');description.style.flex='1 1 280px';description.textContent=(item.part_number||'Unknown part')+' — '+(item.description||'Catalog item missing')+' · Min '+(item.minimum??'—')+' · Target '+(item.target??'—');line.append(description);
+        if(officeVanAccess){line.append(actionButton('Edit',()=>templateEditor.editItem(item)));line.append(actionButton('Remove',()=>{if(confirm('Remove part from future van templates? Existing vans and history remain unchanged.'))submit('/pds-van-stock/template/'+encodeURIComponent(item.part_id),'DELETE');}));}templateRows.append(line);}
+      if(!(state.template_items||[]).length){templateRows.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'No standard template items yet.'}));}
+      template.append(templateRows,templateEditor);main.append(template);
     }else{main.append(panel('Parts List is empty','Use “Add Part with Moses” above to create and review a part before adding it to van stock.'));}
     const low=parts.filter(p=>p.low);const warehouse=document.createElement('details');warehouse.className='card';
     const whTitle=document.createElement('summary');whTitle.style.cssText='font-size:17px;font-weight:700;cursor:pointer';whTitle.textContent=`Warehouse Stock Alerts · ${low.length}`;warehouse.append(whTitle);
     if(!low.length){warehouse.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'No warehouse shortages currently flagged.'}));}
     for(const p of low){const line=document.createElement('div');line.className='jobrow';line.textContent=`${partLabel(p)} · ${p.warehouse} on hand · minimum ${p.minimum} · need ${p.needed}`;warehouse.append(line);}
     main.append(warehouse);
+    if(officeVanAccess){
+      const reconciliation=document.createElement('details');reconciliation.className='card';
+      const head=document.createElement('summary');head.style.cssText='font-size:17px;font-weight:700;cursor:pointer';head.textContent='📋 Inventory Source Review · Physical counts & movement history';reconciliation.append(head);
+      const contents=document.createElement('div');contents.className='hint';contents.textContent='Open to review counted stock and its source.';contents.style.marginTop='12px';reconciliation.append(contents);
+      reconciliation.addEventListener('toggle',async()=>{if(!reconciliation.open)return;contents.textContent='Loading verified quantities…';try{const report=await fetchJSON('/pds-van-stock/reconciliation');contents.replaceChildren();
+        const info=document.createElement('p');info.textContent='Warehouse and van stock are quantity records only. Physical counts do not create purchase orders, receipts, expenses, or tax entries. Pending source review: '+report.counts.pending_source_review;contents.append(info);
+        for(const item of report.physical_count_sources.slice(0,50)){const line=document.createElement('div');line.style.cssText='padding:9px;border-bottom:1px solid #e5e9ef';const label=document.createElement('div');label.textContent=`${item.part_id} · van ${item.employee_id} · ${item.quantity_change>0?'+':''}${item.quantity_change} · ${item.reason} · ${item.source_status}`;line.append(label);
+          if(item.source_status==='unverified'){const form=document.createElement('form');form.style.cssText='display:flex;gap:7px;flex-wrap:wrap;margin:7px 0';const type=document.createElement('select');type.className='input';for(const [k,t] of [['unknown','Unknown / Needs research'],['purchase_reference','Purchase/receipt reference'],['existing_owned_stock','Existing PDS owned stock'],['other','Other documented source']])type.append(new Option(t,k));const reference=document.createElement('input');reference.className='input';reference.placeholder='Evidence reference or explanation';reference.maxLength=180;const save=document.createElement('button');save.className='btn';save.textContent='Save Review';form.append(type,reference,save);form.onsubmit=async e=>{e.preventDefault();try{await fetchJSON('/pds-van-stock/source-reviews/'+encodeURIComponent(item.event_id),{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({source_type:type.value,reference:reference.value,notes:''})});await renderVanStockView();}catch(error){feedback.textContent=error.message||String(error);}};line.append(form);}contents.append(line);}
+        if(!report.physical_count_sources.length)contents.append(Object.assign(document.createElement('p'),{textContent:'No physical count adjustments recorded yet.'}));
+      }catch(error){contents.textContent='Reconciliation unavailable: '+(error.message||error);}});
+      main.append(reconciliation);
+    }
     workspaceBody.replaceChildren(main);currentView={refresh:renderVanStockView};refreshVanStockBadge();
   }
 

@@ -42,7 +42,7 @@ def _path(request: Request) -> Path:
 
 
 def _initial() -> dict:
-    return {'version': 1, 'template': {}, 'vans': {}, 'events': []}
+    return {'version': 2, 'template': {}, 'vans': {}, 'events': [], 'source_reviews': {}, 'review_history': []}
 
 
 def _read(path: Path) -> dict:
@@ -52,6 +52,10 @@ def _read(path: Path) -> dict:
         data = json.loads(path.read_text(encoding='utf-8'))
         if not isinstance(data, dict) or not all(isinstance(data.get(k), t) for k, t in [('template', dict), ('vans', dict), ('events', list)]):
             raise ValueError('invalid stock data')
+        data.setdefault('source_reviews', {})
+        data.setdefault('review_history', [])
+        if not isinstance(data['source_reviews'], dict) or not isinstance(data['review_history'], list):
+            raise ValueError('invalid source review data')
         if len(data['events']) > 200000:
             raise ValueError('ledger too large to load')
         return data
@@ -168,6 +172,7 @@ def _view(request: Request):
     van_balances, _ = _balances(data)
     warehouse = _pds_stock_balances(request)
     rows = []
+    office = getattr(getattr(request, 'state', None), 'auth_role', '') in ('office', 'office_admin')
     for employee_id, config in sorted(data['vans'].items(), key=lambda x: str(x[1].get('employee_name', '')).lower()):
         employee = people.get(employee_id, {})
         items = []
@@ -183,8 +188,12 @@ def _view(request: Request):
                           'low': _low(count, minimum), 'needed': max(0, (target if target is not None else minimum or 0) - count) if _low(count, minimum) else 0,
                           'catalog_missing': not bool(part)})
         rows.append({'employee_id': employee_id, 'employee_name': employee.get('name') or config.get('employee_name') or 'Unknown employee',
+                     'vehicle': dict(config.get('vehicle') or {}) if office else {},
                      'enabled': bool(config.get('enabled', True)), 'items': items,
                      'low_count': sum(1 for i in items if i['low'])})
+    van_totals = {}
+    for (van_id, part_id), count in van_balances.items():
+        van_totals[part_id] = van_totals.get(part_id, 0) + count
     catalog = []
     for part_id, part in parts.items():
         threshold = part.get('min_stock')
@@ -192,11 +201,23 @@ def _view(request: Request):
         recorded = part_id in warehouse
         count = warehouse.get(part_id)
         catalog.append({'id': part_id, 'part_number': part.get('part_number', ''), 'description': part.get('description', ''),
-                        'warehouse': count, 'stock_recorded': recorded, 'minimum': threshold,
+                        'warehouse': count, 'stock_recorded': recorded, 'van_total': van_totals.get(part_id, 0),
+                        'total_tracked': (count if recorded else 0) + van_totals.get(part_id, 0),
+                        'minimum': threshold,
                         'image_url': part.get('image_url', ''), 'product_url': part.get('product_url', ''),
                         'manufacturer': part.get('manufacturer', part.get('Manufacturer', '')),
                         'low': recorded and _low(count, threshold), 'needed': max(0, threshold-count) if recorded and _low(count, threshold) else 0})
-    return {'ok': True, 'vans': rows, 'template': data['template'], 'catalog': catalog,
+    template_items = []
+    for part_id, thresholds in data['template'].items():
+        part = parts.get(part_id) or {}
+        template_items.append({'part_id': part_id, 'part_number': part.get('part_number', ''),
+                               'description': part.get('description', ''), 'minimum': thresholds.get('minimum'),
+                               'target': thresholds.get('target'), 'catalog_missing': not bool(part)})
+    pending = [e for e in data['events'] if e.get('movement') == 'count' and
+               e.get('delta', 0) != 0 and
+               data['source_reviews'].get(e.get('id'), {}).get('source_type') in (None, 'unknown')]
+    return {'ok': True, 'vans': rows, 'template': data['template'], 'template_items': template_items,
+            'catalog': catalog, 'source_review_pending': len(pending),
             'alerts': {'vans': sum(v['low_count'] for v in rows if v['enabled']), 'warehouse': sum(1 for c in catalog if c['low'])}}
 
 
@@ -271,6 +292,117 @@ def van_item(employee_id: str, payload: Threshold, request: Request):
     return _view(request)
 
 
+class VehicleDetails(BaseModel):
+    label: str = Field(default='', max_length=120)
+    year: str = Field(default='', max_length=10)
+    make: str = Field(default='', max_length=70)
+    model: str = Field(default='', max_length=70)
+    license_plate: str = Field(default='', max_length=30)
+    vin: str = Field(default='', max_length=40)
+    insurance_carrier: str = Field(default='', max_length=120)
+    insurance_policy: str = Field(default='', max_length=100)
+    insurance_expires: str = Field(default='', max_length=30)
+    registration_expires: str = Field(default='', max_length=30)
+    next_service: str = Field(default='', max_length=30)
+    odometer: str = Field(default='', max_length=30)
+    notes: str = Field(default='', max_length=1500)
+
+
+@router.put('/vans/{employee_id}/vehicle')
+def save_vehicle(employee_id: str, payload: VehicleDetails, request: Request):
+    actor = _guard(request, write=True)
+    with _locked(request):
+        path = _path(request); data = _read(path)
+        van = data['vans'].get(employee_id)
+        if not van:
+            raise HTTPException(404, 'Van ticket does not exist')
+        van['vehicle'] = {k: v.strip() for k, v in payload.model_dump().items()}
+        van['vehicle_updated_by'] = actor
+        van['vehicle_updated_at'] = datetime.now(timezone.utc).isoformat()
+        _write(path, data)
+    return {'ok': True, 'vehicle': van['vehicle']}
+
+
+@router.delete('/template/{part_id}')
+def remove_template_item(part_id: str, request: Request):
+    _guard(request, write=True)
+    with _locked(request):
+        path = _path(request); data = _read(path)
+        if part_id not in data['template']:
+            raise HTTPException(404, 'Template item not found')
+        del data['template'][part_id]
+        _write(path, data)
+    return {'ok': True, 'removed': part_id, 'existing_vans_unchanged': True}
+
+
+@router.delete('/vans/{employee_id}/items/{part_id}')
+def remove_van_item(employee_id: str, part_id: str, request: Request):
+    _guard(request, write=True)
+    with _locked(request):
+        path = _path(request); data = _read(path)
+        van = data['vans'].get(employee_id)
+        if not van or part_id not in van.get('items', {}):
+            raise HTTPException(404, 'Van part not found')
+        balances, _ = _balances(data)
+        if balances.get((employee_id, part_id), 0) != 0:
+            raise HTTPException(409, 'Move or reconcile existing stock before removing this part')
+        del van['items'][part_id]
+        _write(path, data)
+    return {'ok': True, 'removed': part_id, 'ledger_preserved': True}
+
+
+class SourceReview(BaseModel):
+    source_type: Literal['purchase_reference', 'existing_owned_stock', 'other', 'unknown']
+    reference: str = Field(default='', max_length=180)
+    notes: str = Field(default='', max_length=500)
+
+
+@router.put('/source-reviews/{event_id}')
+def record_source_review(event_id: str, payload: SourceReview, request: Request):
+    """Office explanation of a counted stock adjustment, not an accounting posting."""
+    actor = _guard(request, write=True)
+    if payload.source_type != 'unknown' and len(payload.reference.strip()) < 3:
+        raise HTTPException(422, 'Reference or description required to document a source')
+    with _locked(request):
+        path = _path(request); data = _read(path)
+        source = next((e for e in data['events'] if e.get('id') == event_id), None)
+        if not source or source.get('movement') != 'count' or source.get('delta') == 0:
+            raise HTTPException(404, 'Physical count adjustment not found')
+        review = {'event_id': event_id, 'source_type': payload.source_type,
+                  'reference': payload.reference.strip(), 'notes': payload.notes.strip(),
+                  'actor': actor, 'reviewed_at': datetime.now(timezone.utc).isoformat()}
+        data['source_reviews'][event_id] = review
+        data['review_history'].append(review)
+        _write(path, data)
+    return {'ok': True, 'review': review, 'accounting_posted': False}
+
+
+@router.get('/reconciliation')
+def reconciliation(request: Request):
+    """Office report of tracked quantities and unresolved physical-count sources.
+
+    These are quantities only, not expense, valuation, tax or procurement entries.
+    """
+    _guard(request, write=True)
+    view = _view(request)
+    data = _read(_path(request))
+    counted = []
+    for e in reversed(data['events']):
+        if e.get('movement') != 'count' or e.get('delta') == 0:
+            continue
+        review = data['source_reviews'].get(e.get('id'))
+        counted.append({'event_id': e.get('id'), 'employee_id': e.get('employee_id'),
+                        'part_id': e.get('part_id'), 'quantity_change': e.get('delta'),
+                        'created_at': e.get('created_at'), 'reason': e.get('reason'),
+                        'source_status': 'source_documented' if review and review.get('source_type') != 'unknown' else 'unverified',
+                        'review': review or None})
+    return {'ok': True, 'items': view['catalog'], 'counts': {'pending_source_review': sum(
+        1 for e in counted if e['source_status'] == 'unverified')},
+        'physical_count_sources': counted[:300], 'source_rows_truncated': len(counted) > 300,
+        'recent_movements': data['events'][-100:][::-1],
+        'financial_values_posted': False, 'warehouse_van_totals_are_quantities_only': True}
+
+
 class Movement(BaseModel):
     employee_id: str = Field(min_length=1, max_length=120)
     part_id: str = Field(min_length=1, max_length=120)
@@ -315,9 +447,11 @@ def _apply_movement(payload: Movement, request: Request, actor: str):
             delta, warehouse_delta = -payload.quantity, 0
         else:  # Explicit physically verified count; not a warehouse transfer.
             delta, warehouse_delta = payload.quantity - existing, 0
+        source_status = ('opening_or_adjusted_count_unverified' if delta != 0 else 'count_confirmed_no_change') if payload.movement == 'count' else ('warehouse_transfer' if payload.movement in ('load','return') else 'job_consumption')
         event = {'id': uuid.uuid4().hex, 'request_id': payload.request_id,
                  'employee_id': payload.employee_id, 'part_id': payload.part_id,
                  'quantity': payload.quantity, 'movement': payload.movement,
+                 'source_status': source_status,
                  'delta': delta, 'warehouse_delta': warehouse_delta,
                  'reason': payload.reason.strip(), 'actor': actor,
                  'created_at': datetime.now(timezone.utc).isoformat()}

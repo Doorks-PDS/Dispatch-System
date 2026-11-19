@@ -1130,6 +1130,20 @@ def _model_answer(output):
 def chat(payload:Message,request:Request):
     platform=allowed(request)
     text=payload.message.strip()
+    # Verified PDS business-record lookups and an explicit UNSENT email proposal.
+    # Bypass the generic model fallback for these narrow intents so Moses never
+    # claims it cannot access the inventory or estimate scopes it already has.
+    if platform == 'pds' and getattr(request.state, 'auth_role', None) in ('office_admin', 'office', 'lead'):
+        from app.services.moses_pds_verified_shortcuts import respond as verified_pds_shortcut
+        try:
+            verified = verified_pds_shortcut(request, text)
+        except HTTPException as exc:
+            verified = f'PDS records could not be verified: {exc.detail}. No action was confirmed.'
+        if verified is not None:
+            return {'answer': verified, 'workspace': 'pds', 'matches': [], 'navigation': [],
+                    'read_only': not verified.startswith('Saved UNSENT'),
+                    'agent_mode': 'verified_pds_records', 'action_proposals': [],
+                    'document_proposals': []}
     # Staff and leads: natural-language insight without privileged tool execution.
     # A failed read-only AI call falls through to the existing deterministic search.
     if platform == 'pds' and getattr(request.state, 'auth_role', None) in ('office','lead'):
