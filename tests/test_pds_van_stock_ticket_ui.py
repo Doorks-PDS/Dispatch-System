@@ -10,7 +10,9 @@ def test_van_ticket_uses_shared_moses_part_editor():
     end = js.index('  function renderTimeOffView()', start)
     view = js[start:end]
     assert '🚐 ' in view
-    assert 'Open Van Ticket' in view
+    assert 'View Van · Parts, stock movements & setup' in view
+    assert 'Search part #, description or manufacturer' in view
+    assert 'matches.replaceChildren()' in view
     assert '✨ Add Part with Moses' in view
     assert "renderPartsListView();document.querySelector('#parts_add')?.click()" in view
     assert 'photo.append(img)' in view

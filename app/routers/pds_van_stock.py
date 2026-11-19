@@ -104,19 +104,25 @@ def _parts(request: Request) -> dict:
 
 
 def _people(request: Request) -> dict:
-    # Match the employees screen, which includes staff with only a login account.
+    """Eligible active staff only; historical van ledgers remain untouched."""
     store = request.app.state.employees_store
-    employees = {str(e['id']): dict(e) for e in store.list() if isinstance(e, dict) and e.get('id')}
+    employees = {str(e['id']): dict(e) for e in store.list()
+                 if isinstance(e, dict) and e.get('id') and
+                 str(e.get('status', 'Active')).lower() == 'active' and e.get('active') is not False}
     users_store = getattr(request.app.state, 'users_store', None)
     if users_store:
         by_name = {str(e.get('name', '')).strip().lower(): key for key, e in employees.items()}
         for user in users_store.list_users():
-            if not isinstance(user, dict) or not user.get('id') or not user.get('active', True):
+            if not isinstance(user, dict) or not user.get('id'):
                 continue
             name = str(user.get('name') or user.get('username') or '').strip()
             if not name:
                 continue
             existing_id = by_name.get(name.lower())
+            if not user.get('active', True):
+                if existing_id:
+                    employees.pop(existing_id, None)
+                continue
             if existing_id:
                 employees[existing_id]['role'] = user.get('role') or employees[existing_id].get('role', 'tech')
             else:

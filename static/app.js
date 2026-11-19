@@ -860,17 +860,17 @@
   const pdsOfficeCol=navDataCenter?.parentElement;
   if(pdsJobCol) [navJobFlow,navAllJobs,navMyAssignments,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
   if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
-  // Admin-only PRIO Coin design preview. This is intentionally not a live ledger.
+  // PDS-only PRIO trial workspace. No payroll or real-money actions.
   const navPrioCoinPreview = document.createElement('button');
   navPrioCoinPreview.type = 'button';
   navPrioCoinPreview.className = 'navbtn';
   navPrioCoinPreview.id = 'navPrioCoinPreview';
-  navPrioCoinPreview.innerHTML = '<span>PRIO Coin</span><small>Admin Preview Only</small>';
+  navPrioCoinPreview.innerHTML = '<span>PRIO Coin</span><small>Admin Trials</small>';
   navPrioCoinPreview.hidden = true;
   if (pdsOfficeCol) pdsOfficeCol.appendChild(navPrioCoinPreview);
   navPrioCoinPreview.addEventListener('click', () => {
     if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
-    window.open('/pds/prio-coin-preview', '_blank', 'noopener,noreferrer');
+    renderPrioCoinWorkspace();
   });
   const pdsFormsCol=document.querySelector('#formsBody .navcol');
   if(pdsFormsCol) [navFormsTimeCard,navFormsReceipts,navFormsTimeOff,navFormsSignOff,navTakeoffs].forEach(b=>{if(b)pdsFormsCol.appendChild(b);});
@@ -14252,6 +14252,55 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     load();
   }
 
+  // PRIO is a PDS-only simulation, NOT an investment, payroll or employee-benefit account.
+  async function renderPrioCoinWorkspace(){
+    if(activePlatform!=='pds'||currentUser?.role!=='office_admin')return;
+    setNavActive(navPrioCoinPreview);setActiveChip('Office Flow');setWorkspace('PRIO Coin');clearWorkspaceActions();
+    const root=document.createElement('div');root.className='prio-trial-workspace';
+    root.innerHTML=`<style>
+      .prio-trial-workspace{max-width:1160px;margin:auto;display:grid;gap:14px}
+      .prio-trial-workspace .prio-split{display:grid;grid-template-columns:180px 1fr;align-items:center;gap:22px}
+      .prio-trial-workspace .prio-donut{width:170px;height:170px;border-radius:50%;background:conic-gradient(#ff8527 0 50%,#3687b5 50% 100%);display:grid;place-items:center}
+      .prio-trial-workspace .prio-donut div{border-radius:50%;width:112px;height:112px;background:white;display:grid;place-items:center;text-align:center;font-weight:800;color:#293b50}
+      .prio-trial-workspace .prio-stats{display:flex;flex-wrap:wrap;gap:12px}
+      .prio-trial-workspace .prio-stats>div{flex:1;min-width:130px;padding:12px;border:1px solid #e2e8f0;border-radius:12px}
+      .prio-trial-workspace .prio-stats strong{display:block;font-size:22px}
+      .prio-trial-workspace .prio-entry{display:flex;flex-wrap:wrap;align-items:end;gap:10px}
+      .prio-trial-workspace label{display:grid;gap:5px;font-weight:650;font-size:13px}
+      .prio-trial-workspace .prio-ledger{display:grid;gap:8px;margin-top:12px}
+      .prio-trial-workspace .prio-ledger>div{padding:10px;border:1px solid #e2e8f0;border-radius:10px;display:flex;justify-content:space-between;gap:12px}
+      @media(max-width:650px){.prio-trial-workspace .prio-split{grid-template-columns:1fr;justify-items:center}}
+    </style>
+    <section class="card"><h2>◈ PRIO Coin · Trial Dashboard</h2><p class="hint">Admin-only simulation. No funds move, no payroll changes, and no employee rights or benefits are created.</p>
+      <div class="prio-split"><div class="prio-donut" aria-label="Illustrative allocation: 50 percent owners, 50 percent employee pool"><div>50%<br> / 50%</div></div>
+      <div><h3>Illustrative allocation model</h3><p><b style="color:#e8751d">●</b> Owners: 50% &nbsp; <b style="color:#3687b5">●</b> Employee pool: 50%</p><p class="hint">Trial entries are recorded for planning only. Eligibility, vesting, taxation, and payouts require professional review before any real program.</p></div></div>
+      <div class="prio-stats"><div><span class="hint">Simulated total</span><strong id="prioTotal">$0</strong></div><div><span class="hint">Owners' half</span><strong id="prioOwners">$0</strong></div><div><span class="hint">Employee half</span><strong id="prioEmployees">$0</strong></div><div><span class="hint">Trial entries</span><strong id="prioCount">0</strong></div></div>
+    </section>
+    <section class="card"><h3>Record a trial entry</h3><p class="hint">Use hypothetical amounts to explore contributions. Entries are saved to a separate PDS trial ledger, not a financial account.</p>
+      <form id="prioTrialForm" class="prio-entry"><label>Trial date<input class="input" name="date" type="date" required></label><label>Simulated contribution ($)<input class="input" name="amount" type="number" min="0.01" max="10000000" step="0.01" required placeholder="100.00"></label><label>Frequency<select class="input" name="frequency"><option>Quarterly</option><option>Monthly</option><option>One time</option></select></label><label>Notes<input class="input" name="notes" maxlength="240" placeholder="What are we testing?"></label><button class="btn btn-orange" type="submit">Save trial</button></form><p class="hint" id="prioMessage" role="status"></p></section>
+    <details class="card"><summary style="font-weight:750;cursor:pointer">Trial activity and export</summary><div id="prioHistory" class="prio-ledger"></div><button type="button" class="btn" id="prioExport">Export trials (JSON)</button></details>`;
+    workspaceBody.replaceChildren(root);
+    const form=root.querySelector('#prioTrialForm'),message=root.querySelector('#prioMessage');
+    form.elements.date.value=new Date().toISOString().slice(0,10);
+    let trials=[];
+    const dollars=cents=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(cents/100);
+    async function refresh(){
+      try{const data=await fetchJSON('/pds-prio-trials');trials=data.entries||[];const total=trials.reduce((sum,x)=>sum+Number(x.amount_cents||0),0);
+        root.querySelector('#prioTotal').textContent=dollars(total);root.querySelector('#prioOwners').textContent=dollars(Math.ceil(total/2));root.querySelector('#prioEmployees').textContent=dollars(Math.floor(total/2));root.querySelector('#prioCount').textContent=String(trials.length);
+        const history=root.querySelector('#prioHistory');history.replaceChildren();
+        for(const trial of trials.slice().reverse().slice(0,100)){const line=document.createElement('div');const detail=document.createElement('span');detail.textContent=`${trial.date} · ${trial.frequency} · ${trial.notes||'Trial contribution'}`;const amount=document.createElement('strong');amount.textContent=dollars(trial.amount_cents);line.append(detail,amount);history.append(line);}
+        if(!trials.length)history.textContent='No trial entries yet.';
+      }catch(err){message.textContent='Cannot load trial data: '+(err.message||err);}
+    }
+    form.onsubmit=async event=>{event.preventDefault();const amount=Number(form.elements.amount.value);if(!Number.isFinite(amount)||amount<=0)return;
+      const save=form.querySelector('button[type=submit]');save.disabled=true;message.textContent='Saving simulated entry…';
+      try{await fetchJSON('/pds-prio-trials',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({date:form.elements.date.value,amount,frequency:form.elements.frequency.value,notes:form.elements.notes.value})});message.textContent='Saved as a trial only. No actual funds moved.';form.elements.amount.value='';form.elements.notes.value='';await refresh();}
+      catch(err){message.textContent='Trial not saved: '+(err.message||err);}finally{save.disabled=false;}
+    };
+    root.querySelector('#prioExport').onclick=()=>{const blob=new Blob([JSON.stringify({kind:'PRIO simulation only',entries:trials},null,2)],{type:'application/json'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='prio-trial-entries.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);};
+    await refresh();currentView={refresh:renderPrioCoinWorkspace};
+  }
+
   // PDS Van Stock: same Parts List IDs and the verified warehouse stock ledger.
   let navFormsVanStock = null;
   function installVanStockNav(){
@@ -14306,7 +14355,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       catch(error){feedback.textContent='Could not save: '+(error.message||error);}
     }
     const parts=(state.catalog||[]).slice().sort((a,b)=>String(a.part_number||'').localeCompare(String(b.part_number||'')));
-    const peopleList=(Array.isArray(people)?people:people?.items||[]).filter(e=>e.id&&['tech','lead','technician'].includes(String(e.role||'tech').toLowerCase()));
+    const peopleList=(Array.isArray(people)?people:people?.items||[]).filter(e=>e.id&&e.active!==false&&e.login_active!==false&&String(e.status||'Active').toLowerCase()==='active'&&['tech','lead','technician'].includes(String(e.role||'tech').toLowerCase()));
     const summary=panel('🚐 Technician Van Stock');
     summary.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'Manage each vehicle as a ticket. Counts, transfers and shortages use the existing PDS Parts List and warehouse inventory.'}));
     const stats=document.createElement('div');stats.style.cssText=rowStyle+';margin:12px 0';
@@ -14326,16 +14375,29 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const existingIds=new Set((state.vans||[]).filter(v=>v.enabled).map(v=>String(v.employee_id)));
     for(const employee of peopleList){const o=document.createElement('option');o.value=String(employee.id);o.textContent=(employee.name||employee.id)+(existingIds.has(String(employee.id))?' · Existing van':'');person.append(o);}
     setupControls.append(person,actionButton('Create / Enable Van',()=>{if(person.value)submit('/pds-van-stock/vans','POST',{employee_id:person.value,enabled:true,use_template:true});},true));setup.append(setupControls);main.append(setup);
-    const choosePart=(selected='')=>{const select=document.createElement('select');select.className='input';select.style.maxWidth='370px';select.setAttribute('aria-label','Select part from PDS Parts List');
-      const blank=document.createElement('option');blank.value='';blank.textContent='Select a PDS part';select.append(blank);
-      for(const part of parts){const opt=document.createElement('option');opt.value=part.id;opt.textContent=partLabel(part);select.append(opt);}if(selected)select.value=selected;return select;};
+    const choosePart=(selected='')=>{
+      const wrap=document.createElement('span');wrap.style.cssText='display:inline-flex;flex-direction:column;gap:4px;min-width:min(100%,300px);flex:1 1 300px';
+      const input=document.createElement('input');input.className='input';input.type='search';input.placeholder='Search part #, description or manufacturer';input.autocomplete='off';input.setAttribute('aria-label','Search PDS Parts List');input.setAttribute('role','combobox');input.setAttribute('aria-expanded','false');
+      const matches=document.createElement('div');matches.style.cssText='display:none;max-height:210px;overflow:auto;border:1px solid #d5dfe8;border-radius:10px;background:white;box-shadow:0 8px 16px #15233316;position:absolute;z-index:15;width:min(460px,85vw)';
+      const slot=document.createElement('span');slot.style.cssText='position:relative';slot.append(matches);wrap.append(input,slot);
+      let chosen=parts.find(p=>String(p.id)===String(selected))||null;
+      if(chosen)input.value=partLabel(chosen);
+      function draw(){chosen=null;matches.replaceChildren();const query=input.value.trim().toLowerCase();if(!query){matches.style.display='none';input.setAttribute('aria-expanded','false');return;}
+        const found=parts.filter(p=>[p.part_number,p.description,p.manufacturer].some(v=>String(v||'').toLowerCase().includes(query))).slice(0,15);
+        for(const p of found){const b=document.createElement('button');b.type='button';b.textContent=partLabel(p);b.style.cssText='display:block;text-align:left;padding:9px 11px;width:100%;background:white;border:0;border-bottom:1px solid #edf0f3;cursor:pointer';b.onmousedown=e=>e.preventDefault();b.onclick=()=>{chosen=p;input.value=partLabel(p);matches.style.display='none';input.setAttribute('aria-expanded','false');};matches.append(b);}
+        if(!found.length){const empty=document.createElement('div');empty.textContent='No matching part. Add it in the Parts List with Moses.';empty.className='hint';matches.append(empty);}
+        matches.style.display='block';input.setAttribute('aria-expanded','true');
+      }
+      input.addEventListener('input',draw);input.addEventListener('focus',()=>{if(input.value)draw();});input.addEventListener('blur',()=>setTimeout(()=>{matches.style.display='none';input.setAttribute('aria-expanded','false');},180));
+      return {element:wrap,get value(){return chosen?.id||'';},get label(){return chosen?partLabel(chosen):'';}};
+    };
     const numeric=(placeholder,required=false)=>{const i=document.createElement('input');i.className='input';i.type='number';i.min='0';i.max='100000';i.step='1';i.placeholder=placeholder;i.required=required;i.style.maxWidth='135px';return i;};
     function partForm(endpoint,caption){
       const form=document.createElement('form');form.style.cssText=rowStyle+';margin-top:10px';
       const select=choosePart(),minimum=numeric('Min (optional)'),target=numeric('Target (optional)');
       minimum.setAttribute('aria-label','Low-stock minimum');target.setAttribute('aria-label','Restock target');
       const submitButton=document.createElement('button');submitButton.className='btn btn-orange';submitButton.type='submit';submitButton.textContent='Save';
-      form.append(select,minimum,target,submitButton);
+      form.append(select.element,minimum,target,submitButton);
       form.onsubmit=event=>{event.preventDefault();if(!select.value){feedback.textContent='Select a part first.';return;}
         const min=minimum.value===''?null:Number(minimum.value),goal=target.value===''?null:Number(target.value);
         if(min!==null&&goal!==null&&goal<min){feedback.textContent='Restock target must be at least the minimum.';return;}
@@ -14344,13 +14406,13 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
     const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:14px';
     for(const van of state.vans||[]){
-      const ticket=panel('🚐 '+van.employee_name+(van.enabled?'':' · Inactive'));
-      const count=document.createElement('div');count.className='hint';count.textContent=`${van.items.length} assigned parts · ${van.low_count} low-stock item(s)`;ticket.append(count);
+      const ticket=panel('🚐 '+van.employee_name+(van.enabled?'':' · Van Disabled'));ticket.classList.add('pds-van-ticket');ticket.style.cssText='border-left:4px solid #fb8428;box-shadow:0 8px 22px rgba(22,38,60,.07);border-radius:16px';
+      const count=document.createElement('div');count.className='hint';count.textContent=`${van.items.length} assigned parts · ${van.low_count} low-stock item(s) · Shared PDS inventory`;ticket.append(count);
       const toolbar=document.createElement('div');toolbar.style.cssText=rowStyle+';margin:12px 0';
       toolbar.append(actionButton(van.enabled?'Disable Van':'Enable Van',()=>submit('/pds-van-stock/vans','POST',{employee_id:van.employee_id,enabled:!van.enabled,use_template:false})));
       ticket.append(toolbar);
       const body=document.createElement('details');body.className='van-stock-ticket';body.style.cssText='border-top:1px solid #e2e8f0;padding-top:12px';
-      const heading=document.createElement('summary');heading.style.cssText='cursor:pointer;font-weight:700;color:#274056';heading.textContent='Open Van Ticket — inventory, movements & settings';body.append(heading);
+      const heading=document.createElement('summary');heading.style.cssText='cursor:pointer;font-weight:700;color:#274056';heading.textContent='View Van · Parts, stock movements & setup';body.append(heading);
       const items=document.createElement('div');items.style.cssText='display:grid;gap:8px;margin:14px 0';
       for(const item of van.items){
         const line=document.createElement('div');line.style.cssText='border:1px solid #e2e8f0;border-radius:12px;padding:10px;display:flex;align-items:center;gap:10px';
@@ -14370,7 +14432,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const part=choosePart(),type=document.createElement('select');type.className='input';type.setAttribute('aria-label','Stock movement type');
       for(const [key,label] of [['load','Warehouse → Van'],['return','Van → Warehouse'],['used','Used on job'],['count','Physical van count']]){const opt=document.createElement('option');opt.value=key;opt.textContent=label;type.append(opt);}
       const qty=numeric('Quantity',true),reason=document.createElement('input');reason.className='input';reason.placeholder='Job # / reason';reason.minLength=3;reason.maxLength=300;reason.required=true;reason.style.maxWidth='210px';reason.setAttribute('aria-label','Job number or reason');
-      const save=document.createElement('button');save.type='submit';save.className='btn btn-orange';save.textContent='Record Movement';move.append(part,type,qty,reason,save);
+      const save=document.createElement('button');save.type='submit';save.className='btn btn-orange';save.textContent='Record Movement';move.append(part.element,type,qty,reason,save);
       move.onsubmit=event=>{event.preventDefault();if(!part.value){feedback.textContent='Select a part first.';return;}
         if(type.value!=='count'&&Number(qty.value)<1){feedback.textContent='Enter a quantity of at least one.';return;}
         if(type.value==='count'&&!confirm('Set the physically counted van quantity? This does not affect warehouse stock.'))return;

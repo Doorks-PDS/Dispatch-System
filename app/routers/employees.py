@@ -68,6 +68,8 @@ def list_employees(request: Request, x_api_key: Optional[str] = Header(default=N
             row["login_user_id"] = user.get("id", "")
             row["login_username"] = user.get("username", "")
             row["login_active"] = bool(user.get("active", True))
+            row["active"] = bool(user.get("active", True)) and str(row.get("status", "Active")).lower() == "active"
+        row.setdefault("active", str(row.get("status", "Active")).lower() == "active")
         merged.append(row)
         if key:
             seen.add(key)
@@ -92,6 +94,7 @@ def list_employees(request: Request, x_api_key: Optional[str] = Header(default=N
                 "login_user_id": user.get("id", ""),
                 "login_username": user.get("username", ""),
                 "login_active": bool(user.get("active", True)),
+                "active": bool(user.get("active", True)),
             })
             seen.add(key)
 

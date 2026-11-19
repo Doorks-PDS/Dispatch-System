@@ -1,0 +1,23 @@
+{
+  "release": "Doorks Moses 5.41",
+  "base": "5.40",
+  "before": {
+    "main.py": "9327e5be9f6126178ce54a9a5adea26608a07352efd35e5599a93f2f3293317e",
+    "static/app.js": "41cc84b4331b208f9d4e4f7becdfc22cfad2d8ee816963ea59198b9670ca6d70",
+    "app/routers/employees.py": "426351aaae63b6c101c6fbc269b4091434e0c411083e8c2dbe7760b34664b489",
+    "app/routers/pds_van_stock.py": "6391c065458a3c40c901e5c1e5d8469c069a0908dec9d636275e36510c97ba6a",
+    "tests/test_prio_coin_admin_navigation.py": "27c08f61a35afafb940d9a980e9cd90af90c7e5e15275cbfec31c428a8e89e8e",
+    "tests/test_pds_van_stock_ticket_ui.py": "b4f7d9594c85bfecd06b82add1d47a498c879cd3431bc0d61b9e5fb8e5d17463"
+  },
+  "after": {
+    "main.py": "72995e8a1c5c44730bd9e541a0f5ef79bc229b715c9bd771dbd3090738d76f9b",
+    "static/app.js": "6d665ab2a9cba52991f915c4abaf8838922e8663aeaed947369779fecbef8943",
+    "app/routers/employees.py": "f1e00cdc6033243a48008d76076bf5fe031b2ee2ace81a0c5c65ca73555450d1",
+    "app/routers/pds_van_stock.py": "a4c84fa65df6f29f17ddccc999292cc987a354d760da5c14b183d24f5955f168",
+    "app/routers/pds_prio_trials.py": "040b0c514cd2b33189779b10bdb5ee807ec73364d664a3830b50429e8cb13d10",
+    "tests/test_prio_coin_admin_navigation.py": "e004106de93a7bcc3d58189c8ca729d96280a3af5d4a060cd54051685986f7f0",
+    "tests/test_pds_van_stock_ticket_ui.py": "bdbfca521bbe2353ea3b9a139344c2e80a47c5ce37568ff16f2e5229c7b8dbf0",
+    "tests/test_pds_prio_trials_541.py": "6cbb778f8965950c542e8cba61e39c3b292e2993ce653c481fa54a1d6b439196",
+    "tests/test_pds_van_active_541.py": "b779ba75c65bc82bb2b2fc2d5cebf547019de86061aaf9a0e2787c228f783694"
+  }
+}

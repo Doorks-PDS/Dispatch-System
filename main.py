@@ -211,6 +211,8 @@ app.state.users_store.ensure_seed_user(**SEED_ADMIN)
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
+from app.routers.pds_prio_trials import router as pds_prio_trials_router
+app.include_router(pds_prio_trials_router)
 app.include_router(pds_purchase_orders_router)
 app.include_router(pds_van_stock_router)
 from app.routers.document_vault import router as document_vault_router
