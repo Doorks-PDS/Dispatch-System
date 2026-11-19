@@ -6450,7 +6450,11 @@ function renderAttachmentSection(titleText, items, options = {}) {
       for(const [value,name] of [['email','Email'],['text','Text'],['both','Email & Text']])method.add(new Option(name,value));
       const kind=makeNotifyField('Update type',document.createElement('select'));
       for(const [value,name] of [['appointment','Appointment confirmation'],['schedule_change','Schedule change'],['eta','Technician ETA'],['custom','Custom message']])kind.add(new Option(name,value));
-      const recipientEmail=makeNotifyField('Customer email',document.createElement('input'));recipientEmail.type='email';recipientEmail.value=String(job.contact_email||job.email||job.customer_email||'');recipientEmail.autocomplete='off';
+      const knownNotifyEmails=[...new Set([job.contact_email,job.email,job.customer_email].filter(Boolean).map(x=>String(x).trim().toLowerCase()))];
+      const recipientEmail=makeNotifyField('Customer email (must be on saved job)',document.createElement('input'));recipientEmail.type='email';recipientEmail.value=knownNotifyEmails[0]||'';recipientEmail.autocomplete='off';
+      const savedEmailChoice=document.createElement('div');savedEmailChoice.style.cssText='grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center';
+      for(const address of knownNotifyEmails){const use=document.createElement('button');use.className='btn';use.type='button';use.textContent='Use saved: '+address;use.style.fontSize='12px';use.onclick=()=>{recipientEmail.value=address;notifyStatus.textContent='Saved job recipient selected. Rejected drafts do not block a new request.';};savedEmailChoice.append(use);}
+      notifyBody.append(savedEmailChoice);
       const recipientPhone=makeNotifyField('Customer phone',document.createElement('input'));recipientPhone.type='tel';recipientPhone.value=String(job.contact_phone||job.phone||job.customer_phone||'');recipientPhone.autocomplete='off';
       const subject=document.createElement('input');subject.type='text';subject.maxLength=140;
       const subjectLabel=makeNotifyField('Email subject',subject);subjectLabel.parentElement.style.gridColumn='1/-1';
@@ -6485,10 +6489,17 @@ function renderAttachmentSection(titleText, items, options = {}) {
       notifyBody.append(seeHistory,historyView);
 
       const preset=()=>{
-        const selected=kind.options[kind.selectedIndex]?.textContent||'Service update';
-        subject.value='Priority Door Systems — '+selected+' — '+(job.job_number||'service');
-        const time=dateInput.value?(' on '+dateInput.value+(timeInput.value?' at '+timeInput.value:'')):'';
-        message.value='Priority Door Systems: '+selected+' for '+String(job.customer||'your location')+time+'. Please contact our office with any questions.';
+        const customer=String(job.customer||'your property').trim();
+        const when=dateInput.value?(dateInput.value+(timeInput.value?' at '+timeInput.value:'')):'';
+        const reference=String(job.job_number||'').trim();
+        const contact='Questions? Call (760) 233-5037 or email reception@prioritydoors.com.';
+        const action=kind.value;
+        const typeName={appointment:'Appointment Confirmation',schedule_change:'Schedule Update',eta:'Technician ETA',custom:'Customer Service Update'}[action]||'Service Update';
+        subject.value='Priority Door Systems — '+typeName+(reference?' — '+reference:'');
+        if(action==='appointment')message.value='Priority Door Systems: Your service visit for '+customer+(when?' is scheduled for '+when:' is being coordinated')+'. '+contact;
+        else if(action==='schedule_change')message.value='Priority Door Systems: We have an update to your service schedule for '+customer+(when?'. The updated visit is '+when:'')+'. '+contact;
+        else if(action==='eta')message.value='Priority Door Systems: Technician ETA update for '+customer+(when?'. Planned visit: '+when:'')+'. Please contact our office for a confirmed arrival time. '+contact;
+        else message.value='Priority Door Systems: Regarding your service at '+customer+'. '+contact;
       };
       kind.addEventListener('change',preset);preset();
       const showMethod=()=>{recipientEmail.parentElement.hidden=method.value==='text';recipientPhone.parentElement.hidden=method.value==='email';subject.parentElement.hidden=method.value==='text'};
@@ -6496,6 +6507,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
       requestApproval.onclick=async()=>{
         if(!['office_admin'].includes(String(currentUser?.role||''))){notifyStatus.textContent='Office administrator approval is required to prepare customer notifications.';return;}
         const modes=method.value==='both'?['email','text']:[method.value];
+        if(modes.includes('email')&&!knownNotifyEmails.includes(recipientEmail.value.trim().toLowerCase())){
+          notifyStatus.textContent='Email not prepared: choose a saved job email using the button above, or edit and save the job contact first. Rejected drafts may be prepared again.';
+          return;
+        }
         if(!message.value.trim()||!message.value.startsWith('Priority Door Systems:')){notifyStatus.textContent='Enter a message beginning with Priority Door Systems:';return;}
         if(message.value.length>320){notifyStatus.textContent='Message must be 320 characters or fewer for SMS.';return;}
         if(!confirm('Create '+modes.join(' and ')+' approval request(s) for this saved PDS job? Nothing will be sent yet.'))return;
@@ -6519,7 +6534,8 @@ function renderAttachmentSection(titleText, items, options = {}) {
               try{
                 const decisionRoute=mode==='text'?'/moses-action-center/pds/sms/proposals/'+encodeURIComponent(result.proposal.id)+'/decision':'/pds-schedule-notifications/email/proposals/'+encodeURIComponent(result.proposal.id)+'/decision';
                 const response=await fetchJSON(decisionRoute,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:allowed})});
-                receipt.textContent=allowed?'Provider status: '+String(response.status||'unconfirmed')+' (not proof of delivery)':'Rejected';
+                receipt.textContent=allowed?'Provider status: '+String(response.status||'unconfirmed')+' (not proof of delivery)':'Rejected. Edit the message and choose Prepare notification to create a new approval.';
+                if(!allowed){notifyStatus.textContent='Rejected proposal closed. You can prepare a new request using the saved contact above.';}
               }catch(error){receipt.textContent='Not confirmed: '+(error.message||error);}
             };
             approve.onclick=()=>decision(true);reject.onclick=()=>decision(false);
@@ -7127,7 +7143,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             </div>
             <div id="cf_existing_door_wrap" style="display:none;">
               <div class="label">Existing Door</div>
-              <select class="input" id="cf_existing_door"><option value="">-- Select Door --</option></select>
+              <input class="input" type="search" id="cf_existing_door_search" placeholder="Search door ID, location, customer or address…" autocomplete="off" aria-label="Search existing door records" />
+              <div id="cf_existing_door_results" role="listbox" style="display:none;max-height:210px;overflow:auto;border:1px solid #d8e1eb;border-radius:10px;background:white;margin-top:5px"></div>
+              <select class="input" id="cf_existing_door" hidden aria-label="Selected existing door"><option value="">-- Select Door --</option></select>
             </div>
           </div>
           <div id="cf_new_door_wrap" style="display:none; margin-top:10px;">
@@ -7148,40 +7166,50 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const existingDoorWrap = doorRecordPanel.querySelector("#cf_existing_door_wrap");
       const newDoorWrap = doorRecordPanel.querySelector("#cf_new_door_wrap");
       const existingDoorSelect = doorRecordPanel.querySelector("#cf_existing_door");
-
+      const doorSearch = doorRecordPanel.querySelector("#cf_existing_door_search");
+      const doorResults = doorRecordPanel.querySelector("#cf_existing_door_results");
+      const doorText = item => [item.door_id,item.door_location,item.door_type,item.customer,item.address,item.manufacturer].filter(Boolean).join(" — ") || "Door Record";
       const renderDoorChoices = () => {
         const customer = normalizeText(job.customer || "");
         const address = normalizeText(job.address || "");
-        const matching = doorRecordLogs.filter(item => {
-          const sameCustomer = customer && normalizeText(item.customer || "") === customer;
-          const sameAddress = address && normalizeText(item.address || "") === address;
-          return sameCustomer || sameAddress;
+        const query = normalizeText(doorSearch.value || "");
+        const sorted = doorRecordLogs.slice().sort((a,b) => {
+          const score = x => (customer && normalizeText(x.customer||"")===customer?2:0)+(address && normalizeText(x.address||"")===address?2:0);
+          return score(b)-score(a);
         });
-        const choices = matching.length ? matching : doorRecordLogs;
-        existingDoorSelect.innerHTML = `<option value="">-- Select Door --</option>` + choices.map(item => {
-          const label = [item.door_id, item.door_location, item.door_type, item.address].filter(Boolean).join(" — ") || item.customer || "Door Record";
-          return `<option value="${escapeHtml(item.id || "")}">${escapeHtml(label)}</option>`;
-        }).join("");
+        const found = sorted.filter(item => !query || normalizeText(doorText(item)).includes(query)).slice(0,50);
+        doorResults.replaceChildren();
+        for(const item of found){
+          const option=document.createElement('button');option.type='button';option.setAttribute('role','option');option.className='btn';
+          option.style.cssText='display:block;width:100%;text-align:left;border:0;border-radius:0;border-bottom:1px solid #edf0f3;padding:10px;white-space:normal';
+          option.textContent=doorText(item);
+          option.onmousedown=e=>e.preventDefault();
+          option.onclick=()=>{
+            existingDoorSelect.replaceChildren(new Option(doorText(item),String(item.id||'')));
+            existingDoorSelect.value=String(item.id||'');doorSearch.value=doorText(item);doorResults.style.display='none';
+            existingDoorSelect.dispatchEvent(new Event('change'));
+          };
+          doorResults.append(option);
+        }
+        if(!found.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching door records.';doorResults.append(empty);}
+        doorResults.style.display='block';
       };
-
-      doorRecordPanel.addEventListener("toggle", async () => {
-        if (doorRecordPanel.open && !doorRecordLogs.length) {
-          doorRecordLogs = await apiListDoorLogs().catch(() => []);
-          renderDoorChoices();
-        }
+      const loadDoors=async()=>{if(!doorRecordLogs.length)doorRecordLogs=await apiListDoorLogs().catch(()=>[]);renderDoorChoices();};
+      doorRecordPanel.addEventListener('toggle',()=>{if(doorRecordPanel.open)loadDoors();});
+      doorMode.addEventListener("change",()=>{
+        existingDoorWrap.style.display=doorMode.value==='existing'?'block':'none';
+        newDoorWrap.style.display=doorMode.value==='new'?'block':'none';
+        if(doorMode.value==='existing')loadDoors();else doorResults.style.display='none';
       });
-      doorMode.addEventListener("change", () => {
-        existingDoorWrap.style.display = doorMode.value === "existing" ? "block" : "none";
-        newDoorWrap.style.display = doorMode.value === "new" ? "block" : "none";
-      });
-      existingDoorSelect.addEventListener("change", () => {
-        const selected = doorRecordLogs.find(item => String(item.id || "") === String(existingDoorSelect.value || ""));
-        if (!selected) return;
-        if (selected.door_type && DOOR_TYPES.includes(selected.door_type)) {
-          doorSel.value = selected.door_type;
-          updateRollupLunchVisibility();
-        }
-        if (selected.door_location) locRow.querySelector("#cf_door_loc").value = selected.door_location;
+      doorSearch.addEventListener('focus',loadDoors);
+      doorSearch.addEventListener('input',()=>{existingDoorSelect.value='';renderDoorChoices();});
+      doorSearch.addEventListener('keydown',e=>{if(e.key==='Escape')doorResults.style.display='none';});
+      doorSearch.addEventListener('blur',()=>setTimeout(()=>doorResults.style.display='none',170));
+      existingDoorSelect.addEventListener("change",()=>{
+        const selected=doorRecordLogs.find(item=>String(item.id||'')===String(existingDoorSelect.value||''));
+        if(!selected)return;
+        if(selected.door_type&&DOOR_TYPES.includes(selected.door_type)){doorSel.value=selected.door_type;updateRollupLunchVisibility();}
+        if(selected.door_location)locRow.querySelector('#cf_door_loc').value=selected.door_location;
       });
 
       // Moses: one transcript, then OpenAI proposes structured form fields for review.
@@ -9579,6 +9607,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     ];
     if(isHub){
       makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():x.id==='payables'?renderAccountsPayable('pds'):x.id==='manual-ledger'?renderManualAccountingLedger('pds','bills'):x.id==='stock'?renderPoReceiving('pds',()=>renderAccountingView('hub')):x.id==='vault'?renderDocumentVault('pds','',()=>renderAccountingView('hub')):renderAccountingView(x.id)})));
+      try{const alerts=await fetchJSON('/pds-van-stock');const qty=Number(alerts.alerts?.warehouse||0);if(qty){const target=[...workspaceBody.querySelectorAll('button')].find(b=>b.textContent.includes('Inventory & Receiving'));if(target){const flag=document.createElement('strong');flag.textContent=` ⚠ ${qty} to reorder`;flag.style.color='#a94d00';target.append(flag);}}}catch(_){}
     }else{
       workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
       workspaceBody.querySelector('#pdsAcctBack').onclick=()=>renderAccountingView('hub');
@@ -13720,7 +13749,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   async function renderPoReceiving(platform,backAction=null){
     if(platform!=='pds'&&activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Inventory & Receiving');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Stock quantities combine the PDS Parts List, warehouse adjustments and assigned van balances; receiving and accounting values remain separate.</p></div><button class="btn" id="receiveBack">← Back</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips / AI Upload</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Stock by SKU / Location</h3><div id="receiveStock" class="hint"></div><h3>Stock Movement History</h3><div id="receiveAdjustments" class="hint"></div></div>';
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Stock quantities combine the PDS Parts List, warehouse adjustments and assigned van balances; receiving and accounting values remain separate.</p></div><button class="btn" id="receiveBack">← Back</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips / AI Upload</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Stock by SKU / Location</h3><div id="receiveStockTools"></div><div id="receiveStock" class="hint"></div><details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Stock Movement History</summary><div id="receiveAdjustments" class="hint"></div></details></div>';
     el('receiveBack').onclick=()=>backAction?backAction():platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
     el('receivePacking').onclick=()=>renderDocumentVault(platform,'packing_slip',()=>renderPoReceiving(platform,backAction));
     el('receiveReceipts').onclick=()=>renderDocumentVault(platform,'receipt',()=>renderPoReceiving(platform,backAction));
@@ -13778,6 +13807,31 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       if(!history.children.length)history.textContent='No receiving events yet.';
       const stock=el('receiveStock');stock.replaceChildren();
       const entries=platform==='pds'&&pdsStock?(pdsStock.items||[]).map(x=>[x.part_number||x.id,x.warehouse,x]):liveStock?(liveStock.items||[]).map(x=>[x.sku,x.on_hand,x]):Object.entries(data.received_stock_by_sku||{});
+      if(platform==='pds'&&pdsStock){
+        const tool=el('receiveStockTools');
+        tool.replaceChildren();tool.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:10px 0';
+        const search=document.createElement('input');search.className='input';search.type='search';search.placeholder='Search part #, manufacturer, description or supplier…';search.style.cssText='flex:1 1 320px';
+        const onlyLow=document.createElement('label');onlyLow.style.cssText='display:flex;gap:6px;align-items:center;font-size:13px';const lowCheck=document.createElement('input');lowCheck.type='checkbox';onlyLow.append(lowCheck,document.createTextNode('Low stock only'));
+        const report=document.createElement('small');report.className='hint';tool.append(search,onlyLow,report);
+        const table=document.createElement('div');table.style.cssText='border:1px solid #dce4ec;border-radius:12px;overflow:auto';stock.append(table);
+        let limit=40;
+        const drawTable=()=>{
+          table.replaceChildren();const q=search.value.trim().toLowerCase();
+          const matches=(pdsStock.items||[]).filter(p=>[p.part_number,p.description,p.manufacturer,p.supplier].some(v=>String(v||'').toLowerCase().includes(q))&&(!lowCheck.checked||p.low));
+          report.textContent=`${matches.length} matching parts · ${(pdsStock.items||[]).filter(x=>x.low).length} warehouse alerts`;
+          const grid=document.createElement('table');grid.style.cssText='width:100%;border-collapse:collapse;font-size:13px;text-align:left';
+          const thead=document.createElement('thead');const hr=document.createElement('tr');for(const title of ['Part # / Description','Warehouse','Vans','Total','Status']){const th=document.createElement('th');th.textContent=title;th.style.cssText='padding:10px;border-bottom:1px solid #dce4ec;background:#f3f6f9';hr.append(th);}thead.append(hr);grid.append(thead);
+          const body=document.createElement('tbody');for(const p of matches.slice(0,limit)){
+            const tr=document.createElement('tr');tr.style.borderBottom='1px solid #edf0f3';
+            const cells=[[p.part_number||p.id,(p.description||'')].filter(Boolean).join(' — '),p.stock_recorded?String(p.warehouse):'Not counted',String(p.van_total||0),String(p.total_tracked||0),p.low?'⚠ Reorder '+p.needed:'—'];
+            cells.forEach((v,i)=>{const td=document.createElement('td');td.textContent=v;td.style.cssText='padding:9px;vertical-align:top'+(i===4&&p.low?';color:#a94d00;font-weight:700':'');if(i===0)td.style.minWidth='240px';tr.append(td);});body.append(tr);
+          }
+          grid.append(body);table.append(grid);
+          if(matches.length>limit){const more=document.createElement('button');more.type='button';more.className='btn';more.style.margin='10px';more.textContent='Show next '+Math.min(40,matches.length-limit)+' parts';more.onclick=()=>{limit+=40;drawTable();};table.append(more);}
+          if(!matches.length){const no=document.createElement('p');no.className='hint';no.style.padding='12px';no.textContent='No parts match your search.';table.append(no);}
+        };
+        search.oninput=()=>{limit=40;drawTable();};lowCheck.onchange=()=>{limit=40;drawTable();};drawTable();
+      } else {
       stock.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px';
       for(const [sku,qty,part] of entries){const row=document.createElement('div');row.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;background:#fff';const title=document.createElement('strong');title.textContent=sku;const label=document.createElement('div');label.className='hint';label.style.marginTop='8px';label.textContent=liveStock?[(part?.manufacturer?'Manufacturer: '+part.manufacturer:''),(part?.description||'Part number')].filter(Boolean).join(' · '):'Total quantity received';label.style.cssText='font-size:12px;line-height:1.4;margin-top:5px;max-width:260px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical';const value=document.createElement('div');value.style.cssText='font-size:26px;font-weight:800;margin-top:4px';value.textContent=String(qty);if(part?.image_url&&/^(https:\/\/|\/moses\/part-image\/)/i.test(part.image_url)){const img=document.createElement('img');img.src=part.image_url;img.alt='Part image';img.style.cssText='width:54px;height:54px;object-fit:contain;float:left;margin-right:12px;border-radius:8px';img.onerror=()=>img.remove();row.append(img);}const manufacturer=document.createElement('div');manufacturer.className='hint';manufacturer.textContent='Manufacturer: '+(part?.manufacturer||'Not entered');const supplier=document.createElement('div');supplier.className='hint';supplier.textContent='Supplier: '+(part?.supplier||'Not entered');const count=document.createElement('div');count.style.cssText='font-size:22px;font-weight:800;color:#355a38;margin-top:9px';count.textContent=platform==='pds'&&part?('Warehouse: '+(part.stock_recorded?qty:'not counted')+' · Vans: '+part.van_total+' · Total tracked: '+part.total_tracked):qty+' in Stock';value.remove();row.append(title,label,manufacturer,supplier,count);const qtyAvailable=qty;
         if(platform==='doorks'){
@@ -13797,8 +13851,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
           };
         }
         stock.append(row);}
+      }
       const movement=el('receiveAdjustments');if(movement){movement.replaceChildren();for(const a of stockAdjustments.slice(0,60)){const line=document.createElement('div');line.style.cssText='padding:9px 12px;border-bottom:1px solid #e1e5ea';line.textContent=[(a.created_at||'').slice(0,16),a.sku,(Number(a.quantity_delta)>0?'+':'')+a.quantity_delta,a.job_number?'Job '+a.job_number:'',a.reason,a.reference||''].filter(Boolean).join(' · ');movement.append(line);}if(!movement.children.length)movement.textContent=platform==='doorks'?'No manual stock movements recorded.':platform==='pds'?'No recorded PDS van stock movements.':'Stock movement journal is available in Doorks.';}
-      if(platform==='pds'&&pdsStock){const note=document.createElement('p');note.className='hint';note.textContent='Warehouse and van counts are quantities, not automatic cost, expense or tax entries. Opening counts with unknown purchase history require source review ('+pdsStock.counts.pending_source_review+' pending).';stock.prepend(note);}
+      if(platform==='pds'&&pdsStock){const note=document.createElement('p');note.className='hint';note.textContent='Quantities only — not costs, expenses or tax postings. Opening-count source reviews pending: '+pdsStock.counts.pending_source_review+'.';el('receiveStockTools').prepend(note);}
       if(!entries.length)stock.textContent='No stock or saved parts yet.';
     }
     el('receiveSearch').oninput=draw;await reload();
@@ -14375,7 +14430,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     if(!navFormsVanStock){
       navFormsVanStock=document.createElement('button');
       navFormsVanStock.type='button';navFormsVanStock.className='navbtn';navFormsVanStock.id='navFormsVanStock';
-      navFormsVanStock.innerHTML='<span>Van Stock</span><small>Technicians / Parts</small><span class="badge" id="badgeVanStock" style="display:none">0</span>';
+      navFormsVanStock.innerHTML='<span style="display:flex;flex:1;align-items:center;justify-content:space-between;gap:8px"><span>Vehicle Flow</span><small>Fleet Info/Stock</small></span><span class="badge" id="badgeVanStock" style="display:none">0</span>';
       if(navFormsTimeOff?.nextSibling)column.insertBefore(navFormsVanStock,navFormsTimeOff.nextSibling);
       else column.appendChild(navFormsVanStock);
     }
@@ -14389,7 +14444,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const response=await fetchJSON('/pds-van-stock');
       const total=Number(response.alerts?.vans||0)+Number(response.alerts?.warehouse||0);
       badge.textContent=String(total);badge.style.display=total?'':'none';
-      navFormsVanStock?.setAttribute('aria-label',`Van Stock: ${total} low stock alerts`);
+      navFormsVanStock?.setAttribute('aria-label',`Vehicle Flow: ${total} stock alerts`);
       if(navPartsList){
         let stockBadge=navPartsList.querySelector('#badgePartsLowStock');
         if(!stockBadge){stockBadge=document.createElement('span');stockBadge.id='badgePartsLowStock';stockBadge.className='badge';navPartsList.append(stockBadge);}
@@ -14402,8 +14457,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   async function renderVanStockView(){
     setNavActive(navFormsVanStock);
     setActiveChip('Work Flow');
-    setWorkspace('Van Stock');clearWorkspaceActions();
-    workspaceBody.innerHTML='<div class="card"><h2>Van Stock</h2><p class="hint">Loading van tickets…</p></div>';
+    setWorkspace('Vehicle Flow');clearWorkspaceActions();
+    workspaceBody.innerHTML='<div class="card"><h2>Vehicle Flow</h2><p class="hint">Loading fleet tickets…</p></div>';
     let state,people;
     try{[state,people]=await Promise.all([fetchJSON('/pds-van-stock'),apiListEmployees()]);}
     catch(error){workspaceBody.innerHTML=`<div class="card">Van Stock unavailable: ${escapeHtml(String(error.message||error))}</div>`;return;}
@@ -14422,7 +14477,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
     const parts=(state.catalog||[]).slice().sort((a,b)=>String(a.part_number||'').localeCompare(String(b.part_number||'')));
     const peopleList=(Array.isArray(people)?people:people?.items||[]).filter(e=>e.id&&e.active!==false&&e.login_active!==false&&String(e.status||'Active').toLowerCase()==='active'&&['tech','lead','technician'].includes(String(e.role||'tech').toLowerCase()));
-    const summary=panel('🚐 Technician Van Stock');
+    const summary=panel('🚐 Vehicle Flow · Fleet & Stock');
     summary.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'Manage each vehicle as a ticket. Counts, transfers and shortages use the existing PDS Parts List and warehouse inventory.'}));
     const stats=document.createElement('div');stats.style.cssText=rowStyle+';margin:12px 0';
     for(const [label,value] of [['Active vans',(state.vans||[]).filter(v=>v.enabled).length],['Van shortages',state.alerts?.vans||0],['Warehouse alerts',state.alerts?.warehouse||0]]){
@@ -14475,6 +14530,12 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const ticket=panel('🚐 '+van.employee_name+(van.enabled?'':' · Van Disabled'));ticket.classList.add('pds-van-ticket');ticket.style.cssText='border-left:4px solid #fb8428;box-shadow:0 8px 22px rgba(22,38,60,.07);border-radius:16px';
       const count=document.createElement('div');count.className='hint';count.textContent=`${van.items.length} assigned parts · ${van.low_count} low-stock item(s) · Shared PDS inventory`;ticket.append(count);
       const toolbar=document.createElement('div');toolbar.style.cssText=rowStyle+';margin:12px 0';
+      const vehicleDetails=document.createElement('details');vehicleDetails.className='card';vehicleDetails.style.cssText='margin-top:8px;padding:12px;flex-basis:100%';
+      const today=new Date(),localToday=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+      const vehicleDue=Boolean(/^\d{4}-\d{2}-\d{2}$/.test(van.vehicle?.next_service||'')&&van.vehicle.next_service<=localToday);
+      const vehicleButton=actionButton('🚐 Vehicle Info'+(vehicleDue?' · ⚠ Service Due':''),()=>{vehicleDetails.open=!vehicleDetails.open;if(vehicleDetails.open)vehicleDetails.scrollIntoView({block:'nearest'});});
+      if(officeVanAccess)toolbar.append(vehicleButton);
+      if(vehicleDue){const warning=document.createElement('strong');warning.style.color='#a94d00';warning.textContent='⚠ Vehicle service due';ticket.append(warning);}
       toolbar.append(actionButton(van.enabled?'Disable Van':'Enable Van',()=>{if(confirm(van.enabled?'Disable this van ticket? Stock history will be preserved.':'Enable this van ticket?'))submit('/pds-van-stock/vans','POST',{employee_id:van.employee_id,enabled:!van.enabled,use_template:false});}));
       ticket.append(toolbar);
       const body=document.createElement('details');body.className='van-stock-ticket';body.style.cssText='border-top:1px solid #e2e8f0;padding-top:12px';
@@ -14502,14 +14563,30 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         line.append(actions);
       }
       if(officeVanAccess){
-        const vehicleDetails=document.createElement('details');vehicleDetails.className='card';vehicleDetails.style.cssText='margin-top:12px;padding:12px';
+
         const head=document.createElement('summary');head.style.cssText='cursor:pointer;font-weight:700';head.textContent='🚐 Vehicle Information · Registration, insurance & maintenance';vehicleDetails.append(head);
         const vehicleForm=document.createElement('form');vehicleForm.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin-top:12px';
         const vehicleFields=[['label','Vehicle ID / Fleet #'],['year','Year'],['make','Make'],['model','Model'],['license_plate','License Plate'],['vin','VIN'],['insurance_carrier','Insurance Carrier'],['insurance_policy','Policy Reference'],['insurance_expires','Insurance Expiration'],['registration_expires','Registration Expiration'],['next_service','Next Service Due'],['odometer','Odometer'],['notes','Vehicle Notes']];
         for(const [key,label] of vehicleFields){const wrap=document.createElement('label');wrap.style.cssText='font-size:12px;font-weight:700;display:grid;gap:5px';wrap.textContent=label;const field=document.createElement(key==='notes'?'textarea':'input');field.className='input';field.name=key;field.maxLength=key==='notes'?1500:180;if(key==='insurance_expires'||key==='registration_expires'||key==='next_service')field.type='date';field.value=van.vehicle?.[key]||'';wrap.append(field);vehicleForm.append(wrap);}
         const saveVehicle=document.createElement('button');saveVehicle.type='submit';saveVehicle.className='btn btn-orange';saveVehicle.textContent='Save Vehicle Details';vehicleForm.append(saveVehicle);
         vehicleForm.onsubmit=event=>{event.preventDefault();const values=Object.fromEntries(vehicleFields.map(([key])=>[key,vehicleForm.elements[key].value]));submit('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/vehicle','PUT',values);};
-        vehicleDetails.append(vehicleForm);body.append(vehicleDetails);
+        vehicleDetails.append(vehicleForm);
+        const log=document.createElement('div');log.style.cssText='border-top:1px solid #e2e8f0;margin-top:14px;padding-top:12px';
+        const logTitle=document.createElement('h4');logTitle.textContent='Service, Incident & Maintenance History';log.append(logTitle);
+        for(const event of van.service_events||[]){const line=document.createElement('div');line.style.cssText='border:1px solid #e2e8f0;border-radius:10px;padding:9px;margin:6px 0';line.textContent=[event.date,event.kind,event.odometer&&('Odometer '+event.odometer),event.provider,event.notes].filter(Boolean).join(' · ');log.append(line);}
+        const eventForm=document.createElement('form');eventForm.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-top:12px';
+        const kind=document.createElement('select');kind.className='input';kind.name='kind';for(const [v,t] of [['service','Service'],['repair','Repair'],['accident','Accident / Incident'],['inspection','Inspection'],['note','Other Note']])kind.append(new Option(t,v));
+        const eventDate=document.createElement('input');eventDate.type='date';eventDate.name='date';eventDate.className='input';eventDate.required=true;eventDate.value=localToday;
+        const eventOdo=document.createElement('input');eventOdo.name='odometer';eventOdo.className='input';eventOdo.placeholder='Odometer (optional)';
+        const provider=document.createElement('input');provider.name='provider';provider.className='input';provider.placeholder='Service shop / reference';
+        const eventNotes=document.createElement('textarea');eventNotes.name='notes';eventNotes.className='input';eventNotes.placeholder='Service performed, accident details or notes';eventNotes.required=true;eventNotes.maxLength=1500;eventNotes.style.gridColumn='1/-1';
+        const eventSave=document.createElement('button');eventSave.className='btn btn-orange';eventSave.textContent='Add History Entry';eventSave.type='submit';eventForm.append(kind,eventDate,eventOdo,provider,eventNotes,eventSave);
+        let serviceRequestId='';
+        eventForm.onsubmit=e=>{e.preventDefault();if(!serviceRequestId)serviceRequestId=globalThis.crypto?.randomUUID?.()||String(Date.now());
+          eventSave.disabled=true;
+          submit('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/service-events','POST',{kind:kind.value,date:eventDate.value,odometer:eventOdo.value,provider:provider.value,notes:eventNotes.value,request_id:serviceRequestId})
+            .finally(()=>{eventSave.disabled=false;});};
+        log.append(eventForm);vehicleDetails.append(log);ticket.append(vehicleDetails);
       }
       const record=document.createElement('details');record.className='card';record.style.cssText='margin-top:12px;padding:12px';const recordTitle=document.createElement('summary');recordTitle.textContent='Record Stock Movement · Transfers, adjustments & missed usage';recordTitle.style.cssText='font-weight:700;cursor:pointer';record.append(recordTitle);const recordHint=document.createElement('p');recordHint.className='hint';recordHint.textContent='Use this for warehouse loads, returns, physical counts, or parts missed on a completion form.';record.append(recordHint);
       const move=document.createElement('form');move.style.cssText=rowStyle;
@@ -14543,13 +14620,13 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const head=document.createElement('summary');head.style.cssText='font-size:17px;font-weight:700;cursor:pointer';head.textContent='Standard Van Stock Template · Configure default parts';template.append(head);
       const templateEditor=partForm('/pds-van-stock/template','Standard template sets preferred parts and levels for future vans. It does not transfer, purchase or count inventory.');
       const templateRows=document.createElement('div');templateRows.style.cssText='display:grid;gap:8px;margin:12px 0';
-      for(const item of state.template_items||[]){const line=document.createElement('div');line.style.cssText='padding:10px;border:1px solid #dce3eb;border-radius:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap';const description=document.createElement('span');description.style.flex='1 1 280px';description.textContent=(item.part_number||'Unknown part')+' — '+(item.description||'Catalog item missing')+' · Min '+(item.minimum??'—')+' · Target '+(item.target??'—');line.append(description);
+      for(const item of state.template_items||[]){const line=document.createElement('div');line.style.cssText='padding:8px 12px;border:1px solid #dce3eb;border-radius:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fafcff';const description=document.createElement('span');description.style.flex='1 1 280px';description.textContent=(item.part_number||'Unknown part')+' — '+(item.description||'Catalog item missing')+' · Min '+(item.minimum??'—')+' · Target '+(item.target??'—');line.append(description);
         if(officeVanAccess){line.append(actionButton('Edit',()=>templateEditor.editItem(item)));line.append(actionButton('Remove',()=>{if(confirm('Remove part from future van templates? Existing vans and history remain unchanged.'))submit('/pds-van-stock/template/'+encodeURIComponent(item.part_id),'DELETE');}));}templateRows.append(line);}
       if(!(state.template_items||[]).length){templateRows.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'No standard template items yet.'}));}
       template.append(templateRows,templateEditor);main.append(template);
     }else{main.append(panel('Parts List is empty','Use “Add Part with Moses” above to create and review a part before adding it to van stock.'));}
     const low=parts.filter(p=>p.low);const warehouse=document.createElement('details');warehouse.className='card';
-    const whTitle=document.createElement('summary');whTitle.style.cssText='font-size:17px;font-weight:700;cursor:pointer';whTitle.textContent=`Warehouse Stock Alerts · ${low.length}`;warehouse.append(whTitle);
+    const whTitle=document.createElement('summary');whTitle.style.cssText='font-size:15px;font-weight:700;cursor:pointer';whTitle.textContent=`📦 Warehouse Stock Alerts · ${low.length} (also in Accounting → Inventory)`;warehouse.append(whTitle);
     if(!low.length){warehouse.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'No warehouse shortages currently flagged.'}));}
     for(const p of low){const line=document.createElement('div');line.className='jobrow';line.textContent=`${partLabel(p)} · ${p.warehouse} on hand · minimum ${p.minimum} · need ${p.needed}`;warehouse.append(line);}
     main.append(warehouse);

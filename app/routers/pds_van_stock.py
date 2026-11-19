@@ -12,7 +12,7 @@ import json
 import os
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 from pathlib import Path
 from typing import Literal, Optional
 
@@ -189,6 +189,7 @@ def _view(request: Request):
                           'catalog_missing': not bool(part)})
         rows.append({'employee_id': employee_id, 'employee_name': employee.get('name') or config.get('employee_name') or 'Unknown employee',
                      'vehicle': dict(config.get('vehicle') or {}) if office else {},
+                     'service_events': list(reversed((config.get('service_events') or [])[-50:])) if office else [],
                      'enabled': bool(config.get('enabled', True)), 'items': items,
                      'low_count': sum(1 for i in items if i['low'])})
     van_totals = {}
@@ -322,6 +323,49 @@ def save_vehicle(employee_id: str, payload: VehicleDetails, request: Request):
         _write(path, data)
     return {'ok': True, 'vehicle': van['vehicle']}
 
+
+
+class VehicleServiceEvent(BaseModel):
+    kind: Literal['service', 'repair', 'accident', 'inspection', 'note']
+    date: str = Field(min_length=10, max_length=10)
+    odometer: str = Field(default='', max_length=30)
+    provider: str = Field(default='', max_length=120)
+    notes: str = Field(min_length=2, max_length=1500)
+    request_id: str = Field(default='', max_length=100)
+
+
+@router.post('/vans/{employee_id}/service-events')
+def record_vehicle_service(employee_id: str, payload: VehicleServiceEvent, request: Request):
+    """Office-only immutable service/incident history; never posts accounting costs."""
+    actor = _guard(request, write=True)
+    try:
+        recorded_day = date.fromisoformat(payload.date).isoformat()
+    except ValueError as exc:
+        raise HTTPException(422, 'Enter a valid service date') from exc
+    if not payload.notes.strip():
+        raise HTTPException(422, 'Service or incident notes required')
+    event = {'id': uuid.uuid4().hex, 'kind': payload.kind, 'date': recorded_day,
+             'odometer': payload.odometer.strip(), 'provider': payload.provider.strip(),
+             'notes': payload.notes.strip(), 'created_at': datetime.now(timezone.utc).isoformat(),
+             'created_by': actor, 'request_id': payload.request_id.strip()}
+    with _locked(request):
+        path = _path(request)
+        data = _read(path)
+        van = data['vans'].get(employee_id)
+        if not van:
+            raise HTTPException(404, 'Van ticket does not exist')
+        events = van.setdefault('service_events', [])
+        if not isinstance(events, list) or len(events) >= 1000:
+            raise HTTPException(409, 'Vehicle history requires archival review')
+        if event['request_id']:
+            previous=next((e for e in events if e.get('request_id')==event['request_id']),None)
+            if previous:
+                if any(previous.get(k)!=event.get(k) for k in ('kind','date','odometer','provider','notes')):
+                    raise HTTPException(409, 'Vehicle history request ID was reused with different details')
+                return {'ok':True,'event':previous,'reused':True}
+        events.append(event)
+        _write(path, data)
+    return {'ok': True, 'event': event}
 
 @router.delete('/template/{part_id}')
 def remove_template_item(part_id: str, request: Request):

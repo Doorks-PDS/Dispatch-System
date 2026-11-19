@@ -1,0 +1,26 @@
+{
+  "base": "Doorks/Moses 5.43",
+  "patch": "Doorks/Moses 5.44",
+  "files": {
+    "static/app.js": {
+      "before": "5713a827335c1cb0a760988287ffb59c7ba0aec7a3a4a9039eec09cf0e70d885",
+      "after": "f8cefc6457d33b26cb59df2cae5628c3aa18b96adbd0b78b2cc0c5472c0a9755"
+    },
+    "app/routers/pds_van_stock.py": {
+      "before": "e56831d455e1b77b08680f7cf242bd6622530b9f60b93841e7bc3e148f5bcb5c",
+      "after": "66814a702e75641e3e51896c08c55ca7ba0c20397360d5c1863b48e67c173877"
+    },
+    "tests/test_pds_vehicle_flow_544.py": {
+      "before": null,
+      "after": "34f4a49793f84d16457b901d8b0d0cbccacf64292fbbd56d027d0d7bafd4bb4a"
+    },
+    "scripts/check_moses_544.py": {
+      "before": null,
+      "after": "91497f3eea26ad430429fae0914baeb7f4c16435cea080bfd9fc75e61ed7b71e"
+    },
+    "MOSES_544_RELEASE.md": {
+      "before": null,
+      "after": "2164df1afd1e91762af585bd0c61c796799e21ce6d948dbacda7537209d29e5f"
+    }
+  }
+}
