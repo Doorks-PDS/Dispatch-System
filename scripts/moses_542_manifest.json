@@ -1,0 +1,19 @@
+{
+  "base": "Doorks/Moses 5.41 patch over committed 5.40",
+  "before": {
+    "static/app.js": "6d665ab2a9cba52991f915c4abaf8838922e8663aeaed947369779fecbef8943",
+    "app/routers/pds_van_stock.py": "a4c84fa65df6f29f17ddccc999292cc987a354d760da5c14b183d24f5955f168",
+    "app/services/moses_agent.py": "605d51b3b23b5feada02fada8512bab09ad5a9b4bc1f4a525975fcadb2e1e727",
+    "tests/test_pds_van_stock_http_acceptance.py": "a2e81bf27f55a54577056dac9ab9b5b994f84e8850c6f9c489fca73c4a76de08"
+  },
+  "after": {
+    "static/app.js": "1ce64dcf71acf07effbd16e7337bec42f7a6e59caa91b6d689aca9e18d0cddcb",
+    "app/routers/pds_van_stock.py": "e7663c92bd40a82b59f42fcb39e344008a09e707efde32d12c111751af8c35e1",
+    "app/services/moses_agent.py": "655e545f38fb552a3284655cdb5dfaea55a16ced7c205b63ddefc15734a354ef",
+    "tests/test_pds_van_stock_http_acceptance.py": "ec7ea70584aac0f79e2739fb9cd262a9b052b5e5b4f035be4b6608fd927ccf11",
+    "tests/test_pds_van_completion_542.py": "9b0fd27b8faafd464c2b031f5a05af948efd854178d9accfeb57487453244ed1",
+    "tests/test_pds_van_completion_ui_542.py": "50ecd032b4f5a75782d0619d9854a59e3fada8b96daa4dde2a7710dcdd4e6f1c",
+    "scripts/check_moses_542.py": "fce4fb1a5529fd961508fb6b8ce76bbac01e6c9b03690543cd58e352dfcd4d14",
+    "MOSES_542_RELEASE.md": "0b91692043e3b4ece5a5f93099a1cb93c580b545bdeb7e9732f05bab83ca3754"
+  }
+}

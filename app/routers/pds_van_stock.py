@@ -7,6 +7,7 @@ part creation, payroll adjustments, purchases, or notification sends occur here.
 from __future__ import annotations
 
 import fcntl
+import hashlib
 import json
 import os
 import uuid
@@ -248,9 +249,8 @@ def template_item(payload: Threshold, request: Request):
     with _locked(request):
         path = _path(request); data = _read(path)
         data['template'][payload.part_id] = {'minimum': payload.minimum, 'target': payload.target}
-        # Applying a template adds missing items, never overwrites van-specific levels.
-        for van in data['vans'].values():
-            van['items'].setdefault(payload.part_id, dict(data['template'][payload.part_id]))
+        # Standard stock is a future-van setup template only. Existing van
+        # tickets retain their individual items and quantities unchanged.
         _write(path, data)
     return _view(request)
 
@@ -280,9 +280,7 @@ class Movement(BaseModel):
     request_id: str = Field(min_length=8, max_length=120)
 
 
-@router.post('/movements')
-def movement(payload: Movement, request: Request):
-    actor = _guard(request, write=True)
+def _apply_movement(payload: Movement, request: Request, actor: str):
     from app.routers.data import _pds_stock_balances
     with _locked(request):
         path = _path(request); data = _read(path)
@@ -333,3 +331,119 @@ def movement(payload: Movement, request: Request):
 def recent_events(request: Request, limit: int = 100):
     _guard(request)
     return {'ok': True, 'items': _read(_path(request))['events'][-max(1, min(limit, 500)):][::-1]}
+
+
+@router.post('/movements')
+def movement(payload: Movement, request: Request):
+    # Manual stock corrections and warehouse transfers remain office-only.
+    return _apply_movement(payload, request, _guard(request, write=True))
+
+
+class CompletionUsage(BaseModel):
+    job_id: str = Field(min_length=1, max_length=120)
+    form_id: str = Field(min_length=1, max_length=120)
+    employee_id: str = Field(min_length=1, max_length=120)
+    part_id: str = Field(min_length=1, max_length=120)
+    quantity: int = Field(ge=1, le=100000)
+
+
+@router.post('/completion-usage')
+def completion_usage(payload: CompletionUsage, request: Request):
+    """Record an explicitly selected part after its completion form is saved.
+
+    A single (form, van, part) can only be deducted once. Free text is never
+    parsed into inventory movements. Stock already left warehouse when loaded.
+    """
+    actor = _guard(request)
+    job = request.app.state.calendar_store.get_job(payload.job_id)
+    if not isinstance(job, dict):
+        raise HTTPException(404, 'Job not found')
+    forms = job.get('completion_forms') or []
+    saved = next((f for f in forms if isinstance(f, dict) and str(f.get('id')) == payload.form_id), None)
+    if saved is None:
+        raise HTTPException(404, 'Saved completion form not found on this job')
+    person = _people(request).get(payload.employee_id)
+    if not person:
+        raise HTTPException(404, 'Van technician is not active')
+    technician = str(saved.get('technician_name') or '').strip().casefold()
+    employee = str(person.get('name') or '').strip().casefold()
+    if not technician or technician != employee:
+        raise HTTPException(409, 'Saved completion form technician does not match the selected van')
+    # Only exact, structured usage entered on this form may affect stock.
+    # Never interpret arbitrary technician free-text notes as an inventory action.
+    recorded = next((line.partition(':')[2].strip() for line in
+                     str(saved.get('parts_used') or '').splitlines()
+                     if line.startswith('Van stock used:')), '')
+    matches = [segment.strip() for segment in recorded.split(';')]
+    if not any(segment.startswith(f'{payload.quantity} × ') and
+               segment.endswith(f'[{payload.part_id}]') for segment in matches):
+        raise HTTPException(409, 'Part and quantity not recorded in saved completion form')
+    role = getattr(request.state, 'auth_role', '')
+    if role not in ('office', 'office_admin'):
+        user = request.state.auth_user
+        username = str(user.get('name') or user.get('username') or '').strip().casefold()
+        if not username or username != employee:
+            raise HTTPException(403, 'Only your own van usage can be recorded')
+    # The deterministic request key prevents a second deduction from refresh,
+    # retries, or resubmission. A changed quantity instead produces 409.
+    source_key = f'{payload.job_id}:{payload.form_id}:{payload.employee_id}:{payload.part_id}'
+    request_key = 'completion:' + hashlib.sha256(source_key.encode('utf-8')).hexdigest()
+    reason = f'Completion {str(job.get("job_number") or payload.job_id)[:80]} / form {payload.form_id[:80]}'
+    item = Movement(employee_id=payload.employee_id, part_id=payload.part_id,
+                    quantity=payload.quantity, movement='used', reason=reason,
+                    request_id=request_key)
+    return _apply_movement(item, request, actor)
+
+
+class VanTransfer(BaseModel):
+    from_employee_id: str = Field(min_length=1, max_length=120)
+    to_employee_id: str = Field(min_length=1, max_length=120)
+    part_id: str = Field(min_length=1, max_length=120)
+    quantity: int = Field(ge=1, le=100000)
+    reason: str = Field(min_length=3, max_length=300)
+    request_id: str = Field(min_length=8, max_length=120)
+
+
+@router.post('/transfers')
+def van_to_van(payload: VanTransfer, request: Request):
+    """Atomic van-to-van movement; warehouse balance is unchanged."""
+    actor = _guard(request, write=True)
+    if payload.from_employee_id == payload.to_employee_id:
+        raise HTTPException(422, 'Choose a different destination van')
+    with _locked(request):
+        path = _path(request)
+        data = _read(path)
+        if payload.part_id not in _parts(request):
+            raise HTTPException(404, 'Part not in PDS Parts List')
+        source = data['vans'].get(payload.from_employee_id)
+        destination = data['vans'].get(payload.to_employee_id)
+        if not source or not destination or not source.get('enabled', True) or not destination.get('enabled', True):
+            raise HTTPException(404, 'Both van tickets must be active')
+        out_id = payload.request_id + ':out'
+        prior = next((e for e in data['events'] if e.get('request_id') == out_id), None)
+        if prior:
+            if (prior.get('employee_id') != payload.from_employee_id or
+                prior.get('counterparty') != payload.to_employee_id or
+                prior.get('part_id') != payload.part_id or
+                prior.get('quantity') != payload.quantity or
+                prior.get('reason') != payload.reason.strip()):
+                raise HTTPException(409, 'Transfer ID already used for different details')
+            return {'ok': True, 'duplicate': True, 'event_id': prior['id']}
+        balances, _ = _balances(data)
+        if balances.get((payload.from_employee_id, payload.part_id), 0) < payload.quantity:
+            raise HTTPException(409, 'Insufficient source van stock')
+        now = datetime.now(timezone.utc).isoformat()
+        common = {'part_id': payload.part_id, 'quantity': payload.quantity,
+                  'warehouse_delta': 0, 'reason': payload.reason.strip(),
+                  'actor': actor, 'created_at': now}
+        pair_id = uuid.uuid4().hex
+        out = dict(common, id=uuid.uuid4().hex, request_id=out_id,
+                   employee_id=payload.from_employee_id, counterparty=payload.to_employee_id,
+                   movement='transfer_out', delta=-payload.quantity, pair_id=pair_id)
+        into = dict(common, id=uuid.uuid4().hex, request_id=payload.request_id + ':in',
+                    employee_id=payload.to_employee_id, counterparty=payload.from_employee_id,
+                    movement='transfer_in', delta=payload.quantity, pair_id=pair_id)
+        data['events'].extend([out, into])
+        destination['items'].setdefault(payload.part_id, {'minimum': None, 'target': None})
+        _write(path, data)
+    return {'ok': True, 'duplicate': False, 'event_id': out['id']}

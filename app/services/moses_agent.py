@@ -232,7 +232,7 @@ def answer(request, message: str, history: list[dict[str, str]]) -> str:
         """
         if platform != 'pds':
             raise ValueError('PDS workspace required')
-        from app.routers.pds_van_stock import overview
+        from app.routers.pds_van_stock import overview, recent_events
         result = overview(request)
         vans = []
         for van in result['vans']:
@@ -251,9 +251,16 @@ def answer(request, message: str, history: list[dict[str, str]]) -> str:
              'quantity': item['warehouse'], 'minimum': item['minimum'], 'needed': item['needed']}
             for item in result['catalog'] if item['low']
         ]
+        movements = recent_events(request, limit=30).get('items', [])
         return json.dumps({'van_count': len(vans), 'vans': vans,
                            'alerts': result['alerts'], 'warehouse_shortages': warehouse_shortages[:100],
-                           'warehouse_shortages_truncated': len(warehouse_shortages) > 100})
+                           'warehouse_shortages_truncated': len(warehouse_shortages) > 100,
+                           'recent_stock_movements': [
+                               {'employee_id': e.get('employee_id'), 'part_id': e.get('part_id'),
+                                'quantity': e.get('quantity'), 'movement': e.get('movement'),
+                                'reason': e.get('reason'), 'created_at': e.get('created_at')}
+                               for e in movements],
+                           'movement_history_is_limited': True})
 
     @function_tool
     def get_pds_schedule_email_history(job_id: str) -> str:

@@ -45,8 +45,9 @@ def test_van_stock_http_transfer_reconcile_and_permissions(tmp_path, monkeypatch
         {'id':'initial','part_id':'part1','delta':10,'reason':'initial verified count'}
     ])
     with TestClient(app) as client:
-        assert client.post('/pds-van-stock/vans',json={'employee_id':'tech1'}).status_code==200
+        # Standard template applies on initial van creation, not retroactively.
         assert client.put('/pds-van-stock/template',json={'part_id':'part1','minimum':3,'target':5}).status_code==200
+        assert client.post('/pds-van-stock/vans',json={'employee_id':'tech1'}).status_code==200
         payload={'employee_id':'tech1','part_id':'part1','quantity':4,'movement':'load',
                  'reason':'restock test vehicle','request_id':'test-load-0001'}
         res=client.post('/pds-van-stock/movements',json=payload)
