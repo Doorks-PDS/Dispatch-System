@@ -89,6 +89,13 @@ def _people(request: Request):
         elif not linked:
             roster.append({'id': uid, 'login_user_id': uid, 'name': name,
                            'email': mail, 'role': role})
+    # New assignments should be limited to active sign-in accounts when the
+    # login directory is present. Employee rows without a working login remain
+    # in historical jobs, but are not offered as new scheduler choices.
+    if users_store is not None:
+        active_logins={str(u.get('id') or '') for u in users if isinstance(u,dict)
+                       and u.get('active') is not False and u.get('id')}
+        roster=[entry for entry in roster if entry.get('login_user_id') in active_logins]
     return roster
 
 

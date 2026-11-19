@@ -1,0 +1,50 @@
+{
+  "base": "Doorks/Moses 5.45",
+  "patch": "Doorks/Moses 5.46",
+  "files": {
+    "static/app.js": {
+      "before": "9a60917d5ba95c6afc2b63c25c3ced99513f73ff4f3f90e28f4e4a53fc2f4916",
+      "after": "4d935092b88aaaf9fd770b506de1b00ced78caef8332cd2f6d0fbe89fc866c05"
+    },
+    "app/routers/pds_scheduling.py": {
+      "before": "f8eec33adc0476d5639006500a07b559b138ad7f549c85bde67a0962100698f7",
+      "after": "c8b0c0cda29cdef99df9a92010c598514a87ede2de19e148e596f0be9a7210ca"
+    },
+    "app/routers/pds_van_stock.py": {
+      "before": "66814a702e75641e3e51896c08c55ca7ba0c20397360d5c1863b48e67c173877",
+      "after": "7153f9d04f12bdb5cd8e6a46ebedd19bb4fc55ace5ca0574dadbdd3065830fa3"
+    },
+    "app/services/moses_agent.py": {
+      "before": "655e545f38fb552a3284655cdb5dfaea55a16ced7c205b63ddefc15734a354ef",
+      "after": "641f601967f2ec52f9966ed464b1c30a253020b85566cb457c0f074ae8c02496"
+    },
+    "tests/test_moses_545_cumulative_workflows.py": {
+      "before": "6e6fe8d5224893c80bb7e67b6a38a9b126fbc2a5204714021a779a02d7db5c65",
+      "after": "c6ec803927f584721190c720852148787855fef28598c506f7a6f58b9c41def1"
+    },
+    "tests/test_pds_vehicle_flow_544.py": {
+      "before": "34f4a49793f84d16457b901d8b0d0cbccacf64292fbbd56d027d0d7bafd4bb4a",
+      "after": "4b65e47ef18ff26d2900a5897b24cfbc971b14691bcdc8ad55b8b17ab62f9400"
+    },
+    "tests/test_pds_van_stock_ticket_ui.py": {
+      "before": "bdbfca521bbe2353ea3b9a139344c2e80a47c5ce37568ff16f2e5229c7b8dbf0",
+      "after": "bdbfca521bbe2353ea3b9a139344c2e80a47c5ce37568ff16f2e5229c7b8dbf0"
+    },
+    "tests/test_moses_546_fleet_permissions_audit.py": {
+      "before": null,
+      "after": "f2ee8e4fe9a491dce5fbbb670cc4ddab1a79da244cc674c996a1d8555acb7196"
+    },
+    "tests/test_moses_546_web_search_config.py": {
+      "before": null,
+      "after": "be3e9227791b71b6a9e0402894baf936c543b8e907dd2c811c80a1310e0f288c"
+    },
+    "scripts/check_moses_546.py": {
+      "before": null,
+      "after": "24cdacabbbf55eec60a101440d2bc415d546ee72c532968dda796b3cc18284ca"
+    },
+    "MOSES_546_RELEASE.md": {
+      "before": null,
+      "after": "ebccd30af6fe9ad30077290a13a861ca5418811873e3f74146f67a810d6e2baf"
+    }
+  }
+}

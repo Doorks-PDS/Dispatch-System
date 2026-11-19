@@ -49,7 +49,7 @@ def test_vehicle_flow_ui_search_retries_and_inventory_table_exist():
     source=(Path(__file__).resolve().parents[1]/'static/app.js').read_text()
     for anchor in ('cf_existing_door_search','cf_existing_door_results','Search door ID, location',
                    'Use saved: ', 'Rejected proposal closed', '760) 233-5037', 'reception@prioritydoors.com',
-                   'Vehicle Flow', 'Fleet Info/Stock', 'Vehicle Info', 'service-events',
+                   'Fleet Hub', 'Fleet Info/Stock', 'Vehicle Info', 'service-events',
                    'Search part #, manufacturer, description or supplier', 'Low stock only',
                    'Stock Movement History', 'Show next '):
         assert anchor in source,anchor

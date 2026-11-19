@@ -1,0 +1,5 @@
+Correction: the previous 5.46 before-hash for app/services/moses_agent.py
+incorrectly referenced 5.40. It was changed again in 5.42.
+This archive has the correct 5.42/5.45 baseline SHA-256.
+No application source, tests, or documentation were modified.
+Run the BEFORE compatibility check prior to installation.

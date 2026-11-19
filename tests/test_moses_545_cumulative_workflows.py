@@ -76,10 +76,11 @@ def test_ui_has_all_cumulative_requested_workflows():
     for expected in ('🚚 Receiving','📦 Inventory', 'receiveFilter','Delete Unreceived PO',
                      'renderPdsBusinessSettingsHub','renderPdsAccountingSettingsHub',
                      'const currentFleetTotal=', 'Next Service - ',
-                     'head.hidden=true', 'Save Door Record', 'pds-ticket-action-panel',
+                     "head.style.display='none'", 'Save Door Record', 'pds-ticket-action-panel',
                      'door-logs/ai-preview','🎙 Dictate', 'Apply Reviewed Fields',
-                     'My Uploaded Receipts', "job_number"):
+                     'Last Upload', "job_number"):
         assert expected in js, expected
     assert 'Field Flow' in markup
     assert 'Office Flow' in markup and 'Job Flow' in markup
     assert 'Packing Slips / AI Upload' not in js
+    assert 'const refreshReceipts = async()=>{};' in js  # Field Flow cannot retrieve shared receipt history

@@ -34,6 +34,88 @@ def _guard(request: Request, *, write: bool = False):
     return str(user.get('name') or user.get('id') or 'office')[:120]
 
 
+
+def _actor_fields(request: Request) -> dict:
+    """Stable identity on every change, without publishing credentials or emails."""
+    user = getattr(request.state, 'auth_user', None) or {}
+    return {'actor': str(user.get('name') or user.get('username') or user.get('id') or 'Unknown staff')[:120],
+            'actor_user_id': str(user.get('id') or '')[:120],
+            'actor_role': str(getattr(request.state, 'auth_role', '') or '')[:32]}
+
+
+def _own_van(request: Request, employee_id: str) -> bool:
+    if getattr(getattr(request, 'state', None), 'auth_role', '') not in ('tech', 'lead'):
+        return False
+    # Match the authenticated login through the *active* PDS scheduling
+    # identity resolver. Never trust a name or employee ID supplied by the client.
+    from app.routers.pds_scheduling import _current_employee_id
+    user = getattr(request.state, 'auth_user', None)
+    if not isinstance(user, dict):
+        return False
+    try:
+        return str(_current_employee_id(request, user)) == str(employee_id)
+    except HTTPException:
+        return False
+
+
+def _van_write(request: Request, employee_id: str, *, office_only: bool = False) -> str:
+    actor = _guard(request)
+    if getattr(request.state, 'auth_role', '') in ('office', 'office_admin'):
+        return actor
+    if not office_only and _own_van(request, employee_id):
+        return actor
+    raise HTTPException(403, 'You can update only your assigned van; office authorization required for fleet administration')
+
+
+def _change(data: dict, request: Request, employee_id: str, action: str, description: str):
+    event = {'id': uuid.uuid4().hex, 'employee_id': str(employee_id), 'action': action,
+             'description': str(description)[:300], 'created_at': datetime.now(timezone.utc).isoformat(),
+             **_actor_fields(request)}
+    history = data.setdefault('change_history', [])
+    history.append(event)
+    if len(history) > 50000:
+        raise HTTPException(409, 'Fleet change history requires archival review')
+    return event
+
+
+def _movement_history(data: dict, parts: dict, people: dict, *, limit: int = 100, employee_id: str | None = None) -> list[dict]:
+    """Render ledger IDs as comprehensible, reconciled movement descriptions."""
+    balances: dict[tuple[str, str], int] = {}
+    result = []
+    for event in data.get('events', []):
+        van_id = str(event.get('employee_id') or '')
+        part_id = str(event.get('part_id') or '')
+        key = (van_id, part_id)
+        before = balances.get(key, 0)
+        try:
+            delta = int(event.get('delta', 0))
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(503, 'Van stock history requires review') from exc
+        after = before + delta
+        balances[key] = after
+        if employee_id is not None and employee_id != van_id:
+            continue
+        part = parts.get(part_id) or {}
+        number = str(part.get('part_number') or part_id)
+        name = str(people.get(van_id, {}).get('name') or data.get('vans', {}).get(van_id, {}).get('employee_name') or van_id)
+        other_id = str(event.get('counterparty') or '')
+        other_name = str(people.get(other_id, {}).get('name') or data.get('vans', {}).get(other_id, {}).get('employee_name') or other_id)
+        movement = str(event.get('movement') or '')
+        qty = event.get('quantity', abs(delta))
+        labels = {'load': f'Loaded {qty} × {number} into {name}’s van',
+                  'return': f'Returned {qty} × {number} from {name}’s van to warehouse',
+                  'used': f'Used {qty} × {number} from {name}’s van',
+                  'count': f'Physically counted {number} in {name}’s van: {after} on hand',
+                  'transfer_out': f'Transferred {qty} × {number} from {name} to {other_name}',
+                  'transfer_in': f'Received {qty} × {number} into {name}’s van from {other_name}'}
+        result.append({**event, 'employee_name': name, 'part_number': number,
+                       'part_description': str(part.get('description') or ''),
+                       'summary': labels.get(movement, f'{name}: {number} stock adjustment ({delta:+d})'),
+                       'quantity_before': before, 'quantity_after': after,
+                       'warehouse_effect': int(event.get('warehouse_delta', 0)),
+                       'performed_by': str(event.get('actor') or 'Legacy record — staff not recorded')})
+    return result[-max(1, min(limit, 500)):][::-1]
+
 def _path(request: Request) -> Path:
     root = getattr(request.app.state, 'data_dir', None)
     if not root:
@@ -42,7 +124,7 @@ def _path(request: Request) -> Path:
 
 
 def _initial() -> dict:
-    return {'version': 2, 'template': {}, 'vans': {}, 'events': [], 'source_reviews': {}, 'review_history': []}
+    return {'version': 3, 'template': {}, 'vans': {}, 'events': [], 'source_reviews': {}, 'review_history': [], 'change_history': []}
 
 
 def _read(path: Path) -> dict:
@@ -54,7 +136,8 @@ def _read(path: Path) -> dict:
             raise ValueError('invalid stock data')
         data.setdefault('source_reviews', {})
         data.setdefault('review_history', [])
-        if not isinstance(data['source_reviews'], dict) or not isinstance(data['review_history'], list):
+        data.setdefault('change_history', [])
+        if not isinstance(data['source_reviews'], dict) or not isinstance(data['review_history'], list) or not isinstance(data['change_history'], list):
             raise ValueError('invalid source review data')
         if len(data['events']) > 200000:
             raise ValueError('ledger too large to load')
@@ -187,9 +270,16 @@ def _view(request: Request):
                           'manufacturer': part.get('manufacturer', part.get('Manufacturer', '')),
                           'low': _low(count, minimum), 'needed': max(0, (target if target is not None else minimum or 0) - count) if _low(count, minimum) else 0,
                           'catalog_missing': not bool(part)})
+        owner = _own_van(request, employee_id) if not office else False
+        vehicle = dict(config.get('vehicle') or {}) if office or owner else {}
+        if not office:  # Never expose policy information to field accounts.
+            for field in ('insurance_policy', 'insurance_carrier', 'vin'):
+                vehicle.pop(field, None)
         rows.append({'employee_id': employee_id, 'employee_name': employee.get('name') or config.get('employee_name') or 'Unknown employee',
-                     'vehicle': dict(config.get('vehicle') or {}) if office else {},
-                     'service_events': list(reversed((config.get('service_events') or [])[-50:])) if office else [],
+                     'vehicle': vehicle,
+                     'service_events': list(reversed((config.get('service_events') or [])[-50:])) if office or owner else [],
+                     'can_edit': office or owner, 'can_edit_vehicle': office,
+                     'recent_movements': _movement_history(data, parts, people, limit=15, employee_id=employee_id) if office or owner else [],
                      'enabled': bool(config.get('enabled', True)), 'items': items,
                      'low_count': sum(1 for i in items if i['low'])})
     van_totals = {}
@@ -247,10 +337,12 @@ def set_up_van(payload: VanSetup, request: Request):
         row = data['vans'].get(payload.employee_id)
         if row:
             row['enabled'] = payload.enabled
+            _change(data, request, payload.employee_id, 'van_status_changed', 'Enabled van' if payload.enabled else 'Disabled van')
         else:
             row = {'employee_name': person.get('name', ''), 'enabled': payload.enabled,
                    'items': dict(data['template']) if payload.use_template else {}}
             data['vans'][payload.employee_id] = row
+            _change(data, request, payload.employee_id, 'van_created', f'Created van for {person.get("name", payload.employee_id)}')
         _write(path, data)
     return _view(request)
 
@@ -271,6 +363,7 @@ def template_item(payload: Threshold, request: Request):
     with _locked(request):
         path = _path(request); data = _read(path)
         data['template'][payload.part_id] = {'minimum': payload.minimum, 'target': payload.target}
+        _change(data, request, '', 'template_updated', f'Updated standard part {payload.part_id}: minimum {payload.minimum}, target {payload.target}')
         # Standard stock is a future-van setup template only. Existing van
         # tickets retain their individual items and quantities unchanged.
         _write(path, data)
@@ -279,7 +372,7 @@ def template_item(payload: Threshold, request: Request):
 
 @router.put('/vans/{employee_id}/items')
 def van_item(employee_id: str, payload: Threshold, request: Request):
-    _guard(request, write=True)
+    _van_write(request, employee_id)
     if payload.part_id not in _parts(request):
         raise HTTPException(404, 'Part not in PDS Parts List')
     if payload.minimum is not None and payload.target is not None and payload.target < payload.minimum:
@@ -289,6 +382,7 @@ def van_item(employee_id: str, payload: Threshold, request: Request):
         if employee_id not in data['vans']:
             raise HTTPException(404, 'Set up this employee van first')
         data['vans'][employee_id]['items'][payload.part_id] = {'minimum': payload.minimum, 'target': payload.target}
+        _change(data, request, employee_id, 'van_item_updated', f'Updated {payload.part_id}: minimum {payload.minimum}, target {payload.target}')
         _write(path, data)
     return _view(request)
 
@@ -319,6 +413,7 @@ def save_vehicle(employee_id: str, payload: VehicleDetails, request: Request):
             raise HTTPException(404, 'Van ticket does not exist')
         van['vehicle'] = {k: v.strip() for k, v in payload.model_dump().items()}
         van['vehicle_updated_by'] = actor
+        _change(data, request, employee_id, 'vehicle_updated', 'Updated fleet vehicle information')
         van['vehicle_updated_at'] = datetime.now(timezone.utc).isoformat()
         _write(path, data)
     return {'ok': True, 'vehicle': van['vehicle']}
@@ -336,8 +431,8 @@ class VehicleServiceEvent(BaseModel):
 
 @router.post('/vans/{employee_id}/service-events')
 def record_vehicle_service(employee_id: str, payload: VehicleServiceEvent, request: Request):
-    """Office-only immutable service/incident history; never posts accounting costs."""
-    actor = _guard(request, write=True)
+    """Immutable service/incident history; owner or office may record entries."""
+    actor = _van_write(request, employee_id)
     try:
         recorded_day = date.fromisoformat(payload.date).isoformat()
     except ValueError as exc:
@@ -347,7 +442,7 @@ def record_vehicle_service(employee_id: str, payload: VehicleServiceEvent, reque
     event = {'id': uuid.uuid4().hex, 'kind': payload.kind, 'date': recorded_day,
              'odometer': payload.odometer.strip(), 'provider': payload.provider.strip(),
              'notes': payload.notes.strip(), 'created_at': datetime.now(timezone.utc).isoformat(),
-             'created_by': actor, 'request_id': payload.request_id.strip()}
+             'created_by': actor, 'request_id': payload.request_id.strip(), **_actor_fields(request)}
     with _locked(request):
         path = _path(request)
         data = _read(path)
@@ -364,6 +459,7 @@ def record_vehicle_service(employee_id: str, payload: VehicleServiceEvent, reque
                     raise HTTPException(409, 'Vehicle history request ID was reused with different details')
                 return {'ok':True,'event':previous,'reused':True}
         events.append(event)
+        _change(data, request, employee_id, 'service_recorded', f'{payload.kind.title()} on {recorded_day}: {payload.notes[:120]}')
         _write(path, data)
     return {'ok': True, 'event': event}
 
@@ -375,13 +471,14 @@ def remove_template_item(part_id: str, request: Request):
         if part_id not in data['template']:
             raise HTTPException(404, 'Template item not found')
         del data['template'][part_id]
+        _change(data, request, '', 'template_removed', f'Removed {part_id} from future standard template')
         _write(path, data)
     return {'ok': True, 'removed': part_id, 'existing_vans_unchanged': True}
 
 
 @router.delete('/vans/{employee_id}/items/{part_id}')
 def remove_van_item(employee_id: str, part_id: str, request: Request):
-    _guard(request, write=True)
+    _van_write(request, employee_id)
     with _locked(request):
         path = _path(request); data = _read(path)
         van = data['vans'].get(employee_id)
@@ -391,6 +488,7 @@ def remove_van_item(employee_id: str, part_id: str, request: Request):
         if balances.get((employee_id, part_id), 0) != 0:
             raise HTTPException(409, 'Move or reconcile existing stock before removing this part')
         del van['items'][part_id]
+        _change(data, request, employee_id, 'van_item_removed', f'Removed {part_id} from van setup (zero on hand)')
         _write(path, data)
     return {'ok': True, 'removed': part_id, 'ledger_preserved': True}
 
@@ -443,7 +541,7 @@ def reconciliation(request: Request):
     return {'ok': True, 'items': view['catalog'], 'counts': {'pending_source_review': sum(
         1 for e in counted if e['source_status'] == 'unverified')},
         'physical_count_sources': counted[:300], 'source_rows_truncated': len(counted) > 300,
-        'recent_movements': data['events'][-100:][::-1],
+        'recent_movements': _movement_history(data, _parts(request), _people(request)),
         'financial_values_posted': False, 'warehouse_van_totals_are_quantities_only': True}
 
 
@@ -497,7 +595,7 @@ def _apply_movement(payload: Movement, request: Request, actor: str):
                  'quantity': payload.quantity, 'movement': payload.movement,
                  'source_status': source_status,
                  'delta': delta, 'warehouse_delta': warehouse_delta,
-                 'reason': payload.reason.strip(), 'actor': actor,
+                 'reason': payload.reason.strip(), **_actor_fields(request),
                  'created_at': datetime.now(timezone.utc).isoformat()}
         data['events'].append(event)
         van['items'].setdefault(payload.part_id, {'minimum': None, 'target': None})
@@ -508,13 +606,37 @@ def _apply_movement(payload: Movement, request: Request, actor: str):
 @router.get('/events')
 def recent_events(request: Request, limit: int = 100):
     _guard(request)
-    return {'ok': True, 'items': _read(_path(request))['events'][-max(1, min(limit, 500)):][::-1]}
+    data = _read(_path(request))
+    role = getattr(request.state, 'auth_role', '')
+    owner = None
+    if role in ('tech', 'lead'):
+        from app.routers.pds_scheduling import _current_employee_id
+        owner = _current_employee_id(request, request.state.auth_user)
+    return {'ok': True, 'items': _movement_history(data, _parts(request), _people(request), limit=limit, employee_id=owner)}
+
+
+@router.get('/history')
+def change_history(request: Request, limit: int = 100):
+    _guard(request)
+    data = _read(_path(request))
+    rows = data.get('change_history', [])
+    if getattr(request.state, 'auth_role', '') in ('tech', 'lead'):
+        from app.routers.pds_scheduling import _current_employee_id
+        owner = _current_employee_id(request, request.state.auth_user)
+        rows = [row for row in rows if row.get('employee_id') == owner]
+    return {'ok': True, 'items': rows[-max(1, min(limit, 300)):][::-1]}
+
 
 
 @router.post('/movements')
 def movement(payload: Movement, request: Request):
-    # Manual stock corrections and warehouse transfers remain office-only.
-    return _apply_movement(payload, request, _guard(request, write=True))
+    # Field staff may record only *their own* van's actual usage or count.
+    # Warehouse transfers and inter-van transfers remain office-managed.
+    if payload.movement in ('load', 'return'):
+        actor = _guard(request, write=True)
+    else:
+        actor = _van_write(request, payload.employee_id)
+    return _apply_movement(payload, request, actor)
 
 
 class CompletionUsage(BaseModel):
@@ -613,7 +735,7 @@ def van_to_van(payload: VanTransfer, request: Request):
         now = datetime.now(timezone.utc).isoformat()
         common = {'part_id': payload.part_id, 'quantity': payload.quantity,
                   'warehouse_delta': 0, 'reason': payload.reason.strip(),
-                  'actor': actor, 'created_at': now}
+                  **_actor_fields(request), 'created_at': now}
         pair_id = uuid.uuid4().hex
         out = dict(common, id=uuid.uuid4().hex, request_id=out_id,
                    employee_id=payload.from_employee_id, counterparty=payload.to_employee_id,
