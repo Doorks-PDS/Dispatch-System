@@ -6330,7 +6330,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
     if (["Quote", "Complete/Quote"].includes(String(job.status || ""))) {
       const qt = document.createElement("button");
       qt.className = "btn";
-      qt.textContent = "Edit";
+      qt.textContent = "Quote Tracking";
       qt.addEventListener("click", () => promptUpdateQuoteTracking(job, async () => {
         const updated = await apiGetJob(job.id);
         renderJobDetails(container, updated, ctx);
@@ -6341,7 +6341,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
     actions.appendChild(primaryActions);
     if (secondaryActions.childNodes.length) actions.appendChild(secondaryActions);
-
+    actions.classList.add('pds-ticket-action-panel');
+    actions.style.cssText='border:1px solid #dfe5eb;border-radius:12px;background:#f8fafc;padding:10px 12px;margin:12px 0;display:grid;gap:7px';
+    const actionHeading=document.createElement('strong');actionHeading.textContent='Job Actions';actionHeading.style.cssText='font-size:12px;color:#506073;letter-spacing:.04em;text-transform:uppercase';
+    actions.prepend(actionHeading);
 
     // Preserve original field controls (including five existing inline editors).
     // This is a visual wrapper only; it never writes or copies ticket data.
@@ -9602,11 +9605,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       {id:'manual-ledger',icon:'🧾',label:'Supplier Bills & Payments',description:'Record supplier bills, payments sent and customer payments received. Manual records; no bank settlement.'},
       {id:'stock',icon:'📦',label:'Inventory & Receiving',description:'Materials, receiving and supplier records.'},
       {id:'receipts',icon:'🧾',label:'Receipts & Statements',description:'One view of existing PDS receipts and accounting statements, with original documents.'},
-      {id:'categories',icon:'🏷️',label:'Categories',description:'Manage expense classifications.'},
-      {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'}
+      {id:'employees',icon:'👷',label:'Employees',description:'Manage existing employee and user records.'},
+      {id:'settings',icon:'⚙️',label:'Accounting Settings',description:'Expense categories, receipt controls and inventory settings.'}
     ];
     if(isHub){
-      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='employees'?renderEmployeesView():x.id==='payables'?renderAccountsPayable('pds'):x.id==='manual-ledger'?renderManualAccountingLedger('pds','bills'):x.id==='stock'?renderPoReceiving('pds',()=>renderAccountingView('hub')):x.id==='vault'?renderDocumentVault('pds','',()=>renderAccountingView('hub')):renderAccountingView(x.id)})));
+      makeHubCards(workspaceBody.querySelector('#pdsAcctHubCards'),sections.map(x=>({...x,open:()=>x.id==='settings'?renderPdsAccountingSettingsHub():x.id==='employees'?renderEmployeesView():x.id==='payables'?renderAccountsPayable('pds'):x.id==='manual-ledger'?renderManualAccountingLedger('pds','bills'):x.id==='stock'?renderPoReceiving('pds',()=>renderAccountingView('hub')):x.id==='vault'?renderDocumentVault('pds','',()=>renderAccountingView('hub')):renderAccountingView(x.id)})));
       try{const alerts=await fetchJSON('/pds-van-stock');const qty=Number(alerts.alerts?.warehouse||0);if(qty){const target=[...workspaceBody.querySelectorAll('button')].find(b=>b.textContent.includes('Inventory & Receiving'));if(target){const flag=document.createElement('strong');flag.textContent=` ⚠ ${qty} to reorder`;flag.style.color='#a94d00';target.append(flag);}}}catch(_){}
     }else{
       workspaceBody.querySelector('#pdsAcctSectionTitle').textContent=sections.find(x=>x.id===section)?.label||'Accounting';
@@ -9959,7 +9962,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       try {
         const result = await fetchJSON("/receipts");
         const items = result.items || [];
-        history.innerHTML = `<h3>Saved Receipts (${items.length})</h3>`;
+        history.innerHTML = `<h3>${['tech','lead'].includes(String(currentUser?.role||''))?'My Uploaded Receipts':'Saved Receipts'} (${items.length})</h3>`;
         if (!items.length) history.appendChild(Object.assign(document.createElement("div"), {className:"hint", textContent:"No receipts saved yet."}));
         for (const item of items) {
           const line = document.createElement("div");
@@ -13560,6 +13563,28 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       {icon:'📑',label:'Documents & Compliance',description:'Insurance expiration and license information. File attachments planned.',open:show}
     ]);
   }
+  function renderPdsBusinessSettingsHub(){
+    setNavActive(primaryEstimateNav);setActiveChip('Office Flow');setWorkspace('Business Settings');clearWorkspaceActions();
+    workspaceBody.innerHTML='<section class="card" style="max-width:1100px;margin:auto"><h2>⚙️ PDS Business Settings</h2><p class="hint">Use the existing document and pricing settings. Saved estimates and invoices are not rewritten.</p><div id="pdsBusinessSettingsCards"></div><button type="button" class="btn" id="pdsBusinessSettingsBack">← Business Hub</button></section>';
+    makeHubCards(el('pdsBusinessSettingsCards'),[
+      {icon:'💵',label:'Pricing & Document Defaults',description:'Trip, fuel, labor, tax, terms and existing estimate/invoice billing settings.',open:()=>renderPricingSettingsView()},
+      {icon:'📄',label:'Estimate / Invoice Generator',description:'Review numbered document templates, pricing and sending controls.',open:()=>renderEstimatePage()},
+      {icon:'📎',label:'Business Documents',description:'Upload categorized records without issuing a numbered document.',open:()=>renderDocumentVault('pds','',renderPdsBusinessSettingsHub,'business')}
+    ]);
+    el('pdsBusinessSettingsBack').onclick=renderEstimatePage;
+  }
+
+  function renderPdsAccountingSettingsHub(){
+    setNavActive(navAccounting);setActiveChip('Office Flow');setWorkspace('Accounting Settings');clearWorkspaceActions();
+    workspaceBody.innerHTML='<section class="card" style="max-width:1050px;margin:auto"><h2>⚙️ PDS Accounting Settings</h2><p class="hint">Existing saved classifications and inventory policies. Settings do not create bank, tax or expense transactions.</p><div id="pdsAccountingSettingsCards"></div><button type="button" class="btn" id="pdsAccountingSettingsBack">← Accounting Hub</button></section>';
+    makeHubCards(el('pdsAccountingSettingsCards'),[
+      {icon:'🏷️',label:'Expense Categories',description:'Manage the categories used in receipts and expenses.',open:()=>renderAccountingView('categories')},
+      {icon:'📦',label:'Inventory & Receiving',description:'Review stock minimums, movement history and outstanding receipts.',open:()=>renderPoReceiving('pds',renderPdsAccountingSettingsHub)},
+      {icon:'🧾',label:'Receipt Controls',description:'Review office authorization and saved receipts.',open:()=>renderAccountingView('receipts')}
+    ]);
+    el('pdsAccountingSettingsBack').onclick=()=>renderAccountingView('hub');
+  }
+
   function renderEstimatePage() {
     setNavActive(primaryEstimateNav);
     setActiveChip("Office Flow");
@@ -13598,10 +13623,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       {icon:'📋',label:'Estimates',description:'Search and manage saved estimates.',open:()=>btnEst.click()},
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
-      {icon:'📎',label:'Document Library & AI Upload',description:'Upload receipts, packing slips, bills and statements separately.',open:()=>renderDocumentVault('pds','',()=>renderEstimatePage())},
       {icon:'👥',label:'Customers & Contacts',description:'Open the existing PDS customer and contact database.',open:()=>renderCustomersView()},
       {icon:'🏢',label:'Suppliers',description:'Manage PDS supplier records.',open:()=>renderPdsVendorHub()},
-      {icon:'🧰',label:'Parts List',description:'Search parts, prices and preferred suppliers.',open:()=>renderPartsListView()}
+      {icon:'🧰',label:'Parts List',description:'Search parts, prices and preferred suppliers.',open:()=>renderPartsListView()},
+      {icon:'⚙️',label:'Business Settings',description:'Document pricing, tax and default billing terms.',open:()=>renderPdsBusinessSettingsHub()},
+      {icon:'📎',label:'Document Library & AI Upload',description:'Estimates, invoices, POs, packing slips, parts and supplier documents; uploads are reviewed references.',open:()=>renderDocumentVault('pds','',()=>renderEstimatePage(),'business')}
     ]);
     const businessBack=document.createElement('button');businessBack.className='btn';businessBack.type='button';businessBack.textContent='← Business Hub';businessBack.style.margin='0 0 12px';businessBack.hidden=true;
     const body = document.createElement("div");
@@ -13725,23 +13751,27 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     if(platform!=='pds'&&activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — '+(libraryScope==='business'?'Business':'Accounting')+' Document Library');
     workspaceBody.innerHTML=`<div class="card" style="max-width:1200px;margin:auto;display:grid;gap:15px">
-      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">${libraryScope==='business'?'Business Document Library':'Accounting Document Library'}</h2><p class="hint">Search and organize documents by type. AI suggestions require review; uploads do not automatically post accounting transactions.</p></div><button class="btn" id="dvBack">← Back to Hub</button></div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap"><select id="dvFilter" class="input"><option value="">All Documents</option><option value="receipt">Receipts</option><option value="packing_slip">Packing Slips</option><option value="vendor_bill">Vendor Bills</option><option value="statement">Statements</option><option value="other">Other Documents / Contracts</option></select><input id="dvSearch" class="input" type="search" placeholder="Search all documents by supplier, PO, number, date or notes…" style="flex:1;min-width:190px"><button class="btn btn-orange" id="dvNew">+ Upload / Add Document</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap"><div><h2 style="margin:0">${libraryScope==='business'?'Business Document Library':'Accounting Document Library'}</h2><p class="hint">Search and organize documents by type. AI suggestions require review; uploads do not automatically post accounting transactions.</p></div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="btn" id="dvAddPart" type="button" hidden>✨ Add Part with Moses</button><button class="btn" id="dvBack">← Back to Hub</button></div></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap"><select id="dvFilter" class="input"><option value="">All Documents</option><option value="receipt">Receipts</option><option value="packing_slip">Packing Slips</option><option value="vendor_bill">Vendor Bills</option><option value="statement">Statements</option><option value="estimate">Estimate Attachments</option><option value="invoice">Invoice Attachments</option><option value="purchase_order">Purchase Order Attachments</option><option value="part_reference">Parts / Product References</option><option value="supplier_document">Supplier Documents</option><option value="customer_document">Customer Documents</option><option value="other">Other Documents / Contracts</option></select><input id="dvSearch" class="input" type="search" placeholder="Search all documents by supplier, PO, number, date or notes…" style="flex:1;min-width:190px"><button class="btn btn-orange" id="dvNew">+ Upload / Add Document</button></div>
       <div id="dvList">Loading…</div>
-      <section id="dvEditor" hidden style="border:1px solid #d9dee7;border-radius:14px;padding:16px"><h3>New Document</h3><form id="dvForm" style="display:grid;gap:12px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"><label>Document Type<select name="document_type" class="input"><option value="receipt">Receipt</option><option value="packing_slip">Packing Slip</option><option value="vendor_bill">Vendor Bill</option><option value="statement">Statement</option><option value="other">Other / Contract / Estimate / Invoice / PO</option></select></label><label>Supplier / Vendor<input class="input" name="vendor"></label><label>Document #<input class="input" name="document_number"></label><label>Date<input class="input" name="document_date" type="date"></label><label>Related PO #<input class="input" name="po_number"></label></div>
+      <section id="dvEditor" hidden style="border:1px solid #d9dee7;border-radius:14px;padding:16px"><h3>New Document</h3><form id="dvForm" style="display:grid;gap:12px"><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px"><label>Document Type<select name="document_type" class="input"><option value="receipt">Receipt</option><option value="packing_slip">Packing Slip</option><option value="vendor_bill">Vendor Bill</option><option value="statement">Statement</option><option value="estimate">Estimate attachment</option><option value="invoice">Invoice attachment</option><option value="purchase_order">Purchase order attachment</option><option value="part_reference">Part / product reference</option><option value="supplier_document">Supplier document</option><option value="customer_document">Customer document</option><option value="other">Other / contract</option></select></label><label>Supplier / Vendor<input class="input" name="vendor"></label><label>Document #<input class="input" name="document_number"></label><label>Date<input class="input" name="document_date" type="date"></label><label>Related PO #<input class="input" name="po_number"></label><label>Related Job #<input class="input" name="job_number" placeholder="Optional saved job reference"></label></div>
       <details open style="border:1px solid #d9dee7;border-radius:10px;padding:12px"><summary style="cursor:pointer;font-weight:700">✨ AI Import — Upload or Paste Text</summary><div style="display:grid;gap:10px;margin-top:12px"><label>Upload PDF or image<input class="input" name="file" type="file" accept=".pdf,.png,.jpg,.jpeg,.webp"></label><label>Or paste document text<textarea class="input" name="paste" rows="4" placeholder="Paste the packing slip, receipt, statement or bill text here…"></textarea></label><button class="btn" type="button" id="dvAnalyze">Analyze & Suggest Fields</button><p class="hint" id="dvAiStatus">AI results require review. File extraction needs the configured OpenAI API key.</p></div></details>
       <label>Notes / Extracted Text<textarea class="input" name="notes" rows="3" placeholder="Original text or review notes"></textarea></label><div style="display:flex;gap:8px"><button class="btn btn-orange" type="submit" id="dvSave">Save Document</button><button class="btn" type="button" id="dvCancel">Cancel</button></div><p id="dvStatus" role="status"></p></form></section>
     </div>`;
     const q=id=>el(id),form=q('dvForm');let records=[];
     q('dvBack').onclick=()=>backAction?backAction():platform==='pds'?renderAccountingView('hub'):renderBusinessHub(platform);
-    q('dvFilter').value=initialType; if(libraryScope==='business'){q('dvFilter').querySelector('[value=receipt]')?.remove();q('dvFilter').querySelector('[value=statement]')?.remove();q('dvFilter').querySelector('[value=vendor_bill]')?.remove();}else{q('dvFilter').querySelector('[value=other]')?.remove();}
-    const types={receipt:'Receipt',packing_slip:'Packing Slip',vendor_bill:'Vendor Bill',statement:'Statement',other:'Other'};
-    function draw(){const filter=q('dvFilter').value,search=q('dvSearch').value.toLowerCase(),host=q('dvList');host.replaceChildren();const matching=records.filter(x=>(!filter||x.document_type===filter)&&(!search||[x.vendor,x.document_number,x.po_number,x.document_date,x.original_filename,x.notes].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`${matching.length} document(s) · ${filter?types[filter]:'All types'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.className='card';card.style.margin='8px 0';const title=document.createElement('strong');title.textContent=(types[item.document_type]||'Document')+' · '+(item.vendor||'Unspecified supplier')+' · '+(item.document_number||'No number');const meta=document.createElement('p');meta.className='hint';meta.textContent=[item.document_date,item.po_number?'PO '+item.po_number:'',item.original_filename||'',item.review_status].filter(Boolean).join(' · ');card.append(title,meta);if(item.attachment){const url='/document-vault/'+platform+'/'+encodeURIComponent(item.id)+'/file';const imageFile=/\.(png|jpe?g|gif|webp|bmp)$/i.test(item.original_filename||'');const view=document.createElement('button');view.className='btn';view.textContent='View Details';view.onclick=()=>{const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;z-index:12000;background:#17213388;display:flex;justify-content:flex-end';const drawer=document.createElement('aside');drawer.style.cssText='background:white;width:min(720px,100vw);height:100%;overflow:auto;padding:24px;box-sizing:border-box';const heading=document.createElement('h2');heading.textContent=(types[item.document_type]||'Document')+' · '+(item.document_number||item.vendor||'Record');const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>backdrop.remove();drawer.append(heading,close);for(const [label,value] of [['Supplier',item.vendor],['Document number',item.document_number],['Date',item.document_date],['Purchase order',item.po_number],['Original file',item.original_filename],['Review status',item.review_status],['Notes',item.notes]]){if(!value)continue;const row=document.createElement('p');row.style.cssText='border-bottom:1px solid #e1e5eb;padding:12px 0;overflow-wrap:anywhere';const name=document.createElement('strong');name.textContent=label+': ';row.append(name,document.createTextNode(String(value)));drawer.append(row);}if(imageFile){const image=document.createElement('img');image.src=url;image.alt=item.original_filename||'Document preview';image.style.cssText='width:100%;max-height:520px;object-fit:contain;border-radius:12px';drawer.append(image);}const download=document.createElement('a');download.className='btn';download.href=url;download.target='_blank';download.rel='noopener';download.textContent='Open / Download Original';drawer.append(download);backdrop.append(drawer);backdrop.ondblclick=e=>{if(e.target===backdrop)backdrop.remove()};document.body.append(backdrop);};card.append(view);if(imageFile){const image=document.createElement('img');image.src=url;image.alt=item.original_filename||'Document preview';image.loading='lazy';image.style.cssText='display:block;max-width:220px;max-height:150px;object-fit:contain;border-radius:10px;margin:10px 0';card.append(image);}}if(item.notes){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Notes';const body=document.createElement('p');body.textContent=item.notes;details.append(summary,body);card.append(details);}host.append(card);}}
+    if(platform==='pds'&&libraryScope==='business'){
+      const partEntry=q('dvAddPart');partEntry.hidden=false;
+      partEntry.onclick=()=>{renderPartsListView();document.querySelector('#parts_add')?.click();};
+    }
+    q('dvFilter').value=initialType; if(libraryScope==='business'){/* Business documents may include receipts, packing slips and reference copies for numbered documents. */}else{q('dvFilter').querySelector('[value=other]')?.remove();}
+    const types={receipt:'Receipt',packing_slip:'Packing Slip',vendor_bill:'Vendor Bill',statement:'Statement',estimate:'Estimate attachment',invoice:'Invoice attachment',purchase_order:'PO attachment',part_reference:'Part reference',supplier_document:'Supplier document',customer_document:'Customer document',other:'Other'};
+    function draw(){const filter=q('dvFilter').value,search=q('dvSearch').value.toLowerCase(),host=q('dvList');host.replaceChildren();const matching=records.filter(x=>(!filter||x.document_type===filter)&&(!search||[x.vendor,x.document_number,x.po_number,x.job_number,x.document_date,x.original_filename,x.notes].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`${matching.length} document(s) · ${filter?types[filter]:'All types'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.className='card';card.style.margin='8px 0';const title=document.createElement('strong');title.textContent=(types[item.document_type]||'Document')+' · '+(item.vendor||'Unspecified supplier')+' · '+(item.document_number||'No number');const meta=document.createElement('p');meta.className='hint';meta.textContent=[item.document_date,item.po_number?'PO '+item.po_number:'',item.original_filename||'',item.review_status].filter(Boolean).join(' · ');card.append(title,meta);if(item.attachment){const url='/document-vault/'+platform+'/'+encodeURIComponent(item.id)+'/file';const imageFile=/\.(png|jpe?g|gif|webp|bmp)$/i.test(item.original_filename||'');const view=document.createElement('button');view.className='btn';view.textContent='View Details';view.onclick=()=>{const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;z-index:12000;background:#17213388;display:flex;justify-content:flex-end';const drawer=document.createElement('aside');drawer.style.cssText='background:white;width:min(720px,100vw);height:100%;overflow:auto;padding:24px;box-sizing:border-box';const heading=document.createElement('h2');heading.textContent=(types[item.document_type]||'Document')+' · '+(item.document_number||item.vendor||'Record');const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>backdrop.remove();drawer.append(heading,close);for(const [label,value] of [['Supplier',item.vendor],['Document number',item.document_number],['Date',item.document_date],['Purchase order',item.po_number],['Related job',item.job_number],['Original file',item.original_filename],['Review status',item.review_status],['Notes',item.notes]]){if(!value)continue;const row=document.createElement('p');row.style.cssText='border-bottom:1px solid #e1e5eb;padding:12px 0;overflow-wrap:anywhere';const name=document.createElement('strong');name.textContent=label+': ';row.append(name,document.createTextNode(String(value)));drawer.append(row);}if(imageFile){const image=document.createElement('img');image.src=url;image.alt=item.original_filename||'Document preview';image.style.cssText='width:100%;max-height:520px;object-fit:contain;border-radius:12px';drawer.append(image);}const download=document.createElement('a');download.className='btn';download.href=url;download.target='_blank';download.rel='noopener';download.textContent='Open / Download Original';drawer.append(download);backdrop.append(drawer);backdrop.ondblclick=e=>{if(e.target===backdrop)backdrop.remove()};document.body.append(backdrop);};card.append(view);if(imageFile){const image=document.createElement('img');image.src=url;image.alt=item.original_filename||'Document preview';image.loading='lazy';image.style.cssText='display:block;max-width:220px;max-height:150px;object-fit:contain;border-radius:10px;margin:10px 0';card.append(image);}}if(item.notes){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Notes';const body=document.createElement('p');body.textContent=item.notes;details.append(summary,body);card.append(details);}host.append(card);}}
     q('dvFilter').onchange=draw;q('dvSearch').oninput=draw;
     q('dvNew').onclick=()=>{form.reset();form.elements.document_type.value=q('dvFilter').value||initialType||(libraryScope==='business'?'other':'receipt');q('dvEditor').hidden=false;q('dvStatus').textContent='';q('dvEditor').scrollIntoView({behavior:'smooth',block:'start'});};
     q('dvCancel').onclick=()=>q('dvEditor').hidden=true;
     q('dvAnalyze').onclick=async()=>{const status=q('dvAiStatus'),button=q('dvAnalyze'),file=form.elements.file.files[0],paste=form.elements.paste.value.trim();if(!file&&!paste){status.textContent='Select a file or paste text first.';return;}button.disabled=true;status.textContent='Analyzing…';try{let result;if(file){const fd=new FormData();fd.append('document_type',form.elements.document_type.value);fd.append('file',file);const response=await fetch('/document-vault/'+platform+'/preview-file',{method:'POST',body:fd,credentials:'same-origin'});result=await response.json();if(!response.ok)throw new Error(result.detail||'AI extraction failed');}else{result=await fetchJSON('/document-vault/'+platform+'/preview-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_type:form.elements.document_type.value,text:paste})});}for(const [key,value] of Object.entries(result.fields||{})){if(form.elements[key]&&value&&!form.elements[key].value)form.elements[key].value=value;}if(paste&&!form.elements.notes.value)form.elements.notes.value=paste.slice(0,4000);status.textContent=(result.source||'Suggestions')+' — '+(result.message||'Review before saving.');}catch(e){status.textContent=e.message||String(e);}finally{button.disabled=false;}};
-    form.onsubmit=async e=>{e.preventDefault();const save=q('dvSave');save.disabled=true;q('dvStatus').textContent='Saving…';try{const fd=new FormData();for(const name of ['document_type','vendor','document_number','document_date','po_number'])fd.append(name,form.elements[name].value);fd.append('notes',form.elements.notes.value||form.elements.paste.value.slice(0,4000));fd.append('library_scope',libraryScope);if(form.elements.file.files[0])fd.append('file',form.elements.file.files[0]);const response=await fetch('/document-vault/'+platform,{method:'POST',body:fd,credentials:'same-origin'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Save failed');q('dvEditor').hidden=true;await refresh();}catch(err){q('dvStatus').textContent=err.message||String(err);}finally{save.disabled=false;}};
+    form.onsubmit=async e=>{e.preventDefault();const save=q('dvSave');save.disabled=true;q('dvStatus').textContent='Saving…';try{const fd=new FormData();for(const name of ['document_type','vendor','document_number','document_date','po_number','job_number'])fd.append(name,form.elements[name].value);fd.append('notes',form.elements.notes.value||form.elements.paste.value.slice(0,4000));fd.append('library_scope',libraryScope);if(form.elements.file.files[0])fd.append('file',form.elements.file.files[0]);const response=await fetch('/document-vault/'+platform,{method:'POST',body:fd,credentials:'same-origin'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Save failed');q('dvEditor').hidden=true;await refresh();}catch(err){q('dvStatus').textContent=err.message||String(err);}finally{save.disabled=false;}};
     async function refresh(){const result=await fetchJSON('/document-vault/'+platform+'?library_scope='+encodeURIComponent(libraryScope));records=result.items||[];draw();}
     try{await refresh();}catch(err){q('dvList').textContent='Unable to load document library: '+(err.message||err);}
   }
@@ -13749,8 +13779,13 @@ function openEstimateDrawer(job, container = null, ctx = null) {
   async function renderPoReceiving(platform,backAction=null){
     if(platform!=='pds'&&activePlatform!==platform)return;
     clearWorkspaceActions();setWorkspace((platform==='pds'?'PDS':platform==='sdc'?'SDC':'Doorks')+' — Inventory & Receiving');
-    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Stock quantities combine the PDS Parts List, warehouse adjustments and assigned van balances; receiving and accounting values remain separate.</p></div><button class="btn" id="receiveBack">← Back</button></div><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="width:100%;margin:12px 0"><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips / AI Upload</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div><h3>Stock by SKU / Location</h3><div id="receiveStockTools"></div><div id="receiveStock" class="hint"></div><details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Stock Movement History</summary><div id="receiveAdjustments" class="hint"></div></details></div>';
-    el('receiveBack').onclick=()=>backAction?backAction():platform==='pds'?renderEstimatePage():renderBusinessHub(platform);
+    workspaceBody.innerHTML='<div class="card" style="max-width:1200px;margin:auto"><div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h2>Inventory & Receiving</h2><p class="hint">Receive purchase orders, review receiving history and track received stock. Stock quantities combine the PDS Parts List, warehouse adjustments and assigned van balances; receiving and accounting values remain separate.</p></div><button class="btn" id="receiveBack">← Back</button></div><nav aria-label="Inventory and receiving views" style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0"><button class="btn btn-orange" id="receiveInventoryTab" type="button">📦 Inventory</button><button class="btn" id="receiveReceivingTab" type="button">🚚 Receiving</button></nav><div style="display:flex;gap:8px;flex-wrap:wrap;margin:8px 0"><button class="btn" id="receivePacking">📎 Packing Slips</button><button class="btn" id="receiveReceipts">🧾 Receipts & Bills</button></div><section id="receiveInventoryPane"><h3>Stock by SKU / Location</h3><p class="hint">Search the Parts List, warehouse balances, assigned vans and reorder alerts.</p><div id="receiveStockTools"></div><div id="receiveStock" class="hint"></div><details style="margin-top:14px"><summary style="cursor:pointer;font-weight:700">Stock Movement History</summary><div id="receiveAdjustments" class="hint"></div></details></section><section id="receiveReceivingPane" hidden><h3>Purchase Order Receiving</h3><p class="hint">Pending deliveries are shown first. Completed purchase orders remain in the Received tab.</p><div style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0"><input class="input" id="receiveSearch" placeholder="Search PO or supplier…" style="flex:1;min-width:210px"><select class="input" id="receiveFilter" aria-label="Receiving status"><option value="pending">Pending / Partial</option><option value="all">All</option><option value="received">Received</option><option value="rejected">Rejected / Cancelled</option></select></div><div id="receiveOrders">Loading…</div><h3>Receiving History</h3><div id="receiveHistory"></div></section></div>';
+    el('receiveBack').onclick=()=>backAction?backAction():platform==='pds'?renderAccountingView('hub'):renderBusinessHub(platform);
+    const showReceivingTab=(receiving)=>{el('receiveInventoryPane').hidden=receiving;el('receiveReceivingPane').hidden=!receiving;
+      el('receiveInventoryTab').className='btn'+(!receiving?' btn-orange':'');el('receiveReceivingTab').className='btn'+(receiving?' btn-orange':'');};
+    el('receiveInventoryTab').onclick=()=>showReceivingTab(false);
+    el('receiveReceivingTab').onclick=()=>showReceivingTab(true);
+    showReceivingTab(false);
     el('receivePacking').onclick=()=>renderDocumentVault(platform,'packing_slip',()=>renderPoReceiving(platform,backAction));
     el('receiveReceipts').onclick=()=>renderDocumentVault(platform,'receipt',()=>renderPoReceiving(platform,backAction));
     let data={orders:[],events:[],received_stock_by_sku:{}},liveStock=null,stockAdjustments=[],pdsStock=null;
@@ -13774,12 +13809,19 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
     function draw(){
       const q=el('receiveSearch').value.toLowerCase().trim(),host=el('receiveOrders');host.replaceChildren();
-      for(const order of data.orders.filter(o=>[o.po_number,o.supplier,o.description].some(x=>String(x||'').toLowerCase().includes(q)))){
+      const statusChoice=el('receiveFilter').value;
+      const matchingOrders=data.orders.filter(o=>{
+        const status=String(o.receiving_status||'Pending').toLowerCase();
+        const isDone=status==='received',isRejected=status==='rejected'||status==='cancelled';
+        const visible=statusChoice==='all'||(statusChoice==='received'&&isDone)||(statusChoice==='rejected'&&isRejected)||(statusChoice==='pending'&&!isDone&&!isRejected);
+        return visible&&[o.po_number,o.supplier,o.description].some(x=>String(x||'').toLowerCase().includes(q));
+      });
+      for(const order of matchingOrders){
         const card=document.createElement('div');card.className='card';card.style.margin='8px 0';
         const title=document.createElement('strong');title.textContent=(order.po_number||'PO')+' — '+(order.supplier||'Supplier not specified');
         const info=document.createElement('p');info.className='hint';info.textContent='Ordered: '+order.ordered+' | Received: '+order.received+' | Outstanding: '+order.outstanding+' | '+order.receiving_status;
         card.append(title,info);
-        if(order.outstanding>0){
+        if(order.outstanding>0&&!['Rejected','Cancelled'].includes(order.receiving_status)){
           const button=document.createElement('button');button.className='btn btn-orange';button.textContent='+ Receive Delivery';card.append(button);
           button.onclick=()=>{
             const form=document.createElement('form');form.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-top:12px';
@@ -13794,9 +13836,16 @@ function openEstimateDrawer(job, container = null, ctx = null) {
               }catch(e){status.textContent=e.message||String(e);submit.disabled=false;}
             };card.append(form);button.remove();
           };
-        }host.append(card);
+        }
+        if(platform==='pds'&&String(currentUser?.role||'')==='office_admin'&&Number(order.received||0)===0){
+          const remove=document.createElement('button');remove.type='button';remove.className='btn';remove.style.marginLeft='8px';remove.textContent='Delete Unreceived PO';
+          remove.onclick=async()=>{if(!confirm('Permanently delete unreceived '+(order.po_number||'purchase order')+'? This cannot be undone. Use only for an incorrect/test PO; POs with receiving events cannot be deleted.'))return;
+            remove.disabled=true;try{await fetchJSON('/pds-purchase-orders/manage/pds/'+encodeURIComponent(order.po_id),{method:'DELETE'});await reload();}catch(err){alert('PO not deleted: '+(err.message||err));remove.disabled=false;}};
+          card.append(remove);
+        }
+        host.append(card);
       }
-      if(!host.children.length)host.textContent='No matching purchase orders.';
+      if(!host.children.length)host.textContent='No purchase orders match this status or search.';
       const history=el('receiveHistory');history.replaceChildren();
       for(const event of data.events.slice().reverse().slice(0,100)){
         const row=document.createElement('details');row.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:14px;margin:9px 0;background:#fff';
@@ -13856,7 +13905,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       if(platform==='pds'&&pdsStock){const note=document.createElement('p');note.className='hint';note.textContent='Quantities only — not costs, expenses or tax postings. Opening-count source reviews pending: '+pdsStock.counts.pending_source_review+'.';el('receiveStockTools').prepend(note);}
       if(!entries.length)stock.textContent='No stock or saved parts yet.';
     }
-    el('receiveSearch').oninput=draw;await reload();
+    el('receiveSearch').oninput=draw;el('receiveFilter').onchange=draw;await reload();
   }
   async function renderPdsPurchaseOrders(host) {
     return renderUnifiedPurchaseOrders('pds',false,()=>renderEstimatePage(),host);
@@ -14194,13 +14243,44 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       </div>
       <div style="margin-top:10px;"><div class="label">Notes</div><textarea id="dl_notes"></textarea></div>
       <div style="margin-top:12px; display:flex; gap:8px; flex-wrap:wrap;">
-        <button class="btn btn-orange" id="dl_save">Save Door Log</button>
+        <button class="btn btn-orange" id="dl_save" style="width:auto;max-width:max-content;min-height:42px;padding:10px 18px">Save Door Record</button>
         <button class="btn" id="dl_clear">Clear</button>
         <button class="btn" id="dl_print">Print Results</button>
       </div>
       <div style="margin-top:12px;"><input class="input" id="dl_search" placeholder="Search customer, address, door location, door ID, notes..." /></div>
       <div id="dl_list" style="display:grid; gap:8px; margin-top:12px;"></div>
     `;
+    // Moses-assisted door record intake is draft-only; no door is saved until Save Door Record.
+    const doorAi=document.createElement('details');doorAi.className='card';doorAi.style.cssText='padding:12px;margin:14px 0';
+    const doorAiTitle=document.createElement('summary');doorAiTitle.style.cssText='cursor:pointer;font-weight:750';doorAiTitle.textContent='✨ Moses Door Intake · Notes, voice, photo or PDF';doorAi.append(doorAiTitle);
+    const doorAiForm=document.createElement('div');doorAiForm.style.cssText='display:grid;gap:9px;margin-top:12px';
+    const aiNotes=document.createElement('textarea');aiNotes.className='input';aiNotes.rows=4;aiNotes.maxLength=16000;aiNotes.placeholder='Describe the opening, dictate your notes, or paste field observations…';
+    aiNotes.setAttribute('aria-label','Door intake notes');
+    const aiFile=document.createElement('input');aiFile.type='file';aiFile.className='input';aiFile.accept='.pdf,.png,.jpg,.jpeg,.webp';aiFile.setAttribute('aria-label','Door photo or PDF');
+    const aiActions=document.createElement('div');aiActions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+    const voice=document.createElement('button');voice.type='button';voice.className='btn';voice.textContent='🎙 Dictate';
+    voice.onclick=()=>{const Speech=window.SpeechRecognition||window.webkitSpeechRecognition;if(!Speech){aiStatus.textContent='Voice dictation unavailable in this browser. Type notes instead.';return;}
+      try{const recognition=new Speech();recognition.lang='en-US';recognition.interimResults=false;recognition.onresult=e=>{const transcript=Array.from(e.results).map(r=>r[0]?.transcript||'').join(' ');aiNotes.value=(aiNotes.value+' '+transcript).trim();};recognition.onerror=()=>{aiStatus.textContent='Microphone unavailable; type notes or upload a file.';};recognition.start();}catch(err){aiStatus.textContent='Unable to start microphone: '+(err.message||err);}};
+    const preview=document.createElement('button');preview.type='button';preview.className='btn';preview.textContent='✨ Read & Prepare Fields';
+    const apply=document.createElement('button');apply.type='button';apply.className='btn btn-orange';apply.textContent='Apply Reviewed Fields';apply.disabled=true;
+    const aiStatus=document.createElement('p');aiStatus.className='hint';aiStatus.setAttribute('role','status');
+    const review=document.createElement('pre');review.style.cssText='background:#f6f8fa;padding:12px;border-radius:9px;white-space:pre-wrap;word-break:break-word';review.hidden=true;
+    let suggested=null;
+    preview.onclick=async()=>{if(!aiNotes.value.trim()&&!aiFile.files?.length){aiStatus.textContent='Type, dictate or upload a source first.';return;}
+      const data=new FormData();data.append('notes_text',aiNotes.value);if(aiFile.files?.[0])data.append('file',aiFile.files[0]);
+      preview.disabled=true;apply.disabled=true;aiStatus.textContent='Moses is reading the source…';
+      try{const response=await fetch('/door-logs/ai-preview',{method:'POST',body:data,credentials:'same-origin'});const result=await response.json();if(!response.ok)throw Error(result.detail||'Door intake unavailable');
+        suggested=result.fields||{};review.textContent=Object.entries(suggested).filter(([k,v])=>v).map(([k,v])=>k.replaceAll('_',' ')+': '+v).join('\n')||'No reliable fields found.';
+        review.hidden=false;apply.disabled=false;aiStatus.textContent='Review the suggestions before applying. Missing fields remain blank. Nothing has been saved.';
+      }catch(err){aiStatus.textContent='Moses preview unavailable: '+(err.message||err)+'. Continue manually.';}finally{preview.disabled=false;}};
+    apply.onclick=()=>{if(!suggested)return;const fields={customer:'dl_customer',address:'dl_address',project:'dl_project',job_number:'dl_job_number',door_location:'dl_location',door_id:'dl_door_id',door_type:'dl_door_type',manufacturer:'dl_manufacturer',model:'dl_model',serial_number:'dl_serial',notes:'dl_notes'};
+      for(const [name,id] of Object.entries(fields)){const value=String(suggested[name]||'').trim(),input=card.querySelector('#'+id);if(!value||!input)continue;
+        if(input.tagName==='SELECT'&&![...input.options].some(o=>o.value===value))continue;
+        if(input.value.trim()&&!confirm('Replace existing '+name.replaceAll('_',' ')+' with the reviewed Moses suggestion?'))continue;
+        input.value=value;input.dispatchEvent(new Event('input',{bubbles:true}));}
+      aiStatus.textContent='Suggestions applied locally. Review and select Save Door Record when ready.';};
+    aiActions.append(voice,preview,apply);doorAiForm.append(aiNotes,aiFile,aiActions,aiStatus,review);doorAi.append(doorAiForm);
+    card.querySelector('#dl_save').parentElement.before(doorAi);
     root.appendChild(card);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
@@ -14430,7 +14510,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     if(!navFormsVanStock){
       navFormsVanStock=document.createElement('button');
       navFormsVanStock.type='button';navFormsVanStock.className='navbtn';navFormsVanStock.id='navFormsVanStock';
-      navFormsVanStock.innerHTML='<span style="display:flex;flex:1;align-items:center;justify-content:space-between;gap:8px"><span>Vehicle Flow</span><small>Fleet Info/Stock</small></span><span class="badge" id="badgeVanStock" style="display:none">0</span>';
+      navFormsVanStock.innerHTML='<span>Vehicle Flow</span><small>Fleet Info/Stock</small><span class="badge" id="badgeVanStock" style="display:none">0</span>';
       if(navFormsTimeOff?.nextSibling)column.insertBefore(navFormsVanStock,navFormsTimeOff.nextSibling);
       else column.appendChild(navFormsVanStock);
     }
@@ -14528,7 +14608,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:14px';
     for(const van of state.vans||[]){
       const ticket=panel('🚐 '+van.employee_name+(van.enabled?'':' · Van Disabled'));ticket.classList.add('pds-van-ticket');ticket.style.cssText='border-left:4px solid #fb8428;box-shadow:0 8px 22px rgba(22,38,60,.07);border-radius:16px';
-      const count=document.createElement('div');count.className='hint';count.textContent=`${van.items.length} assigned parts · ${van.low_count} low-stock item(s) · Shared PDS inventory`;ticket.append(count);
+      const count=document.createElement('div');count.className='hint';const serviceDate=/^\d{4}-\d{2}-\d{2}$/.test(van.vehicle?.next_service||'')?van.vehicle.next_service.slice(5,7)+van.vehicle.next_service.slice(8,10)+van.vehicle.next_service.slice(2,4):'—';
+      count.textContent=`${van.items.length} assigned parts · ${van.low_count} low-stock item(s) · Next Service - ${serviceDate}`;ticket.append(count);
       const toolbar=document.createElement('div');toolbar.style.cssText=rowStyle+';margin:12px 0';
       const vehicleDetails=document.createElement('details');vehicleDetails.className='card';vehicleDetails.style.cssText='margin-top:8px;padding:12px;flex-basis:100%';
       const today=new Date(),localToday=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
@@ -14564,11 +14645,12 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       }
       if(officeVanAccess){
 
-        const head=document.createElement('summary');head.style.cssText='cursor:pointer;font-weight:700';head.textContent='🚐 Vehicle Information · Registration, insurance & maintenance';vehicleDetails.append(head);
+        const head=document.createElement('summary');head.hidden=true;head.textContent='Vehicle details';vehicleDetails.append(head);
+        const vehicleTitle=document.createElement('h4');vehicleTitle.textContent='🚐 Vehicle details · Insurance, registration & service history';vehicleTitle.style.margin='0 0 12px';vehicleDetails.append(vehicleTitle);
         const vehicleForm=document.createElement('form');vehicleForm.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:10px;margin-top:12px';
         const vehicleFields=[['label','Vehicle ID / Fleet #'],['year','Year'],['make','Make'],['model','Model'],['license_plate','License Plate'],['vin','VIN'],['insurance_carrier','Insurance Carrier'],['insurance_policy','Policy Reference'],['insurance_expires','Insurance Expiration'],['registration_expires','Registration Expiration'],['next_service','Next Service Due'],['odometer','Odometer'],['notes','Vehicle Notes']];
         for(const [key,label] of vehicleFields){const wrap=document.createElement('label');wrap.style.cssText='font-size:12px;font-weight:700;display:grid;gap:5px';wrap.textContent=label;const field=document.createElement(key==='notes'?'textarea':'input');field.className='input';field.name=key;field.maxLength=key==='notes'?1500:180;if(key==='insurance_expires'||key==='registration_expires'||key==='next_service')field.type='date';field.value=van.vehicle?.[key]||'';wrap.append(field);vehicleForm.append(wrap);}
-        const saveVehicle=document.createElement('button');saveVehicle.type='submit';saveVehicle.className='btn btn-orange';saveVehicle.textContent='Save Vehicle Details';vehicleForm.append(saveVehicle);
+        const saveVehicle=document.createElement('button');saveVehicle.type='submit';saveVehicle.className='btn btn-orange';saveVehicle.textContent='Save Vehicle Details';saveVehicle.style.cssText='width:auto;max-width:max-content;align-self:end;min-height:42px;padding:10px 16px';vehicleForm.append(saveVehicle);
         vehicleForm.onsubmit=event=>{event.preventDefault();const values=Object.fromEntries(vehicleFields.map(([key])=>[key,vehicleForm.elements[key].value]));submit('/pds-van-stock/vans/'+encodeURIComponent(van.employee_id)+'/vehicle','PUT',values);};
         vehicleDetails.append(vehicleForm);
         const log=document.createElement('div');log.style.cssText='border-top:1px solid #e2e8f0;margin-top:14px;padding-top:12px';
@@ -14620,7 +14702,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const head=document.createElement('summary');head.style.cssText='font-size:17px;font-weight:700;cursor:pointer';head.textContent='Standard Van Stock Template · Configure default parts';template.append(head);
       const templateEditor=partForm('/pds-van-stock/template','Standard template sets preferred parts and levels for future vans. It does not transfer, purchase or count inventory.');
       const templateRows=document.createElement('div');templateRows.style.cssText='display:grid;gap:8px;margin:12px 0';
-      for(const item of state.template_items||[]){const line=document.createElement('div');line.style.cssText='padding:8px 12px;border:1px solid #dce3eb;border-radius:10px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;background:#fafcff';const description=document.createElement('span');description.style.flex='1 1 280px';description.textContent=(item.part_number||'Unknown part')+' — '+(item.description||'Catalog item missing')+' · Min '+(item.minimum??'—')+' · Target '+(item.target??'—');line.append(description);
+      for(const item of state.template_items||[]){const line=document.createElement('div');line.className='pds-standard-stock-row';line.style.cssText='padding:12px;border:1px solid #dce3eb;border-radius:12px;display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fafcff';
+        const description=document.createElement('span');description.style.cssText='flex:1 1 230px;display:grid;gap:4px';const title=document.createElement('strong');title.textContent=(item.part_number||'Unknown part')+' — '+(item.description||'Catalog item missing');const limits=document.createElement('small');limits.className='hint';limits.textContent='Standard minimum '+(item.minimum??'—')+' · Restock target '+(item.target??'—');description.append(title,limits);
+        const currentFleetTotal=(state.vans||[]).filter(v=>v.enabled).reduce((sum,v)=>sum+Number((v.items||[]).find(part=>String(part.part_id)===String(item.part_id))?.quantity||0),0);
+        const fleet=document.createElement('div');fleet.style.cssText='font-size:13px;text-align:center;padding:8px 12px;border-radius:9px;background:#f0f5fa;min-width:98px';fleet.innerHTML='<strong style="font-size:19px">'+currentFleetTotal+'</strong><div class="hint">Across fleet</div>';
+        line.append(description,fleet);
         if(officeVanAccess){line.append(actionButton('Edit',()=>templateEditor.editItem(item)));line.append(actionButton('Remove',()=>{if(confirm('Remove part from future van templates? Existing vans and history remain unchanged.'))submit('/pds-van-stock/template/'+encodeURIComponent(item.part_id),'DELETE');}));}templateRows.append(line);}
       if(!(state.template_items||[]).length){templateRows.append(Object.assign(document.createElement('p'),{className:'hint',textContent:'No standard template items yet.'}));}
       template.append(templateRows,templateEditor);main.append(template);

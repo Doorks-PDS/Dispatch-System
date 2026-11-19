@@ -49,7 +49,10 @@ def list_receipts(request: Request, x_api_key: Optional[str] = Header(default=No
     user = getattr(request.state, "auth_user", None) or {}
     if role in {"tech", "lead"}:
         own = str(user.get("name") or user.get("username") or "").strip().casefold()
-        items = [i for i in items if str(i.get("employee", "")).strip().casefold() == own]
+        uid = str(user.get("id") or "").strip()
+        items = [i for i in items if
+                 (str(i.get('uploaded_by_id')) == uid if i.get('uploaded_by_id') else
+                  str(i.get('employee', '')).strip().casefold() == own)]
     if role in {"office", "office_admin"}:
         from app.routers.accounting import require_office
         require_office(request, x_api_key)
@@ -96,6 +99,7 @@ async def create_receipt(
         "card_last4": card_last4, "receipt_number": receipt_number.strip()[:120],
         "notes": notes.strip()[:2000], "category": category.strip()[:100] or "Other", "filename": original,
         "stored_file": filename, "created_at": datetime.now(timezone.utc).isoformat(),
+        "uploaded_by_id": str(user.get('id') or ''),
         "authorization_status": "Pending Authorization",
     }
     with _lock:
@@ -292,7 +296,10 @@ def get_receipt_file(request: Request, receipt_id: str, x_api_key: Optional[str]
     user = getattr(request.state, "auth_user", None) or {}
     if role in {"tech", "lead"}:
         own = str(user.get("name") or user.get("username") or "").strip().casefold()
-        if str(item.get("employee", "")).strip().casefold() != own:
+        uid = str(user.get('id') or '').strip()
+        is_owner = (str(item.get('uploaded_by_id')) == uid if item.get('uploaded_by_id') else
+                    str(item.get('employee', '')).strip().casefold() == own)
+        if not is_owner:
             raise HTTPException(403, "Receipt belongs to another employee")
     if role in {"office", "office_admin"}:
         from app.routers.accounting import require_office

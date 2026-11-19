@@ -22,7 +22,7 @@ def test_interactive_van_pds_business_and_door_record_layout_is_real_source():
     end=js.index('  function renderTimeOffView()',start)
     van=js[start:end]
     for anchor in ("input.addEventListener('focus',draw)", 'setPart(id)',
-                   '🚐 Vehicle Information', "'/pds-van-stock/reconciliation'",
+                   '🚐 Vehicle details', "'/pds-van-stock/reconciliation'",
                    "'/pds-van-stock/template/'", "'/pds-van-stock/vans/'",'Warehouse and van stock are quantity records only'):
         assert anchor in van,anchor
     assert 'document.createElement("details")' in js

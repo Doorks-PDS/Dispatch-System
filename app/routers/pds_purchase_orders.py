@@ -243,12 +243,16 @@ def list_receiving(platform:str,request:Request):
             try:ordered=_receive_qty(po)
             except HTTPException:ordered=0
             received=round(totals.get(str(po.get("id")),0),4)
+            po_status = str(po.get('status') or '').strip().lower()
+            receipt_status = ('Rejected' if po_status == 'rejected' else
+                              'Cancelled' if po_status in ('cancelled','canceled','archived') else
+                              'Received' if ordered > 0 and received >= ordered else
+                              'Partially Received' if received > 0 else 'Pending')
             result.append({"po_id":po.get("id"),"po_number":po.get("po_number"),
                            "supplier":po.get("vendor") or po.get("supplier"),
                            "description":po.get("description"),"ordered":ordered,
                            "received":received,"outstanding":max(0,round(ordered-received,4)),
-                           "receiving_status":"Received" if ordered>0 and received>=ordered else
-                           "Partially Received" if received>0 else "Not Received"})
+                           "receiving_status":receipt_status,"status":po_status})
         inventory={}
         for event in events:
             if not event.get("to_inventory"):continue
@@ -272,8 +276,8 @@ def receive_po(platform:str,po_id:str,payload:ReceiveInput,request:Request):
         orders=_read(orders_path,[])
         po=next((x for x in orders if str(x.get("id"))==po_id),None)
         if not po:raise HTTPException(404,"Purchase order not found")
-        if str(po.get("status","")).strip().lower() in ("cancelled","canceled"):
-            raise HTTPException(409,"Cannot receive cancelled PO")
+        if str(po.get("status","")).strip().lower() in ("cancelled","canceled","archived","rejected"):
+            raise HTTPException(409,"Cannot receive a cancelled or rejected PO")
         ordered=_receive_qty(po)
         events=_receive_events(request,platform)
         # Rev95: Doorks' legacy receiving endpoint writes received_quantity
@@ -379,6 +383,8 @@ async def ai_po_draft(platform:str,request:Request,file:Optional[UploadFile]=Fil
 @router.delete('/manage/{platform}/{po_id}')
 def delete_purchase_order(platform:str,po_id:str,request:Request):
     path=_receive_context(request,platform)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Only an office administrator may delete an unreceived PO')
     with _lock:
         events=_receive_events(request,platform)
         if any(str(e.get('po_id'))==po_id for e in events):

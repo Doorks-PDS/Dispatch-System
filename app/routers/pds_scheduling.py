@@ -50,8 +50,14 @@ def _people(request: Request):
     if not isinstance(users, list):
         users = []
     roster = []
+    inactive_identities = set()
     for item in raw_employees:
-        if not isinstance(item, dict) or item.get('active') is False:
+        if not isinstance(item, dict):
+            continue
+        active = item.get('active') is not False and str(item.get('status') or 'Active').strip().lower() == 'active'
+        if not active:
+            for value in (item.get('name'), item.get('email'), item.get('login_user_id')):
+                if str(value or '').strip():inactive_identities.add(str(value).strip().casefold())
             continue
         role = str(item.get('role') or '').strip().lower()
         if role not in ('office_admin', 'office', 'lead', 'tech'):
@@ -71,6 +77,8 @@ def _people(request: Request):
         mail = str(user.get('email') or '').strip()
         name = str(user.get('name') or user.get('username') or '').strip()
         if not uid or not name:
+            continue
+        if any(value.casefold() in inactive_identities for value in (uid, name, mail) if value):
             continue
         linked = [e for e in roster if e['login_user_id'] == uid or
                   (mail and e['email'].casefold() == mail.casefold()) or

@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 router=APIRouter(prefix='/document-vault',tags=['document-vault'])
 _lock=RLock()
-TYPES={'receipt','packing_slip','vendor_bill','statement','other'}
+TYPES={'receipt','packing_slip','vendor_bill','statement','other','estimate','invoice','purchase_order','part_reference','supplier_document','customer_document'}
 MIME={'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.webp':'image/webp','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.xls':'application/vnd.ms-excel','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.csv':'text/csv','.txt':'text/plain','.rtf':'application/rtf','.ppt':'application/vnd.ms-powerpoint','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.odt':'application/vnd.oasis.opendocument.text','.ods':'application/vnd.oasis.opendocument.spreadsheet'}
 MAX=12*1024*1024
 class TextPreview(BaseModel):
@@ -59,7 +59,7 @@ def listing(platform:str,request:Request,document_type:Optional[str]=None,librar
     return {'items':[x for x in items if (not document_type or x['document_type']==document_type) and (not library_scope or x.get('library_scope','accounting')==library_scope)]}
 
 @router.post('/{platform}')
-async def create(platform:str,request:Request,document_type:str=Form(...),vendor:str=Form(''),document_number:str=Form(''),document_date:str=Form(''),po_number:str=Form(''),notes:str=Form(''),extracted_json:str=Form(''),library_scope:str=Form('accounting'),file:Optional[UploadFile]=File(None)):
+async def create(platform:str,request:Request,document_type:str=Form(...),vendor:str=Form(''),document_number:str=Form(''),document_date:str=Form(''),po_number:str=Form(''),job_number:str=Form(''),notes:str=Form(''),extracted_json:str=Form(''),library_scope:str=Form('accounting'),file:Optional[UploadFile]=File(None)):
     guard(request,platform);validate_type(document_type)
     if library_scope not in ('business','accounting'):raise HTTPException(400,'Invalid library scope')
     if len(notes)>4000 or len(extracted_json)>12000:raise HTTPException(400,'Text too long')
@@ -75,7 +75,7 @@ async def create(platform:str,request:Request,document_type:str=Form(...),vendor
     if not raw and not notes.strip() and not parsed:raise HTTPException(400,'Upload a document or enter text')
     folder,index=paths(request,platform);identifier=uuid.uuid4().hex
     stored=identifier+suffix if raw else ''
-    record={'id':identifier,'library_scope':library_scope,'document_type':document_type,'vendor':trim(vendor),'document_number':trim(document_number),'document_date':trim(document_date,20),'po_number':trim(po_number),'notes':notes,'extracted':parsed,'original_filename':original,'attachment':stored,'created_at':datetime.now(timezone.utc).isoformat(),'review_status':'Saved - not posted'}
+    record={'id':identifier,'library_scope':library_scope,'document_type':document_type,'vendor':trim(vendor),'document_number':trim(document_number),'document_date':trim(document_date,20),'po_number':trim(po_number),'job_number':trim(job_number),'notes':notes,'extracted':parsed,'original_filename':original,'attachment':stored,'created_at':datetime.now(timezone.utc).isoformat(),'review_status':'Saved - not posted'}
     with _lock:
         items=read(index)
         if raw:
