@@ -127,11 +127,30 @@ def _supplier(request, supplier_id, supplier_name, supplier_email):
     return name, supplier_email.strip()
 
 
+def _email_readiness(recipient: str = '') -> dict:
+    """Safe, read-only configuration check; no key or outbound request is exposed."""
+    from app.services.moses_delivery import _email
+    sender = os.getenv('MOSES_DOCUMENTS_FROM', '').strip()
+    reply = os.getenv('PDS_SUPPLIER_QUOTES_REPLY_TO', 'reception@prioritydoors.com').strip()
+    problems = []
+    if not _email(sender):
+        problems.append('Set MOSES_DOCUMENTS_FROM in Render (NoReply@prioritydoors.com).')
+    if os.getenv('MOSES_EMAIL_PROVIDER', '').strip().lower() != 'resend':
+        problems.append('Set MOSES_EMAIL_PROVIDER=resend in Render.')
+    if not os.getenv('RESEND_API_KEY', '').startswith('re_'):
+        problems.append('Configure RESEND_API_KEY as a Render secret.')
+    if not _email(reply):
+        problems.append('Set a valid PDS_SUPPLIER_QUOTES_REPLY_TO address.')
+    if recipient and not _email(recipient):
+        problems.append('The saved supplier needs a valid email address.')
+    return {'from': sender, 'reply_to': reply, 'send_ready': not problems,
+            'setup_issues': problems}
+
+
 @router.get('/config')
 def supplier_quote_email_config(request: Request):
     _auth(request, write=True)
-    # The configured reply address must match the actual Resend send endpoint.
-    return {'reply_to': os.getenv('PDS_SUPPLIER_QUOTES_REPLY_TO', 'reception@prioritydoors.com').strip()}
+    return _email_readiness()
 
 
 @router.get('')
@@ -337,8 +356,10 @@ def preview_supplier_email(quote_id: str, request: Request):
     name, address = _supplier(request, row.get('supplier_id') or '',
                               row.get('supplier_name') or '', row.get('supplier_email') or '')
     reply = os.getenv('PDS_SUPPLIER_QUOTES_REPLY_TO', 'reception@prioritydoors.com').strip()
-    return {'status': row.get('status'), 'from': os.getenv('MOSES_DOCUMENTS_FROM', '').strip(),
+    readiness = _email_readiness(address)
+    return {'status': row.get('status'), 'from': readiness['from'],
             'to': address, 'recipient_verified': bool(_email(address)), 'reply_to': reply,
+            'send_ready': readiness['send_ready'], 'setup_issues': readiness['setup_issues'],
             'subject': _safe_subject(row), 'text': _email_details(row, name),
             'attachments': row.get('attachments', []), 'quote_id': quote_id}
 

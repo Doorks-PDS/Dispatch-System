@@ -271,6 +271,18 @@ def agent_sdk_tool_check(request: Request):
     return check(platform)
 
 
+@router.post('/agent-web-check')
+def agent_web_check(request: Request):
+    """Explicit public-information web-search probe, no customer records or writes."""
+    platform = allowed(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Workspace office-admin access required')
+    if request.headers.get('x-moses-validation') != 'hosted-web-check':
+        raise HTTPException(400, 'Explicit web validation header required')
+    from app.services.moses_web_probe import check
+    return check(platform)
+
+
 @router.get('/permissions')
 def moses_permissions(request: Request):
     """Authorized office admin view of configured, approval-gated Moses abilities."""
@@ -1134,16 +1146,22 @@ def chat(payload:Message,request:Request):
     # Bypass the generic model fallback for these narrow intents so Moses never
     # claims it cannot access the inventory or estimate scopes it already has.
     if platform == 'pds' and getattr(request.state, 'auth_role', None) in ('office_admin', 'office', 'lead'):
+        # When the guarded SDK agent is ready, let it interpret the request first.
+        # Retain deterministic shortcuts for staff and offline/model-unavailable use.
+        from app.services.moses_agent import readiness as _moses_chat_readiness
+        live_admin = (getattr(request.state, 'auth_role', None) == 'office_admin'
+                      and _moses_chat_readiness('pds')['ready_for_live_check'])
         from app.services.moses_pds_verified_shortcuts import respond as verified_pds_shortcut
-        try:
-            verified = verified_pds_shortcut(request, text)
-        except HTTPException as exc:
-            verified = f'PDS records could not be verified: {exc.detail}. No action was confirmed.'
-        if verified is not None:
-            return {'answer': verified, 'workspace': 'pds', 'matches': [], 'navigation': [],
-                    'read_only': not verified.startswith('Saved UNSENT'),
-                    'agent_mode': 'verified_pds_records', 'action_proposals': [],
-                    'document_proposals': []}
+        if not live_admin:
+            try:
+                verified = verified_pds_shortcut(request, text)
+            except HTTPException as exc:
+                verified = f'PDS records could not be verified: {exc.detail}. No action was confirmed.'
+            if verified is not None:
+                return {'answer': verified, 'workspace': 'pds', 'matches': [], 'navigation': [],
+                        'read_only': not verified.startswith('Saved UNSENT'),
+                        'agent_mode': 'verified_pds_records', 'action_proposals': [],
+                        'document_proposals': []}
     # Staff and leads: natural-language insight without privileged tool execution.
     # A failed read-only AI call falls through to the existing deterministic search.
     if platform == 'pds' and getattr(request.state, 'auth_role', None) in ('office','lead'):
@@ -1238,6 +1256,17 @@ def chat(payload:Message,request:Request):
                         logging.getLogger(__name__).warning(
                             'Moses safe conversational recovery failed workspace=%s exception_type=%s',
                             platform, type(recovery_error).__name__)
+                if platform == 'pds' and not getattr(request.state, 'moses_action_proposals', None) and not getattr(request.state, 'moses_document_proposals', None):
+                    try:
+                        from app.services.moses_pds_verified_shortcuts import respond as _verified_fallback
+                        verified = _verified_fallback(request, text)
+                        if verified is not None and not verified.startswith('Saved UNSENT'):
+                            return {'answer': verified, 'workspace': 'pds', 'matches': [],
+                                    'navigation': [], 'agent_mode': 'verified_read_only',
+                                    'agent_connected': False, 'read_only': True,
+                                    'action_proposals': [], 'document_proposals': []}
+                    except Exception:
+                        pass
                 # If live conversation fails on a broad work-priority question,
                 # return an actual saved-record briefing, never a fabricated AI answer.
                 # Document-mail requests are handled above and cannot use this path.

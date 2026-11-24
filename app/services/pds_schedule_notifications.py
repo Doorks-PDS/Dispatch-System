@@ -61,6 +61,25 @@ def _verified_email(job,recipient):
         raise HTTPException(409,'Recipient email does not match the saved job')
     return email
 
+def email_readiness(request):
+    """Check live configured email gates without contacting Resend or exposing secrets."""
+    _guard(request)
+    sender = os.getenv('MOSES_DOCUMENTS_FROM', '').strip()
+    reply = os.getenv('PDS_GENERAL_REPLY_TO', 'reception@prioritydoors.com').strip()
+    issues = []
+    if os.getenv('PDS_SCHEDULE_EMAIL_SEND_ENABLED', '').strip().lower() != 'true':
+        issues.append('Customer schedule emails are disabled in Render.')
+    if os.getenv('MOSES_EMAIL_PROVIDER', '').strip().lower() != 'resend':
+        issues.append('Resend is not selected as the email provider.')
+    if not os.getenv('RESEND_API_KEY', '').startswith('re_'):
+        issues.append('Resend API key is not configured.')
+    if not _email(sender):
+        issues.append('Company sender is not configured (MOSES_DOCUMENTS_FROM).')
+    if not _email(reply):
+        issues.append('Customer Reply-To address is invalid.')
+    return {'enabled': not issues, 'from': sender, 'reply_to': reply, 'issues': issues}
+
+
 def propose(request,job_id,recipient,category,subject,message):
     _guard(request)
     job=_job(request,job_id)

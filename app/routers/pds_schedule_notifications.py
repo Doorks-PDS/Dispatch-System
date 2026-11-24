@@ -15,6 +15,10 @@ class Proposal(BaseModel):
 class Decision(BaseModel):
     approve:bool
 
+@router.get('/email/readiness')
+def email_readiness(request:Request):
+    return notifications.email_readiness(request)
+
 @router.post('/email/proposals')
 def propose(payload:Proposal,request:Request):
     return notifications.propose(request,payload.job_id,payload.recipient,payload.category,payload.subject,payload.message)

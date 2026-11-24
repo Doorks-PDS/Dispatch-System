@@ -6655,53 +6655,67 @@ function renderAttachmentSection(titleText, items, options = {}) {
         }catch(err){note.textContent='Move could not be verified: '+(err.message||err);moveDate.disabled=false;}
       };
       // Customer notifications are independent approval requests. Never send when scheduling.
-      const notify=document.createElement('section');notify.style.cssText='margin-top:8px;border-top:1px solid #e6e9ed;padding-top:9px';
+      const notify=document.createElement('section');notify.style.cssText='margin-top:10px;border-top:1px solid #e6e9ed;padding-top:12px';
       const notifyToggle=document.createElement('button');notifyToggle.type='button';notifyToggle.className='btn';notifyToggle.textContent='✉ Notify Customer';notifyToggle.setAttribute('aria-expanded','false');notify.append(notifyToggle);
-      const notifyBody=document.createElement('div');notifyBody.hidden=true;notifyBody.style.cssText='grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin-top:9px';notify.append(notifyBody);
-      notifyToggle.onclick=()=>{notifyBody.hidden=!notifyBody.hidden;notifyBody.style.display=notifyBody.hidden?'none':'grid';notifyToggle.setAttribute('aria-expanded',String(!notifyBody.hidden));notifyToggle.textContent=notifyBody.hidden?'✉ Notify Customer':'✉ Close Customer Notification';};
-      const makeNotifyField=(caption,control)=>{const label=document.createElement('label');label.style.cssText='font-size:12px';label.textContent=caption;control.className='input';control.style.cssText='width:100%;margin-top:3px';label.append(control);notifyBody.append(label);return control};
-      const method=makeNotifyField('Send by',document.createElement('select'));
-      for(const [value,name] of [['email','Email'],['text','Text'],['both','Email & Text']])method.add(new Option(name,value));
-      const kind=makeNotifyField('Update type',document.createElement('select'));
+      const notifyBody=document.createElement('div');notifyBody.hidden=true;notifyBody.style.cssText='display:none;gap:12px;margin-top:12px';notify.append(notifyBody);
+      const notifyForm=document.createElement('div');notifyForm.className='pds-customer-notify-fields';notifyForm.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px';notifyBody.append(notifyForm);
+      const makeNotifyField=(caption,control,wide=false)=>{
+        const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-size:12px;font-weight:700;color:#536273;min-width:0';
+        label.textContent=caption;control.className='input';control.style.width='100%';
+        if(wide)label.style.gridColumn='1/-1';label.append(control);notifyForm.append(label);return control;
+      };
+      const method=makeNotifyField('Method',document.createElement('select'));
+      for(const [value,name] of [['email','Email'],['text','Text'],['both','Email + Text']])method.add(new Option(name,value));
+      const kind=makeNotifyField('Notification',document.createElement('select'));
       for(const [value,name] of [['appointment','Appointment confirmation'],['schedule_change','Schedule change'],['eta','Technician ETA'],['custom','Custom message']])kind.add(new Option(name,value));
       const knownNotifyEmails=[...new Set([job.contact_email,job.email,job.customer_email].filter(Boolean).map(x=>String(x).trim().toLowerCase()))];
-      const recipientEmail=makeNotifyField('Customer email (must be on saved job)',document.createElement('input'));recipientEmail.type='email';recipientEmail.value=knownNotifyEmails[0]||'';recipientEmail.autocomplete='off';
-      const savedEmailChoice=document.createElement('div');savedEmailChoice.style.cssText='grid-column:1/-1;display:flex;flex-wrap:wrap;gap:6px;align-items:center';
-      for(const address of knownNotifyEmails){const use=document.createElement('button');use.className='btn';use.type='button';use.textContent='Use saved: '+address;use.style.fontSize='12px';use.onclick=()=>{recipientEmail.value=address;notifyStatus.textContent='Saved job recipient selected. Rejected drafts do not block a new request.';};savedEmailChoice.append(use);}
-      notifyBody.append(savedEmailChoice);
-      const recipientPhone=makeNotifyField('Customer phone',document.createElement('input'));recipientPhone.type='tel';recipientPhone.value=String(job.contact_phone||job.phone||job.customer_phone||'');recipientPhone.autocomplete='off';
-      const subject=document.createElement('input');subject.type='text';subject.maxLength=140;
-      const subjectLabel=makeNotifyField('Email subject',subject);subjectLabel.parentElement.style.gridColumn='1/-1';
-      const message=document.createElement('textarea');message.rows=4;message.maxLength=320;
-      const msgLabel=makeNotifyField('Message (review before requesting approval)',message);msgLabel.parentElement.style.gridColumn='1/-1';
-      const notifyStatus=document.createElement('small');notifyStatus.setAttribute('role','status');notifyStatus.style.gridColumn='1/-1';
-      const requestApproval=document.createElement('button');requestApproval.type='button';requestApproval.className='btn';requestApproval.textContent='Prepare notification';
-      requestApproval.style.gridColumn='1/-1';
-      const approvalList=document.createElement('div');approvalList.style.cssText='grid-column:1/-1;display:grid;gap:5px';
-      notifyBody.append(requestApproval,approvalList,notifyStatus);
-      const seeHistory=document.createElement('button');seeHistory.type='button';seeHistory.className='btn';seeHistory.textContent='Notification History';seeHistory.style.gridColumn='1/-1';
-      const historyView=document.createElement('div');historyView.style.cssText='grid-column:1/-1;display:grid;gap:4px;font-size:12px';
-      seeHistory.onclick=async()=>{
-        seeHistory.disabled=true;historyView.replaceChildren();
-        try{
-          const [emails,texts]=await Promise.all([
-            fetchJSON('/pds-schedule-notifications/jobs/'+encodeURIComponent(job.id)+'/email-history'),
-            fetchJSON('/moses-action-center/pds/sms/jobs/'+encodeURIComponent(job.id)+'/history')
-          ]);
-          const rows=[...(emails.items||[]).map(x=>({...x,method:'Email',recipient:x.recipient})),
-                      ...(texts.items||[]).map(x=>({...x,method:'Text',recipient:x.phone}))]
-                      .sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,25);
-          if(!rows.length){historyView.textContent='No saved customer notifications for this job.';return;}
-          for(const item of rows){
-            const line=document.createElement('div');line.style.cssText='border-bottom:1px solid #edf0f3;padding:4px 0;white-space:pre-wrap';
-            line.textContent=[item.method, item.status||'unknown', item.recipient||'',String(item.created_at||'').slice(0,16),item.message||''].join(' · ');
-            historyView.append(line);
-          }
-        }catch(err){historyView.textContent='Notification history unavailable: '+(err.message||err)}
-        finally{seeHistory.disabled=false;}
+      const recipientEmail=makeNotifyField('Send to (saved customer email)',document.createElement('select'));
+      if(!knownNotifyEmails.length)recipientEmail.add(new Option('Add an email to the saved job first',''));
+      else for(const address of knownNotifyEmails)recipientEmail.add(new Option(address,address));
+      const recipientPhone=makeNotifyField('Customer phone',document.createElement('input'));recipientPhone.type='tel';recipientPhone.value=String(job.contact_phone||job.phone||job.customer_phone||'');
+      const subject=makeNotifyField('Subject',document.createElement('input'),true);subject.maxLength=140;
+      const message=makeNotifyField('Message',document.createElement('textarea'),true);message.rows=4;message.maxLength=1600;
+      const readiness=makeNotifyField('Email delivery',document.createElement('div'),true);
+      readiness.className='';readiness.style.cssText='font-size:12px;font-weight:600;color:#617084;padding:7px 0';
+      readiness.textContent='Checking company email settings…';
+      const notifyStatus=document.createElement('small');notifyStatus.setAttribute('role','status');notifyStatus.style.cssText='display:block;color:#536273;font-size:12px';
+      const requestApproval=document.createElement('button');requestApproval.type='button';requestApproval.className='btn btn-orange';requestApproval.textContent='Review & Prepare';
+      const approvalList=document.createElement('div');approvalList.style.cssText='display:grid;gap:8px';
+      const controls=document.createElement('div');controls.style.cssText='display:flex;align-items:center;gap:10px;flex-wrap:wrap';controls.append(requestApproval,notifyStatus);
+      notifyBody.append(controls,approvalList);
+      const historyDetails=document.createElement('details');historyDetails.style.cssText='border-top:1px solid #e5e9ee;padding-top:8px;font-size:12px';
+      const historyToggle=document.createElement('summary');historyToggle.textContent='Notification history';historyToggle.style.cssText='cursor:pointer;font-weight:700;color:#536273';
+      const historyView=document.createElement('div');historyView.style.cssText='display:grid;gap:6px;padding:9px 0';
+      historyDetails.append(historyToggle,historyView);notifyBody.append(historyDetails);
+      let emailGate=null;
+      const showMethod=()=>{
+        for(const [field,hidden] of [
+          [recipientEmail,method.value==='text'],[recipientPhone,method.value==='email'],
+          [subject,method.value==='text'],[readiness,method.value==='text']]){
+          field.parentElement.hidden=hidden;
+          // Inline grid styling otherwise overrides the browser's [hidden] display rule.
+          field.parentElement.style.display=hidden?'none':'grid';
+        }
+        const needsEmail=method.value!=='text';
+        if(needsEmail){
+          const issues=emailGate?.issues||[];
+          readiness.textContent=emailGate===null?'Checking company email settings…':
+            emailGate.enabled?'From: '+emailGate.from+'  ·  Replies: '+emailGate.reply_to:'Email unavailable: '+issues.join(' ');
+          readiness.style.color=emailGate?.enabled?'#317047':'#a44f26';
+        }
+        requestApproval.disabled=needsEmail&&(!emailGate?.enabled||!recipientEmail.value);
       };
-      notifyBody.append(seeHistory,historyView);
-
+      const refreshReadiness=async()=>{
+        try{emailGate=await fetchJSON('/pds-schedule-notifications/email/readiness')}
+        catch(err){emailGate={enabled:false,issues:['Unable to check email setup: '+(err.message||err)]}}
+        showMethod();
+      };
+      notifyToggle.onclick=()=>{
+        notifyBody.hidden=!notifyBody.hidden;notifyBody.style.display=notifyBody.hidden?'none':'grid';
+        notifyToggle.setAttribute('aria-expanded',String(!notifyBody.hidden));
+        notifyToggle.textContent=notifyBody.hidden?'✉ Notify Customer':'✉ Hide Customer Notification';
+        if(!notifyBody.hidden)refreshReadiness();
+      };
       const preset=()=>{
         const customer=String(job.customer||'your property').trim();
         const when=dateInput.value?(dateInput.value+(timeInput.value?' at '+timeInput.value:'')):'';
@@ -6716,48 +6730,64 @@ function renderAttachmentSection(titleText, items, options = {}) {
         else message.value='Priority Door Systems: Regarding your service at '+customer+'. '+contact;
       };
       kind.addEventListener('change',preset);preset();
-      const showMethod=()=>{recipientEmail.parentElement.hidden=method.value==='text';recipientPhone.parentElement.hidden=method.value==='email';subject.parentElement.hidden=method.value==='text'};
-      method.addEventListener('change',showMethod);showMethod();
-      requestApproval.onclick=async()=>{
-        if(!['office_admin'].includes(String(currentUser?.role||''))){notifyStatus.textContent='Office administrator approval is required to prepare customer notifications.';return;}
-        const modes=method.value==='both'?['email','text']:[method.value];
-        if(modes.includes('email')&&!knownNotifyEmails.includes(recipientEmail.value.trim().toLowerCase())){
-          notifyStatus.textContent='Email not prepared: choose a saved job email using the button above, or edit and save the job contact first. Rejected drafts may be prepared again.';
-          return;
+      method.addEventListener('change',showMethod);recipientEmail.addEventListener('change',showMethod);showMethod();
+      historyDetails.addEventListener('toggle',async()=>{
+        if(!historyDetails.open)return;
+        historyView.textContent='Loading history…';
+        const requests=await Promise.allSettled([
+          fetchJSON('/pds-schedule-notifications/jobs/'+encodeURIComponent(job.id)+'/email-history'),
+          fetchJSON('/moses-action-center/pds/sms/jobs/'+encodeURIComponent(job.id)+'/history')
+        ]);
+        const rows=[...(requests[0].status==='fulfilled'?(requests[0].value.items||[]).map(x=>({...x,method:'Email',recipient:x.recipient})):[]),
+                    ...(requests[1].status==='fulfilled'?(requests[1].value.items||[]).map(x=>({...x,method:'Text',recipient:x.phone})):[])].sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||''))).slice(0,25);
+        historyView.replaceChildren();
+        if(!rows.length){historyView.textContent='No saved notifications.';return}
+        for(const item of rows){
+          const entry=document.createElement('details');entry.style.cssText='border:1px solid #e7eaef;border-radius:8px;padding:7px';
+          const label=document.createElement('summary');label.textContent=[item.method, String(item.status||'pending'),item.recipient||'',String(item.created_at||'').slice(0,16)].filter(Boolean).join(' · ');
+          const body=document.createElement('p');body.textContent=String(item.message||'');body.style.cssText='white-space:pre-wrap;margin:7px 0';entry.append(label,body);historyView.append(entry);
         }
-        if(!message.value.trim()||!message.value.startsWith('Priority Door Systems:')){notifyStatus.textContent='Enter a message beginning with Priority Door Systems:';return;}
-        if(message.value.length>320){notifyStatus.textContent='Message must be 320 characters or fewer for SMS.';return;}
-        if(!confirm('Create '+modes.join(' and ')+' approval request(s) for this saved PDS job? Nothing will be sent yet.'))return;
-        requestApproval.disabled=true;approvalList.replaceChildren();notifyStatus.textContent='Verifying recipients and preparing approval…';
+      });
+      requestApproval.onclick=async()=>{
+        if(currentUser?.role!=='office_admin'){notifyStatus.textContent='Office administrator access required.';return}
+        const modes=method.value==='both'?['email','text']:[method.value];
+        if(modes.includes('email')&&(!emailGate?.enabled||!recipientEmail.value)){notifyStatus.textContent='Company email settings or saved recipient unavailable.';return}
+        if(!message.value.trim().startsWith('Priority Door Systems:')){notifyStatus.textContent='Message must begin with Priority Door Systems:';return}
+        if(modes.includes('text')&&message.value.length>320){notifyStatus.textContent='Text message must be 320 characters or fewer.';return}
+        if(!subject.value.trim()&&modes.includes('email')){notifyStatus.textContent='Enter an email subject.';return}
+        requestApproval.disabled=true;approvalList.replaceChildren();notifyStatus.textContent='Preparing for approval…';
         let prepared=0;
         for(const mode of modes){
           try{
             const route=mode==='text'?'/moses-action-center/pds/sms/proposals':'/pds-schedule-notifications/email/proposals';
-            const payload=mode==='text'?{job_id:String(job.id),phone:recipientPhone.value.trim(),message:message.value.trim()}:{job_id:String(job.id),recipient:recipientEmail.value.trim(),category:kind.value,subject:subject.value.trim(),message:message.value.trim()};
+            const payload=mode==='text'?{job_id:String(job.id),phone:recipientPhone.value.trim(),message:message.value.trim()}:
+              {job_id:String(job.id),recipient:recipientEmail.value.trim(),category:kind.value,subject:subject.value.trim(),message:message.value.trim()};
             const result=await fetchJSON(route,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
-            if(!result?.proposal?.id||result?.sent!==false)throw Error('Approval request not verified');
+            if(!result?.proposal?.id||result.sent!==false)throw Error('Approval was not saved');
             prepared++;
-            const line=document.createElement('div');line.style.cssText='display:flex;gap:6px;align-items:center;flex-wrap:wrap';
-            const caption=document.createElement('small');caption.textContent=(mode==='text'?'Text':'Email')+' draft prepared — not sent';
-            const approve=document.createElement('button');approve.type='button';approve.className='btn';approve.textContent='Approve & send '+mode;
-            const reject=document.createElement('button');reject.type='button';reject.className='btn';reject.textContent='Reject';
-            const receipt=document.createElement('small');receipt.setAttribute('role','status');
-            const decision=async(allowed)=>{
-              if(!confirm(allowed?'Send the exact prepared '+mode+' notification now?':'Reject this '+mode+' notification?'))return;
-              approve.disabled=reject.disabled=true;
+            const panel=document.createElement('section');panel.style.cssText='display:grid;gap:6px;padding:11px;border:1px solid #e0e7ec;border-radius:10px;background:#fafbfc';
+            const title=document.createElement('strong');title.textContent=(mode==='email'?'Email':'Text')+' to '+(mode==='email'?recipientEmail.value:recipientPhone.value);
+            const detail=document.createElement('small');detail.textContent='Ready for approval · Not sent';
+            const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+            const approve=document.createElement('button');approve.type='button';approve.className='btn btn-orange';approve.textContent='Approve & Send';
+            const reject=document.createElement('button');reject.type='button';reject.className='btn';reject.textContent='Discard';
+            const decide=async(allowed)=>{
+              if(!confirm(allowed?'Send this '+mode+' notification to the customer now?':'Discard this notification?'))return;
+              approve.disabled=reject.disabled=true;detail.textContent=allowed?'Sending…':'Discarding…';
               try{
-                const decisionRoute=mode==='text'?'/moses-action-center/pds/sms/proposals/'+encodeURIComponent(result.proposal.id)+'/decision':'/pds-schedule-notifications/email/proposals/'+encodeURIComponent(result.proposal.id)+'/decision';
-                const response=await fetchJSON(decisionRoute,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:allowed})});
-                receipt.textContent=allowed?'Provider status: '+String(response.status||'unconfirmed')+' (not proof of delivery)':'Rejected. Edit the message and choose Prepare notification to create a new approval.';
-                if(!allowed){notifyStatus.textContent='Rejected proposal closed. You can prepare a new request using the saved contact above.';}
-              }catch(error){receipt.textContent='Not confirmed: '+(error.message||error);}
+                const endpoint=mode==='text'?'/moses-action-center/pds/sms/proposals/'+encodeURIComponent(result.proposal.id)+'/decision':
+                  '/pds-schedule-notifications/email/proposals/'+encodeURIComponent(result.proposal.id)+'/decision';
+                const response=await fetchJSON(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:allowed})});
+                detail.textContent=allowed?(response.status==='submitted'?'Accepted by provider · Delivery not confirmed':'Status: '+String(response.status||'unconfirmed')):'Discarded · Not sent';
+                actions.remove();
+              }catch(err){detail.textContent='Not confirmed: '+(err.message||err)+' Check notification history before retrying.';actions.remove();}
             };
-            approve.onclick=()=>decision(true);reject.onclick=()=>decision(false);
-            line.append(caption,approve,reject,receipt);approvalList.append(line);
-          }catch(error){const failure=document.createElement('small');failure.textContent=(mode==='text'?'Text':'Email')+' not prepared: '+(error.message||error);approvalList.append(failure)}
+            approve.onclick=()=>decide(true);reject.onclick=()=>decide(false);
+            actions.append(approve,reject);panel.append(title,detail,actions);approvalList.append(panel);
+          }catch(err){const issue=document.createElement('small');issue.textContent=(mode==='email'?'Email':'Text')+' could not be prepared: '+(err.message||err);approvalList.append(issue)}
         }
-        notifyStatus.textContent=prepared+' approval request(s) prepared. Review each before sending.';
-        requestApproval.disabled=false;
+        notifyStatus.textContent=prepared?prepared+' ready for approval · Nothing sent':'No notification prepared';
+        requestApproval.disabled=false;showMethod();
       };
       plan.append(notify);
       savePlan.onclick=async()=>{
@@ -9143,29 +9173,41 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const header=make('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between';header.append(make('h3',title),action('Close ×',()=>shade.remove()));modal.append(header);shade.append(modal);document.body.append(shade);return {shade,modal};
     }
     async function reviewEmail(row){
-      const {shade,modal}=overlayCard('Supplier Quote · Email Review');const status=make('small','Loading email…','hint');modal.append(status);
+      const {shade,modal}=overlayCard('Supplier Quote · Email Review');
+      modal.style.cssText+=';width:min(710px,100%);gap:10px';
+      const status=make('small','Loading email…','hint');status.setAttribute('role','status');modal.append(status);
       try{
         const preview=await rfqApi('/'+encodeURIComponent(row.id)+'/email-preview');
-        if(preview.status!=='draft'){status.textContent='This request is no longer an unsent draft.';return}
+        if(preview.status!=='draft'){status.textContent='This request has already been processed. Review its history in Supplier Pricing.';return}
         status.remove();
-        const grid=make('div');grid.style.cssText='display:grid;gap:8px;background:#f6f8fa;padding:12px;border-radius:10px';
-        for(const [label,value] of [['From',preview.from],['To',preview.to],['Reply To',preview.reply_to],['Subject',preview.subject]]){
-          const line=make('div');line.style.cssText='display:flex;gap:10px;flex-wrap:wrap';const key=make('strong',label+':');key.style.minWidth='80px';line.append(key,make('span',value||'Not configured'));grid.append(line);
+        const mail=make('section');mail.style.cssText='border:1px solid #e1e6ec;border-radius:12px;overflow:hidden';
+        const info=make('div');info.style.cssText='display:grid;grid-template-columns:75px minmax(0,1fr);gap:8px 12px;padding:14px;background:#f7f8fa;font-size:13px';
+        for(const [label,value] of [['From',preview.from],['To',preview.to],['Reply to',preview.reply_to],['Subject',preview.subject]]){
+          const key=make('strong',label);key.style.color='#556070';const val=make('span',value||'Not configured');val.style.overflowWrap='anywhere';
+          info.append(key,val);
         }
-        modal.append(grid);const message=make('div',preview.text);message.style.cssText='white-space:pre-wrap;border:1px solid #e2e7ed;border-radius:10px;padding:13px;line-height:1.5';modal.append(message);
-        if(preview.attachments?.length){const fileHost=make('div');fileHost.append(make('strong','Attachments'));
+        const message=make('div',preview.text);message.style.cssText='white-space:pre-wrap;padding:16px;line-height:1.55;font-size:14px;max-height:320px;overflow:auto';
+        mail.append(info,message);modal.append(mail);
+        const files=(preview.attachments||[]).filter(a=>a.purpose==='request');
+        if(files.length){const fileHost=make('div');fileHost.style.cssText='display:grid;gap:6px';fileHost.append(make('strong','Attachments ('+files.length+')'));
           attachmentGallery(row,fileHost,'request');modal.append(fileHost)}
-        const outcome=make('small','','hint');modal.append(outcome);
+        const outcome=make('div','','hint');outcome.setAttribute('role','status');outcome.style.cssText='font-size:13px;color:#536273';
+        const issues=Array.isArray(preview.setup_issues)?preview.setup_issues:[];
+        const actions=make('div');actions.style.cssText='display:flex;gap:8px;justify-content:flex-end;align-items:center;flex-wrap:wrap;position:sticky;bottom:0;background:#fff;padding:12px 0;border-top:1px solid #e4e7ed';
+        actions.append(action('Edit Request',()=>{shade.remove();editing=row;draw()}));
         const send=action('Approve & Send via Resend',async()=>{
-          if(!confirm('Send this pricing request to '+preview.to+' with '+(preview.attachments||[]).filter(a=>a.purpose==='request').length+' attachment(s)?'))return;
-          send.disabled=true;outcome.textContent='Submitting request…';
+          if(!confirm('Send this exact request to '+preview.to+' with '+files.length+' attachment(s)?'))return;
+          send.disabled=true;outcome.textContent='Sending to Resend…';
           try{const result=await rfqApi('/'+encodeURIComponent(row.id)+'/send','POST',{approve:true});
-            outcome.textContent=result.state==='accepted_by_provider'?'Accepted by Resend · Supplier delivery not confirmed':'Send uncertain · Check Resend before retrying';
+            outcome.textContent=result.state==='accepted_by_provider'?'Resend accepted the request. Supplier delivery is not yet confirmed.':'Send status uncertain. Check Resend before attempting anything else.';
             await reloadQuotes();draw();send.remove();
-          }catch(e){outcome.textContent='Send not confirmed: '+(e.message||e);await reloadQuotes();draw();send.remove()}
+          }catch(e){outcome.textContent='Send not confirmed: '+(e.message||e);await reloadQuotes().catch(()=>{});draw();send.remove()}
         },true);
-        if(!preview.recipient_verified||!preview.from){send.disabled=true;outcome.textContent='Supplier email and configured sender required before sending.'}
-        modal.append(send);
+        if(issues.length||!preview.recipient_verified||!preview.send_ready){
+          send.disabled=true;outcome.style.color='#9a4517';
+          outcome.textContent=issues.length?issues.join(' '):'Choose a supplier with a saved valid email address.';
+        }
+        actions.append(send);modal.append(outcome,actions);
       }catch(e){status.textContent='Email preview unavailable: '+(e.message||e)}
     }
     function responseEditor(row){
