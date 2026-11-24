@@ -165,7 +165,9 @@ def _public(row):
             'subject': snap['subject'], 'filename': snap['filename'],
             'approved': row['state'] in ('sending', 'sent', 'uncertain'),
             'sent': row['state'] == 'sent', 'delivery_status': row.get('delivery_status'),
-            'provider_message_id': row.get('provider_message_id')}
+            'provider_message_id': row.get('provider_message_id'),
+            'requested_at': row.get('requested_at'), 'completed_at': row.get('completed_at'),
+            'cc': snap.get('cc'), 'attachment_filename': snap.get('filename')}
 
 
 def propose(request, kind, number):

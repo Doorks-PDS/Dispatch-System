@@ -30,12 +30,12 @@ _LOCK = RLock()
 def _now():
     return datetime.now(timezone.utc).isoformat()
 
-def _guard(request, platform):
+def _guard(request, platform, *, require_send_enabled=True):
     if platform not in ('doorks', 'sdc', 'pds'):
         raise HTTPException(400, 'Unknown business platform')
     if not getattr(request.state, 'auth_user', None) or getattr(request.state, 'auth_role', None) != 'office_admin' or request.session.get('active_platform') != platform:
         raise HTTPException(403, 'Active workspace office administrator required')
-    if os.getenv('MOSES_PO_SEND_ENABLED', '').lower().strip() != 'true':
+    if require_send_enabled and os.getenv('MOSES_PO_SEND_ENABLED', '').lower().strip() != 'true':
         raise HTTPException(503, 'Purchase-order email sending is disabled')
 
 def _path(request, platform):
@@ -165,6 +165,7 @@ def _public(row):
             'reply_to':msg['reply_to'], 'cc':msg['cc'], 'number':msg['number'],
             'total':msg['total'], 'line_count':len(msg['lines']),
             'attachment_filename':msg['number']+'.pdf', 'requested_at':row['requested_at'],
+            'completed_at':row.get('completed_at'),
             'transport':row.get('transport'),'delivery_status':row.get('delivery_status'),
             'provider_message_id':row.get('provider_message_id')}
 
@@ -279,6 +280,23 @@ def decide(request, platform, proposal_id, approve):
         row.update(state='sent',completed_at=_now(),**receipt);_write(path,rows)
         return {'state':'sent','sent':True,'proposal_id':proposal_id,'recipient':snap['to']}
 
-def history(request,platform,record_id):
-    _guard(request,platform)
-    return [_public(r) for r in _read(_path(request,platform)) if r.get('record_id')==record_id][-50:]
+def history(request, platform, record_id):
+    # Past delivery records remain viewable when outbound sending is disabled.
+    _guard(request, platform, require_send_enabled=False)
+    rows = [_public(r) for r in _read(_path(request, platform))
+            if r.get('record_id') == record_id][-50:]
+    # This view uses ONLY the existing signature-verified webhook event ledger.
+    # A provider acceptance is not a delivered email.
+    if rows:
+        from app.services.moses_resend_events import status as observed_status
+        observed = observed_status(request, platform, 'purchase_order', record_id)
+        events = {str(r.get('proposal_id') or ''): r for r in observed.get('items', [])}
+        for item in rows:
+            event = events.get(str(item.get('id') or ''))
+            if event:
+                item['delivery_status'] = event.get('delivery_status') or 'not_confirmed'
+                item['delivery_event_at'] = event.get('delivery_event_at')
+            else:
+                item['delivery_status'] = item.get('delivery_status') or 'not_confirmed'
+                item['delivery_event_at'] = None
+    return rows

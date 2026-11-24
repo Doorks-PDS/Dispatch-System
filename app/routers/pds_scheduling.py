@@ -349,7 +349,7 @@ def my_jobs(request: Request, day: str = ''):
             continue
         # Allowlist keeps private office notes and other customers' records out.
         found.append({k: str(job.get(k) or '')[:200] for k in
-                      ('id', 'job_number', 'date', 'customer', 'address', 'status', 'contact')})
+                      ('id', 'job_number', 'date', 'scheduled_date', 'scheduled_time', 'customer', 'address', 'status', 'contact')})
         found[-1]['tentative'] = bool(job.get('assignment_tentative', True))
     found.sort(key=lambda j: (j['date'], j['job_number']))
     return {'ok': True, 'jobs': found, 'count': len(found),

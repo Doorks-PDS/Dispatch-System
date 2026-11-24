@@ -168,15 +168,9 @@ def create_order(payload: POInput, request: Request):
                   'updated_by':actor['name'], 'updated_by_id':actor['id']}
         items.append(record)
         _write(records, items)
-        # Keep the legacy primary PO # while every individual PO retains its
-        # own immutable job link. Multiple POs are shown by linked job_id.
-        if verified_job and not str(verified_job.get('po_number') or '').strip():
-            try:
-                linked = request.app.state.calendar_store.update_job(str(verified_job['id']), {'po_number': number})
-                if str(linked.get('po_number') or '') != number:
-                    record['link_warning'] = 'Job PO field not confirmed; PO remains linked by job ID'
-            except Exception:
-                record['link_warning'] = 'Job PO field could not be refreshed; PO remains linked by job ID'
+        # The job's po_number is the CUSTOMER purchase-order reference.
+        # A supplier PO is linked through this record's verified job_id and
+        # work_order, never by overwriting the customer's reference.
         return record
 
 @router.patch('/{record_id}')

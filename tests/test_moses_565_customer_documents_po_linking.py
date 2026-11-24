@@ -34,18 +34,19 @@ def payload(**updates):
     data.update(updates)
     return po.POInput(data=data)
 
-def test_saved_po_uses_verified_job_link_and_primary_field(tmp_path):
+def test_saved_supplier_po_links_to_job_without_overwriting_customer_po(tmp_path):
     jobs=Jobs();r=req(tmp_path,jobs)
     one=po.create_order(payload(tracking_number='UPS999',arrival_date='2026-11-30'),r)
     assert one['job_id']=='job-fixed-5' and one['work_order']=='100344'
     assert one['work_order_number']=='100344' and one['customer']=='Saddleback Design Co.'
     assert one['tracking_number']=='UPS999' and one['arrival_date']=='2026-11-30'
-    assert jobs.jobs[0]['po_number']==one['po_number']
+    assert jobs.jobs[0]['po_number']==''  # Customer PO stays independent
     two=po.create_order(payload(tracking_number='DHL888'),r)
     assert two['job_id']==one['job_id'] and two['po_number']!=one['po_number']
-    assert jobs.jobs[0]['po_number']==one['po_number']
+    assert jobs.jobs[0]['po_number']==''  # Customer PO stays independent
     listed=po.list_orders(r)['items']; assert len(listed)==2
     assert all(x['job_id']=='job-fixed-5' for x in listed)
+    assert not jobs.writes
 
 def test_unmatched_or_other_customer_po_does_not_allocate_number(tmp_path):
     jobs=Jobs();r=req(tmp_path,jobs)
@@ -94,7 +95,8 @@ def test_ticket_original_alternate_and_existing_ai_paths_are_reused():
 def test_saved_docs_have_real_delivery_status_and_correct_edit_path():
     js=(ROOT/'static/app.js').read_text()
     assert "marker.textContent='Saved PDF'" in js
-    assert "marker.textContent='Email Sent'" in js
+    assert "marker.textContent='Resend Accepted'" in js
+    assert "marker.textContent='Delivered to mail server'" in js
     assert "editSaved.textContent='View/Edit'" in js
     assert "edit.textContent='View/Edit Linked Document'" in js
     assert "preview.send_enabled===false" in js

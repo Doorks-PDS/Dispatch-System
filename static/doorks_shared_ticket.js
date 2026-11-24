@@ -12,7 +12,7 @@
    {label:'Contact',keys:['contact','contact_name']},
    {label:'Phone',keys:['phone','contact_phone']},
    {label:'Email',keys:['email'],office:true},
-   {label:'PO #',keys:['po_number'],office:true},
+   {label:'Customer PO #',keys:['po_number'],office:true},
    {label:'Estimate #',keys:['estimate_number'],office:true},
    {label:'Sent Estimate #',keys:['sent_quote_number'],office:true},
    {label:'Quote Assigned To',keys:['quote_assigned_to'],office:true},
@@ -33,7 +33,8 @@
    for(const field of ticketFieldSchema){
      if(field.office&&!office)continue;
      if(options.only&& !options.only.includes(field.label))continue;
-     const value=field.keys.map(k=>r[k]).find(nonempty);
+     const rawValue=field.keys.map(k=>r[k]).find(nonempty);
+     const value=options.suppressPdsSupplierPO && field.label==='Customer PO #' && /^PO-\d{5,}$/i.test(String(rawValue||'')) ? '' : rawValue;
      if(!office&&!nonempty(value))continue;
      const cell=node('div',office?'':'dst-cell');
      if(office){cell.append(node('div','label',field.label),node('div','field',value??''));}
@@ -249,7 +250,7 @@
  // the office ticket and portal request form. Never authorizes persistence.
  const editableTicketFields=Object.freeze({
    address:'Address',contact:'Contact',phone:'Phone',email:'Email',
-   po_number:'Purchase order',estimate_number:'Estimate number',
+   po_number:'Customer PO number',estimate_number:'Estimate number',
    invoice_number:'Invoice number',quote_assigned_to:'Quote assigned to',
    sent_quote_number:'Sent estimate number',requested_date:'Requested date',
    requested_time:'Requested time'
