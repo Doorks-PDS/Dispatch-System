@@ -76,10 +76,13 @@ def test_recommendation_photos_use_saved_attachment_ids_and_fullsize_viewer():
     assert 'form?.attachments' in gallery
     assert 'isImageFilename(f.filename)' in gallery
     assert 'buildCompletionAttachmentUrl(jobId,form.id,f.filename)' in gallery
-    assert 'openAttachmentCarousel(files,index)' in gallery
-    assert 'strip.scrollBy({left:direction*230' in gallery
-    assert "aria-label','View full-size image" in gallery
-    assert 'src=file.url' in gallery
+    assert 'pdsCompactPhotoViewer(files' in gallery
+    assert 'openAttachmentCarousel(files,index)' in js_section('function pdsCompactPhotoViewer(', 'function pdsFormPhotoCarousel(')
+    viewer=js_section('function pdsCompactPhotoViewer(', 'function pdsFormPhotoCarousel(')
+    assert 'Math.floor(index/3)*3' in viewer
+    assert "previous.setAttribute('aria-label','Previous photo')" in viewer
+    assert "next.setAttribute('aria-label','Next photo')" in viewer
+    assert 'image.src=item.url' in viewer
 
 
 def test_timeoff_single_clickable_pill_and_side_request_details():

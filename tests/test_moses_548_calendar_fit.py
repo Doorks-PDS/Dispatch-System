@@ -12,7 +12,7 @@ def test_calendar_shows_all_that_fit_without_five_job_limit():
     assert 'Math.floor((available - markerHeight + gap) / rowSpace)' in app
     assert 'openDailySchedule(dt, dayJobs)' in app
     assert '.cal-item[hidden]{display:none!important;}' in css
-    assert 'height:clamp(172px, 22vh, 268px)' in css
+    assert 'height:clamp(230px, 27vh, 300px)' in css
     assert '/static/style.css?v=__CSS_ASSET_VERSION__' in (ROOT / 'templates/ui.html').read_text()
 
 

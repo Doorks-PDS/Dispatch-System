@@ -127,6 +127,13 @@ def _supplier(request, supplier_id, supplier_name, supplier_email):
     return name, supplier_email.strip()
 
 
+@router.get('/config')
+def supplier_quote_email_config(request: Request):
+    _auth(request, write=True)
+    # The configured reply address must match the actual Resend send endpoint.
+    return {'reply_to': os.getenv('PDS_SUPPLIER_QUOTES_REPLY_TO', 'reception@prioritydoors.com').strip()}
+
+
 @router.get('')
 def list_quotes(request: Request, q: str = '', status: str = ''):
     _auth(request)

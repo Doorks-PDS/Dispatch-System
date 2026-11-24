@@ -411,7 +411,7 @@ textarea:focus{
   border-radius:16px;
   padding:8px;
   background:#fff;
-  height:clamp(172px, 22vh, 268px);
+  height:clamp(230px, 27vh, 300px);
   min-height:0;
   min-width:0;
   cursor:pointer;
@@ -434,7 +434,7 @@ textarea:focus{
   flex:1 1 auto;
   min-height:0;
   flex-direction:column;
-  gap:6px;
+  gap:4px;
   font-weight:900;
   font-size:12px;
   min-width:0;
@@ -444,7 +444,7 @@ textarea:focus{
   display:flex;
   flex:none;
   align-items:center;
-  padding:6px 8px;
+  padding:5px 8px;
   border-radius:10px;
   background:#fafafa;
   min-width:0;

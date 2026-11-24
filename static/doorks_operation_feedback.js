@@ -6,7 +6,7 @@
   const originalFetch = window.fetch.bind(window);
   let active = 0;
   let errors = 0;
-  let bar, message, spinner, hideTimer;
+  let bar, message, spinner, hideTimer, managedSave=false;
   function mount() {
     if (bar || !document.body) return;
     bar = document.createElement('div');
@@ -23,15 +23,27 @@
     document.head.append(style);
     document.body.append(bar);
   }
-  function show(label, busy) {
+  function show(label, busy, state='neutral') {
     mount();
     if (!bar) return;
     clearTimeout(hideTimer);
     message.textContent = label;
     spinner.style.display = busy ? 'inline-block' : 'none';
-    bar.style.display = 'flex';
-    if (!busy) hideTimer = setTimeout(() => { if (active === 0) bar.style.display = 'none'; }, 3500);
+    const failed=state==='error';
+    bar.style.background=failed?'#831b1b':state==='success'?'#203b2c':busy?'#214a37':'#334155';
+    bar.style.color='#fff';
+    bar.style.border=failed?'1px solid #fca5a5':'1px solid transparent';
+    bar.style.display='flex';
+    if (!busy) hideTimer = setTimeout(() => { if (active === 0) bar.style.display='none'; }, failed ? 4400 : 3000);
   }
+  // PDS save handlers drive the same bottom-center bar; the fetch wrapper must
+  // not overwrite Saved!/Save failed with a generic HTTP-success message.
+  window.DoorksOperationFeedback = {
+    updateSave(label,state='saving') {
+      managedSave=state==='saving';
+      show(label,state==='saving',state);
+    }
+  };
   function methodOf(input, init) {
     return String((init && init.method) || (input && input.method) || 'GET').toUpperCase();
   }
@@ -46,9 +58,12 @@
   window.fetch = async function (input, init) {
     const method = methodOf(input, init);
     if (method === 'GET' || method === 'HEAD' || method === 'OPTIONS') return originalFetch(input, init);
+    // The app has already declared this as a tracked save; use its precise
+    // server-acknowledged status rather than counting this request twice.
+    if (init && init.__doorksManagedSave) return originalFetch(input, init);
     const uploading = isUpload(input, init);
     active++;
-    show((uploading ? 'Uploading file' : 'Saving changes') + '…' + (active > 1 ? ' (' + active + ' requests)' : ''), true);
+    if (!managedSave) show((uploading ? 'Uploading file' : 'Processing request') + '…' + (active > 1 ? ' (' + active + ' requests)' : ''), true);
     try {
       const response = await originalFetch(input, init);
       if (!response.ok) errors++;
@@ -58,9 +73,10 @@
       throw error;
     } finally {
       active--;
-      if (active > 0) show(active + ' operation' + (active === 1 ? '' : 's') + ' still processing…', true);
-      else {
-        show(errors ? 'Some changes could not be saved. Check the form for details.' : 'Request completed. Check the form for confirmation.', false);
+      if (active > 0) {
+        if (!managedSave) show(active + ' request' + (active === 1 ? '' : 's') + ' processing…', true);
+      } else {
+        if (!managedSave) show(errors ? 'Request failed — see details in the form' : 'Request completed', false, errors?'error':'neutral');
         errors = 0;
       }
     }

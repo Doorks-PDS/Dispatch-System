@@ -35,7 +35,8 @@ def test_photos_include_job_and_form_attachments_in_one_helper():
     assert "form?.attachments" in forms
     assert "job?.attachments" in forms
     assert 'buildJobAttachmentUrl(job.id,file.filename)' in forms
-    assert 'openAttachmentCarousel(files,index)' in forms
+    assert 'pdsCompactPhotoViewer(files' in forms
+    assert 'openAttachmentCarousel(files,index)' in section('function pdsCompactPhotoViewer(', 'function pdsFormPhotoCarousel(')
     assert 'const jobPhotos=pdsJobPhotoCarousel(job)' in helper
     assert 'sourceGallery.append(jobTitle,jobPhotos)' in helper
 
@@ -43,13 +44,13 @@ def test_photos_include_job_and_form_attachments_in_one_helper():
 def test_new_part_opens_an_actual_approval_gated_supplier_draft_form():
     catalog=section('function pdsQuickCatalogEditor(', 'function pdsQuickSupplierQuoteRequest(')
     supplier=section('function pdsQuickSupplierQuoteRequest(', '// Send saved PDS estimates/invoices')
-    assert "quoteLabel.textContent='Supplier Quote'" in catalog
-    assert "request.textContent='+ Request Supplier Quote'" in catalog
+    assert "opt.value='supplier_quote'" in catalog
+    assert "await pdsQuickSupplierQuoteRequest(context.jobNumber||''" in catalog
     assert "data.supplier_quote_id=api.form.dataset.pdsSupplierQuoteId" in catalog
     assert "'/pds-supplier-quotes'" in supplier
     assert "'/attachments'" in supplier
     assert "['email_subject','Email Subject" in supplier
-    assert 'Review the email in Supplier Pricing before sending.' in supplier
+    assert 'Review email and attachments before approving a send.' in supplier
     assert "'/send'" not in supplier
 
 

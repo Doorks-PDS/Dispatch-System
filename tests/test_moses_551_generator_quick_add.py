@@ -67,7 +67,7 @@ def test_generator_has_inline_customer_vendor_catalog_and_review_before_save():
     assert 'pdsQuickRecordEditor' in source
     assert "id=\"doc_new_customer\"" in source
     assert "textContent='＋ Add Vendor'" in source
-    assert 'Add New Part or Service' in source
+    assert 'id="part_lookup_new"' in source and '＋ New' in source
     assert 'Apply Selected Suggestions' in source
     assert 'Apply Checked Fields' in source
     assert 'defaultDocItems(pricing)' in source
