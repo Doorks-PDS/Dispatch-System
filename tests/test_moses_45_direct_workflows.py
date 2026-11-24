@@ -9,8 +9,9 @@ def test_job_flow_button_opens_office_queue_not_failed_ai_chat():
     assert "batchBtn.onclick=()=>openPdsJobFlowWorkQueue()" in APP
     assert "async function openPdsJobFlowWorkQueue()" in APP
     assert "Review the PDS Job Flow. Identify unassigned Quote jobs" not in APP
-    assert "const groups={quotes,invoices,parts}" in APP
-    assert "if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(currentUser?.role))return" in APP
+    assert "const kinds=[['quotes','Quotes'],['pricing','Supplier Pricing'],['invoices','Invoices']]" in APP
+    assert "const count={quotes:jobs.filter(" in APP
+    assert "if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(String(currentUser?.role||'')))return" in APP
 
 
 def test_todo_actions_use_existing_workflows_and_keep_job_id():
@@ -42,7 +43,7 @@ def test_direct_actions_do_not_auto_send_or_change_work_records():
     queue = APP[start:end]
     assert "apiListJobs({limit:5000})" in queue
     assert "openDrawer('Job Details'" in queue
-    assert "openEstimateInvoiceDrawer(await apiGetJob(job.id),'invoice')" in queue
-    assert "await openPdsSingleQuoteReview(job)" in queue
+    assert "openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice'" in queue
+    assert "const full=await apiGetJob(job.id)" in queue
     assert '/resend' not in queue
     assert 'apiUpdateJob(' not in queue

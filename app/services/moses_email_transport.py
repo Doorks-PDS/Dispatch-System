@@ -57,6 +57,37 @@ def send_resend(message, pdf_bytes=None):
             raise HTTPException(422, 'Invalid document number')
         payload['attachments'] = [{'filename':number+'.pdf',
                                   'content':base64.b64encode(pdf_bytes).decode('ascii')}]
+    if message.get('attachments'):
+        if pdf_bytes is not None:
+            raise HTTPException(422, 'Choose one attachment source')
+        from pathlib import Path
+        types = {'.pdf':'application/pdf','.png':'image/png','.jpg':'image/jpeg',
+                 '.jpeg':'image/jpeg','.webp':'image/webp'}
+        files = message['attachments']
+        if not isinstance(files, list) or len(files) > 8:
+            raise HTTPException(422, 'Too many attachments')
+        total = 0
+        payload['attachments'] = []
+        for item in files:
+            name = header(item.get('filename', ''))
+            raw = item.get('content')
+            ext = Path(name).suffix.lower()
+            if (not name or len(name) > 160 or '/' in name or '\\' in name or
+                ext not in types or item.get('mime') != types.get(ext) or
+                not isinstance(raw, bytes) or not raw):
+                raise HTTPException(422, 'Invalid RFQ attachment')
+            signatures = {'.pdf': raw.startswith(b'%PDF'),
+                          '.png': raw.startswith(b'\x89PNG\r\n\x1a\n'),
+                          '.jpg': raw.startswith(b'\xff\xd8\xff'),
+                          '.jpeg': raw.startswith(b'\xff\xd8\xff'),
+                          '.webp': raw.startswith(b'RIFF') and raw[8:12] == b'WEBP'}
+            if not signatures[ext] or len(raw) > 4 * 1024 * 1024:
+                raise HTTPException(422, 'RFQ attachment content invalid')
+            total += len(raw)
+            if total > 12 * 1024 * 1024:
+                raise HTTPException(422, 'RFQ attachment total exceeds limit')
+            payload['attachments'].append({'filename': name,
+                                  'content': base64.b64encode(raw).decode('ascii')})
     body=json.dumps(payload).encode('utf-8')
     req=Request('https://api.resend.com/emails', data=body, method='POST',
                 headers={'Authorization':'Bearer '+os.environ['RESEND_API_KEY'],

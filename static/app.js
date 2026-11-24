@@ -942,27 +942,70 @@
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
   }
 
+  // One unobtrusive status for ordinary record saves, not email sends,
+  // AI previews or payment approvals. Never show Saved unless the server replies OK.
+  let pdsSaveNoticeNode=null, pdsSaveNoticePending=0, pdsSaveNoticeTimer=null;
+  function pdsSaveNotice(message, state='saving'){
+    if(!document.body)return;
+    if(!pdsSaveNoticeNode){
+      pdsSaveNoticeNode=document.createElement('div');
+      pdsSaveNoticeNode.id='pds-save-progress';
+      pdsSaveNoticeNode.setAttribute('role','status');
+      pdsSaveNoticeNode.setAttribute('aria-live','polite');
+      pdsSaveNoticeNode.style.cssText='position:fixed;top:92px;right:18px;z-index:22000;display:flex;align-items:center;gap:10px;padding:10px 15px;border:1px solid #cbd5e1;border-radius:12px;background:#fff;box-shadow:0 8px 26px #0002;color:#172133;font-weight:750;font-size:14px;max-width:80vw';
+      document.body.append(pdsSaveNoticeNode);
+    }
+    clearTimeout(pdsSaveNoticeTimer);pdsSaveNoticeNode.replaceChildren();
+    if(state==='saving'){
+      const spinner=document.createElement('span');spinner.className='pds-save-spinner';
+      spinner.setAttribute('aria-hidden','true');
+      spinner.style.cssText='width:15px;height:15px;border:2px solid #cbd5e1;border-top-color:#f97316;border-radius:50%;animation:pds-save-spin .7s linear infinite';
+      pdsSaveNoticeNode.append(spinner);
+    }
+    const label=document.createElement('span');label.textContent=message;pdsSaveNoticeNode.append(label);
+    if(state!=='saving')pdsSaveNoticeTimer=setTimeout(()=>{pdsSaveNoticeNode?.remove();pdsSaveNoticeNode=null;},1800);
+  }
+  function pdsIsSaveRequest(url,opts){
+    const method=String(opts.method||'GET').toUpperCase();
+    return ['POST','PATCH','PUT'].includes(method)&&
+      /^\/(?:calendar|data\/parts|pds-supplier-quotes|pds-van-stock|pds-purchase-orders|crm\/(?:customers|contacts)|pds-scheduling|door-logs|receipts|documents)(?:\/|$)/.test(String(url))&&
+      !/\/(?:preview|send|approve|request-approval|extract|read|lookup)(?:\/|\?|$)/.test(String(url));
+  }
   async function fetchJSON(url, opts = {}) {
+    const trackedSave=pdsIsSaveRequest(url,opts);
+    if(trackedSave){pdsSaveNoticePending++;pdsSaveNotice('Saving…','saving');}
     const headers = opts.headers || {};
     opts.headers = headers;
     opts.credentials = "same-origin";
 
-    const res = await fetch(url, opts);
-    const txt = await res.text();
-    let data = null;
-    try { data = JSON.parse(txt); } catch {}
-
-    if (!res.ok) {
-      const msg = (data && (data.detail || data.error)) ? (data.detail || data.error) : (txt || `HTTP ${res.status}`);
-      if (res.status === 401) {
-        currentUser = null;
-        applyRoleAccess(null);
-        updateLoginUi();
-        showLoggedOutSplash("Session expired. Please log in again.");
+    let saveCompleted=false;
+    try {
+      const res = await fetch(url, opts);
+      const txt = await res.text();
+      let data = null;
+      try { data = JSON.parse(txt); } catch {}
+      if (!res.ok) {
+        const msg = (data && (data.detail || data.error)) ? (data.detail || data.error) : (txt || `HTTP ${res.status}`);
+        if (res.status === 401) {
+          currentUser = null;
+          applyRoleAccess(null);
+          updateLoginUi();
+          showLoggedOutSplash("Session expired. Please log in again.");
+        }
+        throw new Error(msg);
       }
-      throw new Error(msg);
+      saveCompleted=true;
+      return data;
+    } catch(error) {
+      if(trackedSave)pdsSaveNotice('Save failed','error');
+      throw error;
+    } finally {
+      if(trackedSave){
+        pdsSaveNoticePending=Math.max(0,pdsSaveNoticePending-1);
+        if(pdsSaveNoticePending)pdsSaveNotice('Saving…','saving');
+        else if(saveCompleted)pdsSaveNotice('Saved!','success');
+      }
     }
-    return data;
   }
 
 
@@ -3231,7 +3274,13 @@
     }
     const admin = currentUser.role === "office_admin";
     if (platformSwitchWrap) platformSwitchWrap.style.display = admin ? "flex" : "none";
-    if (!admin) { showPlatformShell("pds"); return; }
+    if (!admin) {
+      // Older signed-in PDS sessions can lack the explicit workspace field.
+      // The endpoint reconciles the server session before PDS widgets load.
+      try { await fetchJSON('/platforms/current'); }
+      catch(err) { console.warn('PDS workspace initialization unavailable',err); }
+      showPlatformShell('pds'); return;
+    }
     try {
       const state = await fetchJSON("/platforms/current");
       showPlatformShell(state.platform || "pds");
@@ -3901,6 +3950,8 @@
       image_url: payload.image_url || "",
       product_url: payload.product_url || "",
       supplier_rate: payload.supplier_rate ?? "",
+      supplier_quote_number: payload.supplier_quote_number || "",
+      supplier_quote_id: payload.supplier_quote_id || "",
       min_stock: payload.item_type === "service" ? null : (payload.min_stock ?? null),
       item_type: payload.item_type === "service" ? "service" : "part",
     };
@@ -4521,9 +4572,8 @@ async function apiListForms() {
       currentUser = data.user || null;
       applyRoleAccess(currentUser ? currentUser.role : null);
       updateLoginUi();
-      renderCalendarView();
-      initializePlatform();
-      refreshBadges();
+      await initializePlatform();
+      if(activePlatform==='pds'){renderCalendarView();refreshBadges();}
     } catch (e) {
       pendingPinUser = null;
       updateLoginUi(e.message || "Login failed.");
@@ -4543,9 +4593,8 @@ async function apiListForms() {
       if (pinInput) pinInput.value = "";
       applyRoleAccess(currentUser ? currentUser.role : null);
       updateLoginUi();
-      renderCalendarView();
-      initializePlatform();
-      refreshBadges();
+      await initializePlatform();
+      if(activePlatform==='pds'){renderCalendarView();refreshBadges();}
     } catch (e) {
       updateLoginUi(e.message || "PIN verification failed.");
     }
@@ -6030,6 +6079,61 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }
   });
 
+  // Job-linked receipt/packing-slip upload. No duplicate Document Vault file or stock entry.
+  // This overlay leaves the dispatch ticket open and refreshes its linked records after save.
+  function openJobReceiptUpload(job, documentType, ticketContainer, ctx) {
+    const type=documentType==='Packing Slip'?'Packing Slip':'Receipt';
+    if(!String(job.job_number||'').trim()){alert('Save the job number before attaching a receipt or packing slip.');return;}
+    const overlay=document.createElement('div');overlay.className='overlay pds-job-receipt-overlay';
+    overlay.style.zIndex='15000';
+    const drawer=document.createElement('div');drawer.className='drawer';
+    const hd=document.createElement('div');hd.className='drawer-hd';
+    const heading=document.createElement('div');heading.className='drawer-title';heading.textContent='Attach '+type;
+    const close=document.createElement('button');close.type='button';close.className='drawer-close';close.textContent='×';
+    close.setAttribute('aria-label','Close upload');close.onclick=()=>overlay.remove();hd.append(heading,close);
+    const body=document.createElement('div');body.className='drawer-bd';
+    const intro=document.createElement('p');intro.className='hint';intro.textContent='Saved against Job #'+job.job_number+' in the existing Receipts & Packing Slips register. This attachment does not post an expense or receive inventory.';
+    const form=document.createElement('form');form.style.cssText='display:grid;gap:12px';
+    form.innerHTML=`<div class="grid2">
+      <label>Document Type<input class="input" name="display_type" readonly></label>
+      <label>Job #<input class="input" name="job_display" readonly></label>
+      <label>Customer<input class="input" name="customer" readonly></label>
+      <label>Date<input class="input" type="date" name="date" required></label>
+      <label>Uploaded By<input class="input" name="employee" readonly></label>
+      <label>Vendor / Supplier<input class="input" name="vendor" required placeholder="Who issued this document?"></label>
+      <label>PO # (optional)<input class="input" name="po_number" placeholder="Linked purchase order"></label>
+      <label>Document # (optional)<input class="input" name="receipt_number"></label>
+      <label data-job-receipt-amount>Receipt Amount ($)<input class="input" name="amount" type="number" min="0" step="0.01" required></label>
+      <label>Photo / PDF<input class="input" type="file" name="file" accept="image/*,application/pdf" required></label>
+      </div><label>Notes<textarea class="input" name="notes" rows="3" placeholder="Purpose, shipment, parts or other details"></textarea></label>
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><button class="btn btn-orange" type="submit">Save ${type}</button><button class="btn" type="button" data-cancel>Cancel</button></div><p class="hint" role="status" data-status></p>`;
+    form.elements.display_type.value=type;form.elements.job_display.value=String(job.job_number||'');
+    form.elements.customer.value=String(job.customer||'');
+    const today=new Date();form.elements.date.value=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+    form.elements.employee.value=String(currentUser?.name||currentUser?.username||'');
+    form.elements.po_number.value=String(job.po_number||job.po_no||'');
+    if(type==='Packing Slip'){form.elements.amount.value='0';form.querySelector('[data-job-receipt-amount]').hidden=true;}
+    const cancel=form.querySelector('[data-cancel]');cancel.onclick=()=>overlay.remove();
+    form.onsubmit=async event=>{
+      event.preventDefault();const save=form.querySelector('button[type="submit"]'),status=form.querySelector('[data-status]');
+      save.disabled=true;status.textContent='Saving original document…';
+      try{
+        const fd=new FormData(form);fd.delete('display_type');fd.delete('job_display');
+        fd.set('document_type',type);fd.set('job_number',String(job.job_number||''));
+        fd.set('customer',String(job.customer||''));fd.set('employee',String(currentUser?.name||currentUser?.username||''));
+        fd.set('category',type==='Packing Slip'?'Stock / Inventory':'Other');
+        fd.set('amount',type==='Packing Slip'?'0':form.elements.amount.value);
+        const response=await fetch('/receipts',{method:'POST',credentials:'same-origin',body:fd});
+        const result=await response.json().catch(()=>({}));
+        if(!response.ok||!result.item?.id)throw Error(result.detail||'Receipt upload could not be verified');
+        overlay.remove();renderJobDetails(ticketContainer,job,ctx);
+      }catch(error){status.textContent='Upload not confirmed: '+(error.message||error);save.disabled=false;}
+    };
+    body.append(intro,form);drawer.append(hd,body);overlay.append(drawer);document.body.append(overlay);
+    overlay.addEventListener('dblclick',event=>{if(event.target===overlay&&confirm('Discard the unfinished upload?'))overlay.remove()});
+    form.elements.vendor.focus();
+  }
+
   function renderJobDetails(container, job, ctx) {
     container.innerHTML = "";
     pdsLoadOfficePolish();
@@ -6356,7 +6460,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       // Alternate documents use the same existing Document Library; never issue new PDS document numbers.
       // Keep the action visually aligned with Estimate, Invoice and Purchase Order.
       const alternateUpload=document.createElement('button');alternateUpload.type='button';styleActionButton(alternateUpload,'blue',true);
-      alternateUpload.textContent='Alternate Upload';
+      alternateUpload.textContent='Alternate';
       alternateUpload.title='Attach an existing estimate, invoice or purchase order (including QuickBooks) using its original number';
       alternateUpload.setAttribute('aria-expanded','false');
       const alternateChoices=document.createElement('div');alternateChoices.hidden=true;
@@ -6370,6 +6474,13 @@ function renderAttachmentSection(titleText, items, options = {}) {
       for(const [label,type] of alternateOptions){
         const choice=document.createElement('button');choice.type='button';styleActionButton(choice,'blue',true);
         choice.textContent=label;choice.onclick=()=>openAlternate(type);alternateChoices.appendChild(choice);
+      }
+      // A receipt/packing slip is an expense/field attachment, not a numbered business document.
+      // Save it once through the existing /receipts store used by Field Flow and Accounting.
+      for(const [label,type] of [['Receipt','Receipt'],['Packing Slip','Packing Slip']]){
+        const choice=document.createElement('button');choice.type='button';styleActionButton(choice,'blue',true);
+        choice.textContent=label;choice.onclick=()=>openJobReceiptUpload(job,type,container,ctx);
+        alternateChoices.appendChild(choice);
       }
       alternateUpload.onclick=()=>{alternateChoices.hidden=!alternateChoices.hidden;alternateChoices.style.display=alternateChoices.hidden?'none':'flex';alternateUpload.setAttribute('aria-expanded',String(!alternateChoices.hidden));};
       secondaryActions.append(alternateUpload,alternateChoices);
@@ -7453,7 +7564,18 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.parts_used=[payload.parts_used,`Van stock used: ${vanDetail}`].filter(Boolean).join('\n');
           }
           const selectedFiles = Array.from(card.querySelector("#cf_files")?.files || []);
-          const savedForm = await apiAddCompletion(job.id, payload);
+          pdsSaveNoticePending++;
+          pdsSaveNotice('Saving…','saving');
+          let savedForm;
+          try {
+            savedForm = await apiAddCompletion(job.id, payload);
+            pdsSaveNoticePending = Math.max(0, pdsSaveNoticePending - 1);
+            pdsSaveNotice('Saved!','success');
+          } catch (saveError) {
+            pdsSaveNoticePending = Math.max(0, pdsSaveNoticePending - 1);
+            pdsSaveNotice('Save failed','error');
+            throw saveError;
+          }
           if(vanUsage.items.length){
             const failures=[];
             for(const item of vanUsage.items){
@@ -7675,7 +7797,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       // Existing time-off requests are the source of truth; never mutate jobs.
       let approvedAbsences = [];
       try {
-        const timeoff = await apiListTimeOff({limit: 500});
+        const timeoff = await apiListTimeOff({limit: 5000, status: 'approved'});
         if (requestId !== calendarRequestId) return;
         approvedAbsences = timeoff.filter(t =>
           String(t.status || '').trim().toLowerCase() === 'approved' &&
@@ -7713,23 +7835,29 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const dayJobs = (byDate[dt] || []).slice();
 
         if (document.body.dataset.platform === 'pds') {
-          // Inclusive dates; one compact, clearly differentiated pill per employee.
-          const absentNames = new Set();
-          for (const request of approvedAbsences) {
-            const from = String(request.start_date || '');
-            const through = String(request.end_date || from);
-            if (from <= dt && dt <= through) {
-              const firstName = String(request.employee_name || '').trim().split(/\s+/)[0];
-              if (firstName) absentNames.add(firstName);
+          // Group everyone off on this date in a single accessible, clickable pill.
+          // Use saved approved requests; never invent or create calendar jobs.
+          const dayAbsences = approvedAbsences.filter(request => {
+            const from=String(request.start_date || '');
+            const through=String(request.end_date || from);
+            return from<=dt && dt<=through;
+          });
+          if (dayAbsences.length) {
+            const names=[...new Set(dayAbsences.map(request=>String(request.employee_name||'').trim().split(/\s+/)[0]).filter(Boolean))]
+              .sort((a,b)=>a.localeCompare(b));
+            if (names.length) {
+              const marker=document.createElement('button');
+              marker.type='button';marker.className='pds-cal-timeoff';
+              marker.style.cssText='display:block;flex:none;width:100%;min-width:0;text-align:left;font-size:11px;line-height:1.4;background:#fff2e6;border:1px solid #f4cba6;border-radius:7px;color:#8b470d;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;';
+              marker.textContent=names.join(', ')+' Out';
+              marker.dataset.allNames=names.join(', ');
+              marker.dataset.firstName=names[0];
+              marker.dataset.absenceCount=String(names.length);
+              marker.title=names.join(', ')+' — View approved time off';
+              marker.setAttribute('aria-label',names.join(', ')+' out on '+dt+'. View approved time off requests');
+              marker.onclick=event=>{event.stopPropagation();openCalendarTimeOffDetails(dt,dayAbsences);};
+              items.appendChild(marker);
             }
-          }
-          for (const name of [...absentNames].sort((a,b) => a.localeCompare(b))) {
-            const marker = document.createElement('div');
-            marker.className = 'pds-cal-timeoff';
-            marker.style.cssText = 'font-size:11px;line-height:1.35;background:#fff2e6;border:1px solid #f4cba6;border-radius:7px;color:#8b470d;padding:3px 6px;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;';
-            marker.textContent = name + ' Out';
-            marker.title = name + ' — Approved time off';
-            items.appendChild(marker);
           }
         }
 
@@ -7760,6 +7888,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       // Approved time-off markers take priority over regular job pills.
       const fitCalendarItems = () => {
         for (const { items, jobs } of visibleDayCells) {
+          for (const pill of items.querySelectorAll('.pds-cal-timeoff')) {
+            // Prefer the full comma-separated list if it fits the visible date cell.
+            const names=pill.dataset.allNames||'';
+            const count=Number(pill.dataset.absenceCount||0);
+            pill.textContent=names+' Out';
+            if(pill.scrollWidth>pill.clientWidth && count>1)
+              pill.textContent=pill.dataset.firstName+' +'+(count-1)+' Out';
+            if(pill.scrollWidth>pill.clientWidth) pill.textContent=count+' Out';
+          }
           for (const item of jobs) item.hidden = false;
           if (!jobs.length) continue;
           const available = items.clientHeight;
@@ -7785,6 +7922,40 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         grid.__calendarObserver = observer;
       }
       refreshBadges();
+    }
+
+    function openCalendarTimeOffDetails(dateStr, requests) {
+      const snapshot=(Array.isArray(requests)?requests:[]).filter(r=>r && String(r.status||'').toLowerCase()==='approved');
+      const panel=openDrawer('Time Off · '+mmDdYy(dateStr), (container)=>{
+        const intro=document.createElement('div');intro.className='hint';
+        intro.textContent=snapshot.length+' approved time off request'+(snapshot.length===1?'':'s')+' for this day';
+        intro.style.marginBottom='15px';container.append(intro);
+        snapshot.sort((a,b)=>String(a.employee_name||'').localeCompare(String(b.employee_name||''))).forEach(entry=>{
+          const card=document.createElement('section');card.className='card';
+          card.style.cssText='padding:14px;margin-bottom:10px;display:grid;gap:7px';
+          const head=document.createElement('div');head.className='jobrow-top';
+          const employee=document.createElement('strong');employee.textContent=String(entry.employee_name||'Employee');
+          const status=document.createElement('span');status.className='badge';status.textContent='Approved';
+          head.append(employee,status);
+          const span=document.createElement('div');span.className='hint';
+          span.textContent='Dates: '+(formatDisplayDate(entry.start_date)||entry.start_date||'—')+
+            (entry.end_date && entry.end_date!==entry.start_date ? ' – '+(formatDisplayDate(entry.end_date)||entry.end_date) : '');
+          card.append(head,span);
+          if(entry.emergency){const emergency=document.createElement('small');emergency.style.color='#aa3d2e';emergency.textContent='Emergency request';card.append(emergency);}
+          if(entry.use_pto){const pto=document.createElement('small');pto.textContent='PTO: '+String(entry.pto_hours||0)+' hours';card.append(pto);}
+          if(String(entry.notes||'').trim()){
+            const label=document.createElement('small');label.textContent='Request notes';label.className='hint';
+            const notes=document.createElement('div');notes.textContent=String(entry.notes);notes.style.cssText='white-space:pre-wrap;overflow-wrap:anywhere';
+            card.append(label,notes);
+          }
+          container.append(card);
+        });
+        if(['office','office_admin','admin'].includes(String(currentUser?.role||''))){
+          const manage=document.createElement('button');manage.type='button';manage.className='btn';manage.textContent='Open Time Off Requests';
+          manage.onclick=()=>{panel.remove();renderTimeOffView();};container.append(manage);
+        }
+      });
+      panel.style.zIndex='11000';
     }
 
     function openDailySchedule(dateStr, preloadedJobs = null) {
@@ -8722,49 +8893,247 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
   // Office work queue: uses saved PDS jobs and the existing review/estimator tools.
   // No LLM call, automatic email, status change or staff assignment is performed here.
+  // Moses Job Flow uses the existing PDS supplier RFQ records; nothing is sent
+  // until a staff member previews the persisted message and explicitly approves.
   async function openPdsJobFlowWorkQueue(){
-    if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(currentUser?.role))return;
-    const previous=document.getElementById('pdsMosesWorkQueue');if(previous)previous.remove();
-    const veil=document.createElement('div');veil.id='pdsMosesWorkQueue';veil.style.cssText='position:fixed;inset:0;z-index:11090;background:#101d2b70;display:flex;align-items:center;justify-content:center;padding:12px';
-    const dialog=document.createElement('section');dialog.style.cssText='background:#fff;border:1px solid #dce3e9;border-radius:16px;width:min(1100px,100%);height:min(88vh,900px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 44px #0004';
-    const head=document.createElement('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid #e3e8ed';
-    const title=document.createElement('strong');title.textContent='Moses · Job Flow';
-    const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>veil.remove();head.append(title,close);
-    const tabs=document.createElement('div');tabs.style.cssText='display:flex;gap:7px;padding:12px 18px;flex-wrap:wrap';
-    const body=document.createElement('div');body.style.cssText='padding:4px 18px 22px;overflow:auto;flex:1;min-height:0;display:grid;align-content:start;gap:8px';
-    dialog.append(head,tabs,body);veil.append(dialog);document.body.append(veil);
+    if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(String(currentUser?.role||'')))return;
+    document.getElementById('pdsMosesWorkQueue')?.remove();
+    const make=(tag,label,cls)=>{const e=document.createElement(tag);if(label!=null)e.textContent=label;if(cls)e.className=cls;return e;};
+    const action=(label,callback,primary=false)=>{const b=make('button',label,'btn'+(primary?' btn-orange':''));b.type='button';b.onclick=callback;return b;};
+    const rfqApi=(path,method='GET',body)=>fetchJSON('/pds-supplier-quotes'+path,{method,headers:body?{'Content-Type':'application/json'}:undefined,body:body?JSON.stringify(body):undefined});
+    const veil=make('div');veil.id='pdsMosesWorkQueue';veil.style.cssText='position:fixed;inset:0;z-index:11090;background:#101d2b70;display:flex;align-items:center;justify-content:center;padding:12px';
+    const dialog=make('section');dialog.style.cssText='background:#fff;border:1px solid #dce3e9;border-radius:16px;width:min(1120px,100%);height:min(88vh,900px);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 12px 44px #0004';
+    const head=make('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid #e3e8ed';
+    head.append(make('strong','Moses · Job Flow'),action('Close ×',()=>veil.remove()));
+    const tabs=make('div');tabs.style.cssText='display:flex;gap:7px;padding:12px 18px;flex-wrap:wrap;border-bottom:1px solid #f1f2f5';
+    const body=make('div');body.style.cssText='padding:14px 18px 22px;overflow:auto;flex:1;min-height:0;display:grid;align-content:start;gap:10px';
+    const feedback=make('div','','hint');feedback.setAttribute('role','status');feedback.style.cssText='min-height:16px;padding:0 18px 8px';
+    dialog.append(head,tabs,feedback,body);veil.append(dialog);document.body.append(veil);
     veil.addEventListener('click',e=>{if(e.target===veil)veil.remove()});
-    const kinds=[['quotes','Quotes'],['invoices','Invoices'],['parts','Parts / Pricing']];
-    let active='quotes';let jobs=[];
-    const field=document.createElement('input');field.className='input';field.placeholder='Search customer or job #';field.style.cssText='width:100%;margin-bottom:8px;box-sizing:border-box';
-    async function show(){
-      tabs.replaceChildren();body.replaceChildren();body.append(field);
-      const normalized=x=>String(x||'').toLowerCase();
-      const quotes=jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(normalized(j.status).trim())&&!j.sent_quote_number);
-      const invoices=jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(normalized(j.status).trim())&&j.kind!=='sales_lead'&&!j.invoice_number);
-      const parts=jobs.filter(j=>['quote','complete/quote','to be quoted','to be invoiced','complete'].includes(normalized(j.status).trim())&&!j.sent_quote_number&&!j.invoice_number);
-      const groups={quotes,invoices,parts};
-      for(const [key,label] of kinds){const b=document.createElement('button');b.className=key===active?'btn btn-orange':'btn';b.textContent=label+' ('+groups[key].length+')';b.onclick=()=>{active=key;show()};tabs.append(b)}
-      const search=normalized(field.value.trim());const rows=(groups[active]||[]).filter(j=>!search||normalized(j.customer).includes(search)||normalized(j.job_number).includes(search));
-      for(const job of rows.slice(0,120)){
-        const card=document.createElement('div');card.style.cssText='border:1px solid #dce3e9;border-radius:11px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
-        const meta=document.createElement('div');meta.style.cssText='min-width:180px;flex:1';const name=document.createElement('strong');name.textContent=job.customer||'Job';
-        const detail=document.createElement('div');detail.className='hint';detail.textContent=['#'+(job.job_number||''),job.status,job.quote_assigned_to?'Assigned: '+job.quote_assigned_to:'Unassigned',job.address].filter(Boolean).join(' · ');meta.append(name,detail);
-        const controls=document.createElement('div');controls.style.cssText='display:flex;gap:7px;flex-wrap:wrap';
-        const view=document.createElement('button');view.className='btn';view.textContent='View Job';view.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',drawer=>{const node=document.createElement('div');drawer.append(node);renderJobDetails(node,full,{})});const overlay=[...document.querySelectorAll('.overlay')].at(-1);if(overlay)overlay.style.zIndex='11250'}catch(e){alert('Could not open job: '+(e.message||e))}};controls.append(view);
-        const action=document.createElement('button');action.className='btn';action.textContent=active==='quotes'?'Draft Estimate':active==='invoices'?'Draft Invoice':'Review Parts';
-        action.onclick=async()=>{
-          if(active==='invoices'){try{await openEstimateInvoiceDrawer(await apiGetJob(job.id),'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}
-          else if(active==='quotes'){await openPdsSingleQuoteReview(job)}
-          else{await openPdsPartReview(job)}
-        };controls.append(action);card.append(meta,controls);body.append(card);
-      }
-      if(rows.length>120){const note=document.createElement('small');note.textContent='Showing 120 of '+rows.length+' jobs. Search to narrow the list.';body.append(note)}
-      if(!rows.length){const note=document.createElement('p');note.className='hint';note.textContent='No matching jobs.';body.append(note)}
+    const kinds=[['quotes','Quotes'],['pricing','Supplier Pricing'],['invoices','Invoices']];
+    let active='quotes',jobs=[],rfqs=[],suppliers=[],editing=null,filter='';
+    const search=make('input',null,'input');search.type='search';search.placeholder='Search customer, job #, supplier or request';search.style.cssText='width:100%;box-sizing:border-box';
+    const norm=value=>String(value||'').toLowerCase().trim();
+    const pending=x=>!['closed','ready_for_estimate'].includes(x.status);
+    const heldJobs=()=>new Set(rfqs.filter(pending).map(r=>String(r.job_number||'').trim()).filter(Boolean));
+    const stateLabel={draft:'Draft',awaiting_supplier:'Awaiting Supplier',send_uncertain:'Send Uncertain',quote_received:'Quote Received',ready_for_estimate:'Ready for Estimate',closed:'Closed'};
+    function setMessage(message){feedback.textContent=message||'';}
+    function renderTabs(){
+      tabs.replaceChildren();const held=heldJobs();const count={quotes:jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(norm(j.status))&&!j.sent_quote_number&&!held.has(String(j.job_number||'').trim())).length,
+        invoices:jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(norm(j.status))&&j.kind!=='sales_lead'&&!j.invoice_number&&!held.has(String(j.job_number||'').trim())).length,
+        pricing:rfqs.filter(pending).length};
+      for(const [key,title] of kinds){const tab=action(title+' ('+count[key]+')',()=>{active=key;editing=null;draw()});tab.className=key===active?'btn btn-orange':'btn';tabs.append(tab)}
     }
-    field.oninput=show;
-    body.textContent='Loading PDS jobs…';
-    try{jobs=await apiListJobs({limit:5000});show()}catch(e){body.textContent='Unable to load jobs: '+(e.message||e)}
+    const fileUrl=(row,file)=>'/pds-supplier-quotes/'+encodeURIComponent(row.id)+'/attachments/'+encodeURIComponent(file.id);
+    function attachmentGallery(row,host,purpose){
+      const all=(row.attachments||[]).filter(a=>!purpose||a.purpose===purpose);
+      if(!all.length)return;
+      const strip=make('div');strip.style.cssText='display:flex;gap:9px;overflow-x:auto;padding:5px 0';
+      for(const a of all){
+        const link=document.createElement('a');link.href=fileUrl(row,a);link.target='_blank';link.rel='noopener noreferrer';link.title='Open '+a.filename;
+        link.style.cssText='display:grid;gap:4px;justify-items:center;width:100px;min-width:100px;padding:7px;border:1px solid #dce3e9;border-radius:10px;text-decoration:none;color:inherit';
+        if(/^image\//.test(a.mime)){const img=make('img');img.src=fileUrl(row,a);img.alt=a.filename;img.loading='lazy';img.style.cssText='width:84px;height:65px;object-fit:cover;border-radius:6px';link.append(img)}
+        else link.append(make('div','PDF','badge'));
+        const label=make('small',a.filename);label.style.cssText='font-size:11px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap';link.append(label);strip.append(link);
+      }
+      host.append(strip);
+    }
+    function draw(){
+      renderTabs();body.replaceChildren();
+      if(editing){drawEditor(editing);return;}
+      body.append(search);
+      if(active==='pricing'){drawPricingQueue();return;}
+      // A job with pending RFQ(s) is worked from Supplier Pricing until every
+      // supplier request is ready/closed. No job status or record is mutated.
+      const held=heldJobs();
+      const quotes=jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(norm(j.status))&&!j.sent_quote_number&&!held.has(String(j.job_number||'').trim()));
+      const invoices=jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(norm(j.status))&&j.kind!=='sales_lead'&&!j.invoice_number&&!held.has(String(j.job_number||'').trim()));
+      const rows=(active==='quotes'?quotes:invoices).filter(j=>!filter||[j.customer,j.job_number,j.address].some(v=>norm(v).includes(filter)));
+      for(const job of rows.slice(0,120)){
+        const card=make('article');card.style.cssText='border:1px solid #dce3e9;border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
+        const meta=make('div');meta.style.cssText='flex:1;min-width:200px';meta.append(make('strong',job.customer||'Job'));
+        meta.append(make('div',['#'+(job.job_number||''),job.status,job.quote_assigned_to?'Assigned: '+job.quote_assigned_to:'',job.address].filter(Boolean).join(' · '),'hint'));
+        const controls=make('div');controls.style.cssText='display:flex;gap:7px;flex-wrap:wrap';
+        controls.append(action('View Job',()=>viewJob(job)));
+        controls.append(action('Request Supplier Quote',()=>{active='pricing';editing={job_number:job.job_number||'',quantity:1,attachments:[]};draw()}));
+        const draft=action(active==='quotes'?'Draft Estimate':'Draft Invoice',async()=>{
+          draft.disabled=true;try{const full=await apiGetJob(job.id);if(String(full?.id)!==String(job.id))throw Error('Saved job identity mismatch');
+            openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice',null,{mosesJobFlow:true});
+          }catch(err){setMessage('Document review unavailable: '+(err.message||err))}finally{draft.disabled=false}
+        },true);controls.append(draft);card.append(meta,controls);body.append(card);
+      }
+      if(rows.length>120)body.append(make('small','Showing first 120 jobs. Search to narrow the list.','hint'));
+      if(!rows.length)body.append(make('p','No matching jobs.','hint'));
+    }
+    async function viewJob(job){
+      try{const full=await apiGetJob(job.id);openDrawer('Job Details',drawer=>{const node=make('div');drawer.append(node);renderJobDetails(node,full,{})});
+        const overlay=[...document.querySelectorAll('.overlay')].at(-1);if(overlay)overlay.style.zIndex='11250';
+      }catch(e){setMessage('Could not open job: '+(e.message||e))}
+    }
+    function drawPricingQueue(){
+      const toolbar=make('div');toolbar.style.cssText='display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap';
+      toolbar.append(make('strong','Supplier pricing requests'));
+      toolbar.append(action('+ Request Supplier Quote',()=>{editing={quantity:1,attachments:[]};draw()},true));body.append(toolbar);
+      const rows=rfqs.filter(row=>!filter||[row.supplier_name,row.job_number,row.description,row.supplier_quote_number].some(x=>norm(x).includes(filter)));
+      for(const row of rows.slice(0,120)){
+        const card=make('article');card.style.cssText='border:1px solid #dce5ed;border-radius:13px;padding:14px;display:grid;gap:8px';
+        const title=make('div');title.style.cssText='display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap';
+        title.append(make('strong',row.supplier_name||'Supplier needed'));
+        const pill=make('span',stateLabel[row.status]||row.status,'badge');if(row.status==='send_uncertain')pill.style.color='#ad3e1c';title.append(pill);card.append(title);
+        card.append(make('div',row.quantity+' × '+row.description));
+        card.append(make('small',[row.job_number&&'Job #'+row.job_number,row.supplier_quote_number&&'Quote '+row.supplier_quote_number,row.supplier_cost!=null&&'Supplier $'+Number(row.supplier_cost).toFixed(2),row.lead_time&&'Lead '+row.lead_time].filter(Boolean).join(' · '),'hint'));
+        const requestFiles=make('div');attachmentGallery(row,requestFiles,'request');card.append(requestFiles);
+        const responseFiles=make('div');attachmentGallery(row,responseFiles,'response');if(responseFiles.childNodes.length){responseFiles.prepend(make('small','Supplier response','hint'));card.append(responseFiles)}
+        const controls=make('div');controls.style.cssText='display:flex;gap:7px;flex-wrap:wrap';
+        if(row.job_number){const job=jobs.find(j=>String(j.job_number)===String(row.job_number));if(job)controls.append(action('View Job',()=>viewJob(job)))}
+        if(row.status==='draft'){
+          controls.append(action('Edit Request',()=>{editing=row;draw()}));
+          controls.append(action('Review Email & Send',()=>reviewEmail(row),true));
+          controls.append(action('Mark Sent Externally',async()=>{
+            const note=prompt('Where and when did you send this request?','');if(note===null||!note.trim())return;
+            try{await updateRequest(row,'awaiting_supplier',{note:note.trim()})}catch(e){setMessage(e.message||e)}
+          }));
+        }
+        if(row.status==='awaiting_supplier'||row.status==='quote_received'){
+          controls.append(action('Record Supplier Response',()=>responseEditor(row),row.status==='awaiting_supplier'));
+        }
+        if(row.status==='quote_received'&&row.supplier_cost!=null){
+          controls.append(action('Ready for Estimate',()=>updateRequest(row,'ready_for_estimate',{note:'Supplier quote reviewed for estimate'}),true));
+        }
+        if(row.status==='send_uncertain')card.append(make('small','Resend outcome unknown — check provider records. Do not resend.','hint'));
+        if(row.status==='ready_for_estimate')controls.append(action('Add to Parts List',()=>openPartEditor({id:'',item_type:'part',Item:row.supplier_name+' Quote '+row.supplier_quote_number,Description:row.description,supplier:row.supplier_name,supplier_rate:row.supplier_rate??row.supplier_cost??'',supplier_quote_number:row.supplier_quote_number,supplier_quote_id:row.id})));
+        if(['draft','awaiting_supplier','quote_received','ready_for_estimate'].includes(row.status)){
+          controls.append(action('Close Request',()=>{
+            if(confirm('Close this supplier pricing request? Its history and attachments remain saved.'))updateRequest(row,'closed',{note:'Closed after staff review'});
+          }));
+        }
+        card.append(controls);body.append(card);
+      }
+      if(!rows.length)body.append(make('p','No supplier pricing requests found.','hint'));
+    }
+    async function updateRequest(row,status,extra){
+      try{const result=await rfqApi('/'+encodeURIComponent(row.id),'PATCH',{status,supplier_quote_number:row.supplier_quote_number||'',supplier_cost:row.supplier_cost??null,lead_time:row.lead_time||'',note:'',...extra});
+        setMessage('Saved · '+(stateLabel[result.item?.status]||status));await reloadQuotes();draw();
+      }catch(e){setMessage('Not saved: '+(e.message||e))}
+    }
+    async function reloadQuotes(){rfqs=(await rfqApi('')).items||[];}
+    function formField(form,label,name,type,initial,required=false){
+      const wrap=make('label');wrap.style.cssText='display:grid;gap:5px;font-weight:650;font-size:13px';wrap.append(make('span',label));
+      const control=make(type==='textarea'?'textarea':'input',null,'input');control.name=name;control.required=required;
+      if(type==='textarea'){control.rows=3;control.maxLength=name==='description'?2500:2000}
+      else{control.type=type;control.maxLength=type==='number'?-1:180}
+      control.value=initial==null?'':String(initial);wrap.append(control);form.append(wrap);return control;
+    }
+    function drawEditor(row){
+      const existing=!!row.id;
+      const editor=make('section');editor.style.cssText='display:grid;gap:12px;max-width:830px;width:100%';
+      const heading=make('div');heading.style.cssText='display:flex;justify-content:space-between;align-items:center';
+      heading.append(make('h3',existing?'Edit Supplier Request':'New Supplier Request'));
+      heading.append(action('Back to Queue',()=>{editing=null;draw()}));editor.append(heading);
+      const form=make('form');form.style.cssText='display:grid;gap:12px';
+      const supplierWrap=make('label');supplierWrap.style.cssText='display:grid;gap:5px;font-weight:650;font-size:13px';supplierWrap.append(make('span','Supplier'));
+      const supplier=make('select',null,'input');supplier.name='supplier_id';supplier.required=true;supplier.append(new Option('Select supplier…',''));
+      for(const entry of suppliers.filter(x=>!x.deactivated_at))supplier.add(new Option(entry.name+(entry.email?' · '+entry.email:''),entry.id));
+      supplier.value=row.supplier_id||'';supplierWrap.append(supplier);form.append(supplierWrap);
+      const split=make('div');split.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px';
+      const jobfield=formField(split,'Job #','job_number','text',row.job_number||'');
+      const quantity=formField(split,'Quantity','quantity','number',row.quantity||1,true);quantity.min=1;quantity.max=100000;
+      form.append(split);
+      formField(form,'Items / scope requested','description','textarea',row.description||'',true);
+      formField(form,'Specifications / dimensions','notes','textarea',row.notes||'');
+      const emailHeading=make('strong','Email');emailHeading.style.cssText='margin-top:5px';form.append(emailHeading);
+      const contact=make('small','To: '+(suppliers.find(x=>x.id===supplier.value)?.email||'Select a supplier with an email'),'hint');
+      supplier.onchange=()=>{contact.textContent='To: '+(suppliers.find(x=>x.id===supplier.value)?.email||'Supplier email required')};form.append(contact);
+      formField(form,'Subject (optional)','email_subject','text',row.email_subject||'');
+      formField(form,'Additional message (optional)','email_message','textarea',row.email_message||'');
+      const fileBox=make('label');fileBox.style.cssText='display:grid;gap:6px;font-size:13px;font-weight:650';fileBox.append(make('span','Attach photos / drawings / PDFs'));
+      const upload=make('input',null,'input');upload.type='file';upload.multiple=true;upload.accept='.pdf,.png,.jpg,.jpeg,.webp';fileBox.append(upload);form.append(fileBox);
+      if(existing)attachmentGallery(row,form,'request');
+      const controls=make('div');controls.style.cssText='display:flex;align-items:center;gap:9px;flex-wrap:wrap';
+      const save=action('Save Request',()=>{},true);save.type='submit';controls.append(save);
+      // Review from the saved queue so the exact emailed content matches persisted fields.
+      form.append(controls);editor.append(form);body.append(editor);
+      form.onsubmit=async e=>{
+        e.preventDefault();save.disabled=true;setMessage('Saving request…');
+        try{
+          const values=Object.fromEntries(new FormData(form).entries());delete values[''];values.quantity=Number(quantity.value||1);
+          // File input data is uploaded separately to the durable quote record.
+          const data=existing?await rfqApi('/'+encodeURIComponent(row.id)+'/draft','PUT',values):await rfqApi('','POST',values);
+          const saved=data.item;const files=[...(upload.files||[])];
+          let failures=[];
+          for(const file of files){try{if(file.size>4*1024*1024)throw Error(file.name+' exceeds 4 MB');
+              const multipart=new FormData();multipart.append('file',file);multipart.append('purpose','request');
+              const response=await fetch('/pds-supplier-quotes/'+encodeURIComponent(saved.id)+'/attachments',{method:'POST',credentials:'same-origin',body:multipart});
+              const output=await response.json().catch(()=>({}));if(!response.ok)throw Error(output.detail||'Upload failed');
+            }catch(err){failures.push(file.name+': '+(err.message||err))}}
+          await reloadQuotes();editing=null;draw();
+          setMessage(failures.length?'Request saved; some attachments failed: '+failures.join('; '):'Request saved · Ready for email review');
+        }catch(err){setMessage('Request not saved: '+(err.message||err))}finally{save.disabled=false}
+      };
+    }
+    function overlayCard(title){
+      const shade=make('div');shade.style.cssText='position:fixed;inset:0;z-index:11300;background:#18243399;display:flex;align-items:center;justify-content:center;padding:14px';
+      const modal=make('section');modal.style.cssText='width:min(750px,100%);max-height:90vh;overflow:auto;background:#fff;border-radius:15px;box-shadow:0 12px 50px #0005;padding:20px;display:grid;gap:12px';
+      const header=make('div');header.style.cssText='display:flex;align-items:center;justify-content:space-between';header.append(make('h3',title),action('Close ×',()=>shade.remove()));modal.append(header);shade.append(modal);document.body.append(shade);return {shade,modal};
+    }
+    async function reviewEmail(row){
+      const {shade,modal}=overlayCard('Supplier Quote · Email Review');const status=make('small','Loading email…','hint');modal.append(status);
+      try{
+        const preview=await rfqApi('/'+encodeURIComponent(row.id)+'/email-preview');
+        if(preview.status!=='draft'){status.textContent='This request is no longer an unsent draft.';return}
+        status.remove();
+        const grid=make('div');grid.style.cssText='display:grid;gap:8px;background:#f6f8fa;padding:12px;border-radius:10px';
+        for(const [label,value] of [['From',preview.from],['To',preview.to],['Reply To',preview.reply_to],['Subject',preview.subject]]){
+          const line=make('div');line.style.cssText='display:flex;gap:10px;flex-wrap:wrap';const key=make('strong',label+':');key.style.minWidth='80px';line.append(key,make('span',value||'Not configured'));grid.append(line);
+        }
+        modal.append(grid);const message=make('div',preview.text);message.style.cssText='white-space:pre-wrap;border:1px solid #e2e7ed;border-radius:10px;padding:13px;line-height:1.5';modal.append(message);
+        if(preview.attachments?.length){const fileHost=make('div');fileHost.append(make('strong','Attachments'));
+          attachmentGallery(row,fileHost,'request');modal.append(fileHost)}
+        const outcome=make('small','','hint');modal.append(outcome);
+        const send=action('Approve & Send via Resend',async()=>{
+          if(!confirm('Send this pricing request to '+preview.to+' with '+(preview.attachments||[]).filter(a=>a.purpose==='request').length+' attachment(s)?'))return;
+          send.disabled=true;outcome.textContent='Submitting request…';
+          try{const result=await rfqApi('/'+encodeURIComponent(row.id)+'/send','POST',{approve:true});
+            outcome.textContent=result.state==='accepted_by_provider'?'Accepted by Resend · Supplier delivery not confirmed':'Send uncertain · Check Resend before retrying';
+            await reloadQuotes();draw();send.remove();
+          }catch(e){outcome.textContent='Send not confirmed: '+(e.message||e);await reloadQuotes();draw();send.remove()}
+        },true);
+        if(!preview.recipient_verified||!preview.from){send.disabled=true;outcome.textContent='Supplier email and configured sender required before sending.'}
+        modal.append(send);
+      }catch(e){status.textContent='Email preview unavailable: '+(e.message||e)}
+    }
+    function responseEditor(row){
+      const {shade,modal}=overlayCard('Record Supplier Response');
+      const form=make('form');form.style.cssText='display:grid;gap:10px';
+      const number=formField(form,'Supplier Quote #','supplier_quote_number','text',row.supplier_quote_number||'',true);
+      const cost=formField(form,'Unit Cost ($)','supplier_cost','number',row.supplier_cost??'');cost.min=0;cost.step='0.01';
+      formField(form,'Lead Time','lead_time','text',row.lead_time||'');
+      formField(form,'Response Notes','note','textarea','');
+      const files=make('input',null,'input');files.type='file';files.multiple=true;files.accept='.pdf,.png,.jpg,.jpeg,.webp';
+      form.append(make('strong','Supplier Reply Files'),files);
+      const msg=make('small','','hint');form.append(msg);
+      const save=action('Save Supplier Response',()=>{},true);save.type='submit';form.append(save);modal.append(form);
+      form.onsubmit=async e=>{
+        e.preventDefault();save.disabled=true;
+        try{
+          const response=await rfqApi('/'+encodeURIComponent(row.id),'PATCH',{status:'quote_received',supplier_quote_number:number.value.trim(),
+            supplier_cost:cost.value.trim()?Number(cost.value):null,lead_time:form.elements.namedItem('lead_time').value.trim(),note:form.elements.namedItem('note').value.trim()});
+          let warnings=[];
+          for(const file of [...(files.files||[])]){try{
+            const multipart=new FormData();multipart.append('file',file);multipart.append('purpose','response');
+            const reply=await fetch('/pds-supplier-quotes/'+encodeURIComponent(row.id)+'/attachments',{method:'POST',credentials:'same-origin',body:multipart});
+            const json=await reply.json().catch(()=>({}));if(!reply.ok)throw Error(json.detail||'Upload failed');
+          }catch(err){warnings.push(file.name+': '+(err.message||err))}}
+          await reloadQuotes();draw();shade.remove();setMessage(warnings.length?'Response saved; attachment errors: '+warnings.join('; '):'Supplier response saved');
+        }catch(err){msg.textContent='Could not save response: '+(err.message||err)}finally{save.disabled=false}
+      };
+    }
+    search.oninput=()=>{filter=norm(search.value);draw()};
+    body.textContent='Loading saved jobs and supplier requests…';
+    try{
+      const [loadedJobs,loadedRFQs,loadedSuppliers]=await Promise.all([apiListJobs({limit:5000}),rfqApi(''),fetchJSON('/pds-purchase-orders/suppliers')]);
+      jobs=loadedJobs;rfqs=loadedRFQs.items||[];suppliers=loadedSuppliers.items||[];draw();
+    }catch(e){body.textContent='Unable to load Moses Job Flow: '+(e.message||e)}
   }
 
   function renderJobFlowView(initialStatus = "Dispatch", standalone = false) {
@@ -8993,12 +9362,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             await promptUpdateQuoteTracking(full, refresh);
           });
           row.appendChild(quoteBtn);
-          if (document.body.dataset.platform === 'pds') {
-            const partsBtn=document.createElement('button');partsBtn.type='button';partsBtn.className='btn';
-            partsBtn.textContent='Parts & Pricing';partsBtn.style.margin='8px 0 0 8px';
-            partsBtn.addEventListener('click',(event)=>{event.stopPropagation();openPdsQuotePartsReview(j)});
-            row.appendChild(partsBtn);
-          }
         }
 
         const techSummary = collectJobTechSummary(j);
@@ -9221,7 +9584,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     list.style.marginTop = "12px";
 
     async function openPartEditor(item = null) {
-      openDrawer(item ? "Edit Part" : "Add Part", (drawerBody, overlay) => {
+      openDrawer(item && item.id ? "Edit Part" : "Add Part", (drawerBody, overlay) => {
         const part = item || { id: "", Manufacturer: "", Item: "", Description: "", Price: "", supplier: "" };
         const wrap = document.createElement("div");
         wrap.className = "card";
@@ -9236,6 +9599,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div style="margin-top:10px;"><div class="label">Customer Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
           <div style="margin-top:10px;"><div class="label">Warehouse Low-Stock Alert (optional)</div><input class="input" id="part_min_stock" type="number" min="0" step="1" placeholder="Leave blank to disable alerts" value="${escapeHtml(part.min_stock==null?'':String(part.min_stock))}" /></div>
           <div style="margin-top:10px;"><div class="label">Supplier Rate (optional)</div><input class="input" id="part_supplier_rate" type="number" step="0.01" min="0" value="${escapeHtml(String(part.supplier_rate??''))}" /></div>
+          <div style="margin-top:10px;"><div class="label">Supplier Quote # (optional)</div><input class="input" id="part_quote_number" placeholder="DCI Quote 12345" value="${escapeHtml(part.supplier_quote_number||'')}" /></div>
           <div style="margin-top:10px;"><div class="label">Product Website URL</div><input class="input" id="part_product_url" type="url" placeholder="https://supplier.com/product" value="${escapeHtml(part.product_url || "")}" /></div>
           <div style="margin-top:10px;"><div class="label">Photo URL</div><input class="input" id="part_image_url" placeholder="https://... or uploaded photo" value="${escapeHtml(part.image_url || "")}" /></div>
           <img id="part_photo_preview" alt="Part image preview" style="max-width:200px;max-height:140px;object-fit:contain;display:none" />
@@ -9294,6 +9658,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             price: Number(wrap.querySelector("#part_price").value || 0),
             supplier: wrap.querySelector("#part_supplier").value.trim(),
             supplier_rate: wrap.querySelector("#part_supplier_rate").value.trim(),
+            supplier_quote_number: wrap.querySelector("#part_quote_number").value.trim(),
+            supplier_quote_id: part.supplier_quote_id || "",
             min_stock: wrap.querySelector("#part_min_stock").value.trim()===""?null:Number(wrap.querySelector("#part_min_stock").value),
             product_url: wrap.querySelector("#part_product_url").value.trim(),
             image_url: wrap.querySelector("#part_image_url").value.trim(),
@@ -9319,6 +9685,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         row.className = "jobrow";
         row.style.cursor = "pointer";
         row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${p.item_type==='service'?'🛠️ Service · ':''}${escapeHtml(p.Item || p.item || "")}${p.stock_low?" ⚠️ Low stock":""}</div><div class="hint">${p.item_type==='service'?'Non-stock service':(p.stock_recorded?Number(p.stock_on_hand||0)+' in Stock':'Stock not counted')} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
+        if(p.supplier_quote_number){const quoteTag=document.createElement('div');quoteTag.className='hint';quoteTag.textContent='Supplier Quote: '+p.supplier_quote_number;row.append(quoteTag);}
         if(activePlatform==='pds' && p.item_type!=='service' && tracked.has(String(p.id))){
           const saved=tracked.get(String(p.id));const quantities=document.createElement('div');quantities.className='hint';quantities.style.cssText='padding:6px 0 2px;font-weight:650';
           quantities.textContent='PDS quantities · Warehouse: '+(saved.stock_recorded?saved.warehouse:'not counted')+' · Vans: '+saved.van_total+' · Total physically tracked: '+saved.total_tracked;
@@ -9349,11 +9716,92 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       });
     }
 
+    // Supplier RFQ queue is separate from inventory: a quote is neither a stock
+    // receipt nor a purchase order. Only office/lead staff can update requests.
+    const supplierQuotes=document.createElement('details');
+    supplierQuotes.className='card';supplierQuotes.style.cssText='margin-top:12px;padding:14px';
+    const quoteHeader=document.createElement('summary');quoteHeader.style.cssText='cursor:pointer;font-weight:800';
+    quoteHeader.textContent='📨 Supplier Quotes · Request pricing';supplierQuotes.append(quoteHeader);
+    const quoteBody=document.createElement('div');quoteBody.style.cssText='display:grid;gap:12px;margin-top:12px';
+    const quoteForm=document.createElement('form');quoteForm.style.cssText='display:grid;gap:10px';
+    quoteForm.innerHTML=`<div class="grid2"><label>Supplier<select class="input" name="supplier_id" required><option value="">Choose a supplier…</option></select></label><label>Job # (optional)<input class="input" name="job_number" placeholder="1126-15"></label></div>
+      <label>Requested item / scope<textarea name="description" class="input" rows="2" required maxlength="2500" placeholder="36 × 84 hollow metal door and frame"></textarea></label>
+      <div class="grid2"><label>Quantity<input name="quantity" class="input" type="number" min="1" max="100000" value="1" required></label><label>Notes (optional)<input name="notes" class="input" placeholder="Finish, handing, lead time…"></label></div>
+      <div><button type="submit" class="btn btn-orange">＋ Save Pricing Request</button></div><small class="hint">Draft only. Copy the request for email, then record when it was sent. No supplier is contacted automatically.</small>`;
+    const quoteStatus=document.createElement('p');quoteStatus.className='hint';quoteStatus.setAttribute('role','status');
+    const quoteList=document.createElement('div');quoteList.style.cssText='display:grid;gap:8px';
+    quoteBody.append(quoteForm,quoteStatus,quoteList);supplierQuotes.append(quoteBody);
+    const quoteSupplier=quoteForm.elements.namedItem('supplier_id');
+    let suppliersLoaded=false;
+    async function loadQuoteSuppliers(){
+      if(suppliersLoaded)return;
+      try{const r=await fetchJSON('/pds-purchase-orders/suppliers');const suppliers=(r.items||[]).filter(x=>!x.deactivated_at);
+        for(const sup of suppliers){const option=new Option(sup.name+(sup.email?' · '+sup.email:''),sup.id);quoteSupplier.add(option);}
+        suppliersLoaded=true;
+      }catch(e){quoteStatus.textContent='Supplier directory unavailable: '+e.message;}
+    }
+    const quoteAction=(title,click,emphasis=false)=>{const button=document.createElement('button');button.type='button';button.className='btn'+(emphasis?' btn-orange':'');button.textContent=title;button.onclick=click;return button;};
+    async function updateQuote(row,status,extra={}){
+      try{await fetchJSON('/pds-supplier-quotes/'+encodeURIComponent(row.id),{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status,supplier_quote_number:row.supplier_quote_number||'',supplier_cost:row.supplier_cost??null,lead_time:row.lead_time||'',note:'',...extra})});
+        quoteStatus.textContent='Saved!';await renderQuotes();
+      }catch(e){quoteStatus.textContent='Not saved: '+e.message;}
+    }
+    async function renderQuotes(){
+      if(activePlatform!=='pds')return;
+      quoteList.replaceChildren();
+      try{const r=await fetchJSON('/pds-supplier-quotes');const records=r.items||[];
+        quoteHeader.textContent='📨 Supplier Quotes · '+records.filter(x=>!['closed','ready_for_estimate'].includes(x.status)).length+' pending';
+        if(!records.length){const note=document.createElement('p');note.className='hint';note.textContent='No supplier pricing requests yet.';quoteList.append(note);return;}
+        for(const row of records.slice(0,35)){
+          const item=document.createElement('article');item.style.cssText='border:1px solid #dce5ed;border-radius:12px;padding:12px;display:grid;gap:6px';
+          const name=document.createElement('strong');name.textContent=row.supplier_name+' · '+row.description;
+          const meta=document.createElement('small');meta.className='hint';meta.textContent=[row.status==='send_uncertain'?'⚠️ Check Resend before any retry':'',row.job_number&&'Job '+row.job_number,'Qty '+row.quantity,String(row.status||'draft').replaceAll('_',' '),row.supplier_quote_number&&'Quote '+row.supplier_quote_number,row.supplier_cost!=null&&'Cost $'+Number(row.supplier_cost).toFixed(2)].filter(Boolean).join(' · ');
+          const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:7px;flex-wrap:wrap';
+          buttons.append(quoteAction('Copy Request',async()=>{
+            const requestText='Subject: Pricing Request — '+(row.job_number||'Priority Door Systems')+'\nTo: '+(row.supplier_email||'[supplier email required]')+'\n\nPlease quote '+row.quantity+' × '+row.description+'.'+(row.notes?'\n'+row.notes:'')+'\nPlease include your quote number, cost, and lead time.\n\nPriority Door Systems\nreception@prioritydoors.com';
+            try{await navigator.clipboard.writeText(requestText);quoteStatus.textContent='Request copied. No email sent.';}
+            catch{quoteStatus.textContent='Clipboard unavailable. You can copy the supplier quote details from this card.';}
+          }));
+          if(!['closed','ready_for_estimate','send_uncertain'].includes(row.status)){
+            if(row.status==='draft' && row.supplier_email){
+              buttons.append(quoteAction('Approve & Send (Resend)',async()=>{
+                if(!confirm('Send this pricing request to the saved supplier '+row.supplier_email+'? This is a real external email.'))return;
+                quoteStatus.textContent='Submitting to Resend…';
+                try{const outcome=await fetchJSON('/pds-supplier-quotes/'+encodeURIComponent(row.id)+'/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:true})});
+                  quoteStatus.textContent=outcome.state==='accepted_by_provider'?'Resend accepted. Delivery not yet confirmed.':'Send outcome uncertain. Check Resend before retrying.';
+                  await renderQuotes();
+                }catch(err){quoteStatus.textContent='Email not sent: '+err.message;await renderQuotes();}
+              },true));
+            }
+            if(row.status==='draft')buttons.append(quoteAction('Mark Sent Externally',()=>{const note=prompt('Where and when did you send this request? (required)','');if(note!==null&&note.trim())updateQuote(row,'awaiting_supplier',{note:note.trim()});}));
+            buttons.append(quoteAction('Record Supplier Quote',()=>{
+              const number=prompt('Supplier quote number',row.supplier_quote_number||'');if(number===null||!number.trim())return;
+              const price=prompt('Supplier unit cost (leave blank if unknown)',row.supplier_cost??'');if(price===null||price.trim()&&!/^\d+(?:\.\d{1,2})?$/.test(price.trim())){quoteStatus.textContent='Enter a valid nonnegative cost or leave blank.';return;}
+              const lead=prompt('Lead time (optional)',row.lead_time||'');if(lead===null)return;
+              updateQuote(row,'quote_received',{supplier_quote_number:number.trim(),supplier_cost:price.trim()?Number(price):null,lead_time:lead.trim(),note:'Supplier pricing recorded for office review'});
+            }));
+          }
+          if(row.supplier_quote_number){
+            buttons.append(quoteAction('Add to Parts List',()=>openPartEditor({id:'',item_type:'part',Item:row.supplier_name+' Quote '+row.supplier_quote_number,Description:row.description,supplier:row.supplier_name,supplier_rate:row.supplier_cost??'',supplier_quote_number:row.supplier_quote_number,supplier_quote_id:row.id})));
+            if(row.supplier_cost!=null&&row.status==='quote_received')buttons.append(quoteAction('Ready for Estimate',()=>updateQuote(row,'ready_for_estimate',{note:'Quote reviewed for estimating'}),true));
+          }
+          item.append(name,meta,buttons);quoteList.append(item);
+        }
+      }catch(e){quoteStatus.textContent='Supplier quotes unavailable: '+e.message;}
+    }
+    supplierQuotes.addEventListener('toggle',()=>{if(supplierQuotes.open){loadQuoteSuppliers();renderQuotes();}});
+    quoteForm.onsubmit=async e=>{e.preventDefault();const btn=quoteForm.querySelector('[type="submit"]');btn.disabled=true;quoteStatus.textContent='Saving…';
+      try{const data=Object.fromEntries(new FormData(quoteForm));data.quantity=Number(data.quantity||1);
+        await fetchJSON('/pds-supplier-quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});
+        quoteForm.reset();quoteStatus.textContent='Saved!';await renderQuotes();
+      }catch(e){quoteStatus.textContent='Not saved: '+e.message;}finally{btn.disabled=false;}};
+
     controls.querySelector("#parts_add").addEventListener("click", ()=> openPartEditor());
     controls.querySelector("#parts_search").addEventListener("keydown", e=>{ if(e.key === "Enter") refresh(); });
 
     root.appendChild(card);
     root.appendChild(controls);
+    if(activePlatform==='pds' && ['lead','office','office_admin'].includes(String(currentUser?.role||'')))root.appendChild(supplierQuotes);
     root.appendChild(list);
     workspaceBody.innerHTML = "";
     workspaceBody.appendChild(root);
@@ -9721,11 +10169,46 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     await draw();
   }
 
+  // The PIN is verified on the server. Numeric keypad + password dots on mobile.
+  function requestMaskedOfficePin(title) {
+    return new Promise(resolve => {
+      const backdrop = document.createElement('div');
+      backdrop.style.cssText='position:fixed;inset:0;background:rgba(15,23,42,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:18px';
+      const form = document.createElement('form');
+      form.style.cssText='width:min(380px,100%);background:#fff;border-radius:18px;padding:24px;box-shadow:0 18px 80px #0003;display:grid;gap:14px';
+      const heading=document.createElement('h3');heading.textContent=title;heading.style.margin='0';
+      const hint=document.createElement('p');hint.textContent='Enter your office PIN to continue.';hint.className='hint';hint.style.margin='0';
+      const input=document.createElement('input');input.type='password';input.inputMode='numeric';input.pattern='[0-9]*';
+      input.autocomplete='off';input.maxLength=8;input.required=true;input.className='input';input.setAttribute('aria-label','Office PIN');
+      input.style.cssText='font-size:22px;letter-spacing:.25em;max-width:100%;box-sizing:border-box';
+      const actions=document.createElement('div');actions.style.cssText='display:flex;gap:10px;justify-content:flex-end';
+      const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';
+      const unlock=document.createElement('button');unlock.type='submit';unlock.className='btn btn-orange';unlock.textContent='Unlock';
+      actions.append(cancel,unlock);form.append(heading,hint,input,actions);backdrop.append(form);document.body.append(backdrop);
+      const finish=value=>{backdrop.remove();resolve(value)};
+      cancel.onclick=()=>finish(null);
+      form.onsubmit=e=>{e.preventDefault();finish(input.value)};
+      backdrop.addEventListener('keydown',e=>{if(e.key==='Escape'){e.preventDefault();finish(null)}});
+      setTimeout(()=>input.focus(),0);
+    });
+  }
+
+  async function ensurePdsOfficeReportPin(label='Office Reports') {
+    try {
+      const access=await fetchJSON('/pds-office-reports/access');
+      if(access.unlocked)return true;
+      const pin=await requestMaskedOfficePin(label);
+      if(pin===null)return false;
+      await fetchJSON('/pds-office-reports/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
+      return true;
+    } catch(err) { alert('Office report access denied: '+(err.message||err));return false; }
+  }
+
   async function renderAccountingView(section = "hub") {
     try {
       const access = await fetchJSON("/accounting/access");
       if (!access.unlocked) {
-        const pin = prompt("Accounting — enter office PIN:");
+        const pin = await requestMaskedOfficePin("Accounting Hub");
         if (pin === null) return;
         await fetchJSON("/accounting/unlock", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({pin})});
       }
@@ -9870,9 +10353,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const uploadBox=document.createElement("div");uploadBox.className="card";uploadBox.style.margin="12px 0";uploadBox.style.display="none";
 
         const uploadForm=document.createElement("form");uploadForm.style.marginTop="12px";
-        uploadForm.innerHTML=`<div class="grid2"><label>Date<input class="input" type="date" name="date" required></label><label>Employee<input class="input" name="employee" required></label><label>Vendor<input class="input" name="vendor" required></label><label>Amount ($)<input class="input" type="number" min="0" step="0.01" name="amount" required></label><label>Card last 4<input class="input" name="card_last4" maxlength="4" pattern="[0-9]{4}"></label><label>Receipt #<input class="input" name="receipt_number"></label><label>Category<select class="input" name="category"></select></label></div><label>Notes<textarea class="input" name="notes" rows="2"></textarea></label><label>Photo / PDF<input class="input" type="file" name="file" accept="image/*,application/pdf" required></label><p class="hint" data-receipt-status>Select a file for AI reading. Review before saving.</p><button class="btn btn-orange" type="submit">Save Receipt</button>`;
+        uploadForm.innerHTML=`<div class="grid2"><label>Type<select class="input" name="document_type"><option value="Receipt">Receipt</option><option value="Packing Slip">Packing Slip</option></select></label><label>Related Job #<input class="input" name="job_number"></label><label>Related PO #<input class="input" name="po_number"></label><label>Date<input class="input" type="date" name="date" required></label><label>Employee<input class="input" name="employee" required></label><label>Vendor<input class="input" name="vendor" required></label><label>Amount ($)<input class="input" type="number" min="0" step="0.01" name="amount" required></label><label>Card last 4<input class="input" name="card_last4" maxlength="4" pattern="[0-9]{4}"></label><label>Receipt / Slip #<input class="input" name="receipt_number"></label><label>Category<select class="input" name="category"></select></label></div><label>Notes<textarea class="input" name="notes" rows="2"></textarea></label><label>Photo / PDF<input class="input" type="file" name="file" accept="image/*,application/pdf" required></label><p class="hint" data-receipt-status>Select a file for AI reading. Review before saving. No receiving or accounting posting is automatic.</p><button class="btn btn-orange" type="submit">Save Receipt</button>`;
         uploadBox.appendChild(uploadForm);host.appendChild(uploadBox);
         const receiptStatus=uploadForm.querySelector('[data-receipt-status]');
+        uploadForm.elements.document_type.onchange=()=>{
+          const isSlip=uploadForm.elements.document_type.value==='Packing Slip';
+          uploadForm.querySelector('button[type="submit"]').textContent=isSlip?'Save Packing Slip':'Save Receipt';
+          if(isSlip)uploadForm.elements.amount.value='0';
+        };
         uploadForm.elements.date.value=new Date().toISOString().slice(0,10);
         uploadForm.elements.employee.value=currentUser?.name||currentUser?.username||"";
         const receiptCategories=uploadForm.elements.category;
@@ -9894,7 +10382,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           catch(err){receiptStatus.textContent=`Could not save: ${err.message||err}`;}finally{btn.disabled=false;}
         });
         const bar = make("div", ""); bar.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px";
-        const search = document.createElement("input"); search.className="input"; search.placeholder="Search vendor, employee, category, receipt #"; bar.appendChild(search);
+        const search = document.createElement("input"); search.className="input"; search.placeholder="Search job, PO, vendor, employee, reference #"; bar.appendChild(search);
+        const selectedType=document.createElement('select');selectedType.className='input';selectedType.setAttribute('aria-label','Receipt document type');
+        for(const [name,value] of [['All documents','all'],['Receipts','Receipt'],['Packing Slips','Packing Slip']])selectedType.add(new Option(name,value));
+        selectedType.value=window.__pdsReceiptViewType||'all';window.__pdsReceiptViewType=null;
+        bar.appendChild(selectedType);selectedType.onchange=()=>draw();
         const exportBtn = document.createElement("a"); exportBtn.className="btn"; exportBtn.href="/receipts/export.csv"; exportBtn.textContent="Export CSV";
         const showAllLabel=document.createElement('label');showAllLabel.style.cssText='display:flex;align-items:center;gap:8px;font-weight:600';
         const showAllReceipts=document.createElement('input');showAllReceipts.type='checkbox';showAllReceipts.checked=true;
@@ -9905,11 +10397,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         function draw() {
           list.innerHTML="";
           const q=search.value.trim().toLowerCase();
-          (showAllReceipts.checked?items:periodReceipts).filter(r=>[r.vendor,r.employee,r.category,r.receipt_number,r.date].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
+          (showAllReceipts.checked?items:periodReceipts).filter(r=>(selectedType.value==='all'||r.document_type===selectedType.value)&&[r.vendor,r.employee,r.category,r.receipt_number,r.date,r.job_number,r.po_number].some(v=>String(v||"").toLowerCase().includes(q))).forEach(r=>{
             const line=document.createElement("div"); line.className="card";line.style.cssText="padding:14px;margin:10px 0;border:1px solid #d9dfe8;border-radius:12px";
             const name=document.createElement("div");name.style.cssText="display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center";
             const info=document.createElement("div");const heading=document.createElement("strong");heading.textContent=r.vendor||"Unknown vendor";info.appendChild(heading);
-            const meta=document.createElement("div");meta.className="hint";meta.textContent=[r.date,r.employee,r.category,r.receipt_number?`Receipt # ${r.receipt_number}`:"",r.card_last4?`Card •••• ${r.card_last4}`:""].filter(Boolean).join(" · ");info.appendChild(meta);
+            const meta=document.createElement("div");meta.className="hint";meta.textContent=[r.document_type||'Receipt',r.date,r.employee,r.category,r.job_number?`Job #${r.job_number}`:'',r.po_number?`PO #${r.po_number}`:'',r.receipt_number?`Document #${r.receipt_number}`:'',r.card_last4?`Card •••• ${r.card_last4}`:''].filter(Boolean).join(' · ');info.appendChild(meta);
             const amount=document.createElement("strong");amount.textContent=money(r.amount);amount.style.fontSize="18px";name.append(info,amount);
             const controls=document.createElement("div");controls.style.cssText="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px";
             const edit=document.createElement("button"); edit.className="btn"; edit.textContent="Edit"; edit.style.marginLeft="12px";
@@ -10606,7 +11098,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
 
 
-  function renderPayrollView() {
+  function renderPayrollView(reportPinVerified=false) {
+    if(!reportPinVerified){ensurePdsOfficeReportPin("Payroll").then(ok=>{if(ok)renderPayrollView(true)});return;}
     setNavActive(navPayroll);
     setActiveChip("Office Flow");
     setWorkspace("Payroll");
@@ -11826,7 +12319,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
     async function renderActiveTab() { setTab(); if (activeTab==="rollup") return renderRollUpTab(); if (activeTab==="estimator") return renderEstimatorTab(); return renderDashboardTab(); }
     if (!leadEstimatorOnly) btnDashboard.addEventListener("click",()=>{activeTab="dashboard";renderActiveTab();});
-    if (!leadEstimatorOnly) btnRollUp.addEventListener("click",()=>{activeTab="rollup";renderActiveTab();});
+    if (!leadEstimatorOnly) btnRollUp.addEventListener("click",async()=>{if(!await ensurePdsOfficeReportPin("Roll Up Data"))return;activeTab="rollup";renderActiveTab();});
     btnEstimator.addEventListener("click",()=>{activeTab="estimator";renderActiveTab();});
     prevBtn.addEventListener("click",()=>{currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()-1, 1); renderActiveTab();});
     nextBtn.addEventListener("click",()=>{currentMonth = new Date(currentMonth.getFullYear(), currentMonth.getMonth()+1, 1); renderActiveTab();});
@@ -12722,7 +13215,7 @@ function renderEmployeesView() {
       ['item_type','Item Type','text'],['part_number','Part # / Service Code','text',true],
       ['description','Description','textarea',true],['manufacturer','Manufacturer / Provider','text'],
       ['supplier','Preferred Supplier / Subcontractor','text'],['price','Customer Price ($)','number'],
-      ['supplier_rate','Supplier Cost ($)','number'],['product_url','Product Website (HTTPS)','url'],
+      ['supplier_rate','Supplier Cost ($)','number'],['supplier_quote_number','Supplier Quote # (optional)','text'],['product_url','Product Website (HTTPS)','url'],
       ['image_url','Photo URL (HTTPS, optional)','url']
     ],async(data)=>{
       data.item_type=['part','service'].includes(data.item_type)?data.item_type:'part';
@@ -12767,6 +13260,27 @@ function renderEmployeesView() {
           form.elements.namedItem('image_url').value=result.url;message.textContent='Photo attached to catalog draft. Save to finish.';
         }catch(err){message.textContent='Photo upload requires PDS office-admin access: '+(err.message||err);}
       };
+    }});
+  }
+
+  function pdsQuickSupplierQuoteRequest(defaultJob=''){
+    return pdsQuickRecordEditor('📨 Request Supplier Pricing',[
+      ['supplier_id','Supplier','text',true],['job_number','Job # (optional)','text'],
+      ['description','Item / Scope','textarea',true],['quantity','Quantity','number'],
+      ['notes','Finish / Dimensions / Requirements','textarea']
+    ],async values=>{
+      if(!values.supplier_id)throw Error('Select a saved supplier');
+      const data=await fetchJSON('/pds-supplier-quotes',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...values,quantity:Math.max(1,parseInt(values.quantity||'1',10)||1)})});
+      return data.item;
+    },{hint:'Saves a draft supplier request. No email will be sent or inventory changed.',setup:({form,message})=>{
+      const original=form.elements.namedItem('supplier_id');
+      const select=document.createElement('select');select.name='supplier_id';select.className='input';select.required=true;
+      select.append(new Option('Select saved supplier…',''));original.replaceWith(select);
+      form.elements.namedItem('job_number').value=defaultJob||'';
+      form.elements.namedItem('quantity').value='1';
+      fetchJSON('/pds-purchase-orders/suppliers').then(r=>{
+        for(const supplier of (r.items||[]).filter(s=>!s.deactivated_at))select.add(new Option(supplier.name,supplier.id));
+      }).catch(e=>{message.textContent='Supplier list unavailable: '+e.message;});
     }});
   }
 
@@ -12961,6 +13475,7 @@ function serializeDocItems(items, laborOnly) {
   async function openEstimateInvoiceDrawer(job = null, initialType = "estimate", container = null, ctx = null) {
     await doorksLoadSharedTicket();
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
+      if(ctx?.mosesJobFlow)overlay.style.zIndex='11250';
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
       const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:190, fuel:20, labor:190, crew_labor:250, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
@@ -13164,6 +13679,12 @@ function serializeDocItems(items, laborOnly) {
         add.onclick=async()=>{const saved=await pdsQuickCatalogEditor();if(!saved)return;
           insertItem({code:saved.part_number||'',description:saved.description||'',qty:1,rate:Number(saved.price||0),kind:saved.item_type==='service'?'service':'part',taxable:saved.item_type!=='service'});
         };dom.partResults.append(add);
+        if(['lead','office','office_admin'].includes(String(currentUser?.role||''))){
+          const rfq=document.createElement('button');rfq.type='button';rfq.className='pds-doc-suggestion';rfq.setAttribute('role','option');
+          rfq.textContent='📨 Request Supplier Quote · Custom Part';
+          rfq.onclick=async()=>{const record=await pdsQuickSupplierQuoteRequest(job?.job_number||'');if(record){dom.partLookupHint.textContent='Supplier pricing request saved as Draft. Track it in Parts List → Supplier Quotes.';}};
+          dom.partResults.append(rfq);
+        }
         dom.partLookupHint.textContent=choices.length?`${choices.length} matching charges or parts · or add a new item`:'No matching catalog item. Add a new part or service above.';
         for(const {item,charge} of choices.slice(0,15)){
           const row=document.createElement('button'); row.type='button';row.className='pds-doc-suggestion';row.setAttribute('role','option');
@@ -13385,6 +13906,28 @@ function serializeDocItems(items, laborOnly) {
       }
 
       await applyHelperPrefill();
+      const invoiceSource=(!editDoc && docType==='invoice' && ctx?.invoiceSourceEstimate)||null;
+      if(invoiceSource){
+        if(String(invoiceSource.job_id||'')!==String(job?.id||'') &&
+            !(String(invoiceSource.job_number||'')===String(job?.job_number||'') &&
+              String(invoiceSource.customer||'').trim().toLowerCase()===String(job?.customer||'').trim().toLowerCase())){
+          alert('Linked estimate identity mismatch. The invoice was not opened.');if(overlay)overlay.remove();return;
+        }
+        const sourceLines=Array.isArray(invoiceSource.items)?invoiceSource.items:[];
+        if(!sourceLines.length){
+          alert('This saved estimate has no structured line items to copy. Review the source estimate manually before invoicing.');
+          if(overlay)overlay.remove();return;
+        }
+        items=sourceLines.map(createDocLineItem);
+        dom.work.value=pdsCompletedInvoiceText(invoiceSource.work);
+        dom.po.value=invoiceSource.po_number||dom.po.value;
+        dom.ship.value=invoiceSource.ship_to||dom.ship.value;
+        if(invoiceSource.terms)dom.terms.value=invoiceSource.terms;
+        if(invoiceSource.tax_rate!=null)setTaxRateValue(invoiceSource.tax_rate);
+        const note=document.createElement('p');note.className='hint';
+        note.textContent='Source: saved estimate '+invoiceSource.number+'. Verify completed scope, quantities, rates and tax. No extra trip/fuel/parts were added; nothing has been sent.';
+        card.insertBefore(note,card.querySelector('#doc_generate').parentElement);
+      }
       if (ctx?.mosesDraft && !editDoc && docType === 'estimate') {
         const reviewed = ctx.mosesDraft;
         dom.work.value = String(reviewed.scope || '');
@@ -13400,7 +13943,7 @@ function serializeDocItems(items, laborOnly) {
           (reviewed.review_note ? '\nOffice notes: ' + String(reviewed.review_note).slice(0,1200) : '');
         card.insertBefore(warning, card.querySelector('#doc_generate').parentElement);
       }
-      if (!editDoc) setTaxRateValue("");
+      if (!editDoc && !invoiceSource) setTaxRateValue("");
       renderItems();
 
       function enteredDocItems(){return items.filter(it=>String(it.code||'').trim()||String(it.description||'').trim());}
@@ -13428,6 +13971,15 @@ function serializeDocItems(items, laborOnly) {
         };
       }
 card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try {
+        if(invoiceSource){
+          // Check same saved document and job association immediately before issuing.
+          const current=pdsLinkedEstimateCandidates(job,await apiListDocuments({type:'estimate'}))
+            .find(doc=>doc.filename===invoiceSource.filename && doc.number===invoiceSource.number);
+          if(!current || JSON.stringify(current.items||[])!==JSON.stringify(invoiceSource.items||[]) ||
+             String(current.work||'')!==String(invoiceSource.work||'')){
+            alert('The source estimate changed or is no longer linked to this job. Reopen Invoice review.');return;
+          }
+        }
         if (ctx?.mosesDraft) {
           const latest = await fetchJSON('/moses-drafts/'+encodeURIComponent(ctx.mosesDraft.draft_id)+'/handoff');
           if (!latest.verified || latest.job_id !== ctx.mosesDraft.job_id ||
@@ -13460,13 +14012,78 @@ const updated = await apiUpdateJob(job.id, {
   // Never overwrite the job's actual Estimate # and never auto-move the dispatch to Quote Sent.
   estimate_number: job.estimate_number || "",
   invoice_number: docType === "invoice" ? newDocNumber : (job.invoice_number || ""),
-  status: docType === "invoice" ? "Done" : (job.status || "Dispatch"),
+  // Preparing/saving a document is not sending it. Confirmed Resend delivery
+  // workflow owns the Quote Sent / Done status transitions.
+  status: job.status || "Dispatch",
   quote_assigned_to: dom.completedBy.value || (job.quote_assigned_to || ""),
-  sent_quote_number: docType === "estimate" ? newDocNumber : (job.sent_quote_number || "")
+  sent_quote_number: job.sent_quote_number || ""
 }); if (overlay) overlay.remove(); if (ctx && ctx.afterSave) await ctx.afterSave(); if (container) renderJobDetails(container, updated, ctx); refreshBadges(); return; } if (overlay) overlay.remove(); if (ctx && ctx.refreshDocs) await ctx.refreshDocs(); if (currentView && currentView.refresh) currentView.refresh(); } catch(e){ alert(e.message || String(e)); } });
     });
   }
 
+
+  // Proposal text is NOT proof of installation. Call only after a staff member confirms
+  // the quoted scope was completed; the editable invoice remains subject to review.
+  function pdsCompletedInvoiceText(sourceText) {
+    return String(sourceText || '').split(/\r?\n/).map((line) => {
+      let v=line.trim();
+      if (!v || /^please allow\b/i.test(v)) return '';
+      v=v.replace(/^proposal includes\s*[-:]/i,'Invoice Includes -')
+        .replace(/^estimate includes\s*[-:]/i,'Invoice Includes -')
+        .replace(/^description\s*:?$/i,'Work Completed')
+        .replace(/\bwe (?:are )?propos(?:e|ing) to\s+/ig,'')
+        .replace(/\bfurnish\s*(?:and|&)\s*install\b/ig,'Furnished and installed')
+        .replace(/\bremove\s*(?:and|&)\s*replace\b/ig,'Removed and replaced')
+        .replace(/\bsupply\s*(?:and|&)\s*install\b/ig,'Supplied and installed')
+        .replace(/^(\s*(?:[-•]\s*)?)install\b/i,'$1Installed')
+        .replace(/^(\s*(?:[-•]\s*)?)replace\b/i,'$1Replaced')
+        .replace(/^(\s*(?:[-•]\s*)?)repair\b/i,'$1Repaired')
+        .replace(/^(\s*(?:[-•]\s*)?)adjust\b/i,'$1Adjusted')
+        .replace(/^(\s*(?:[-•]\s*)?)furnish\b/i,'$1Furnished');
+      return v;
+    }).filter(Boolean).join('\n').trim();
+  }
+
+  function pdsLinkedEstimateCandidates(job, docs) {
+    const id=String(job?.id||'');
+    const number=String(job?.job_number||'').trim();
+    return (Array.isArray(docs)?docs:[]).filter(d=>d && d.type==='estimate' &&
+      ((id && String(d.job_id||'')===id) ||
+       (number && String(d.job_number||'').trim()===number &&
+        (!d.job_id || String(d.job_id)===id) &&
+        String(d.customer||'').trim().toLowerCase()===String(job.customer||'').trim().toLowerCase())));
+  }
+
+  function pdsFormPhotoCarousel(jobId, form) {
+    const images=(Array.isArray(form?.attachments)?form.attachments:[])
+      .filter(f=>f && isImageFilename(f.filename) && f.filename);
+    const strip=document.createElement('div');strip.className='pds-recommendation-photos';
+    strip.style.cssText='display:flex;gap:9px;overflow-x:auto;scroll-snap-type:x mandatory;padding:6px 2px 10px;max-width:100%';
+    strip.setAttribute('aria-label','Photos attached to this recommendation');
+    if(!jobId || !form?.id || !images.length)return strip;
+    const files=images.map(f=>({filename:f.filename,url:buildCompletionAttachmentUrl(jobId,form.id,f.filename)}));
+    files.forEach((file,index)=>{
+      const thumb=document.createElement('button');thumb.type='button';thumb.className='pds-recommendation-photo';
+      thumb.setAttribute('aria-label','View full-size image '+(index+1)+' of '+files.length+': '+file.filename);
+      thumb.title=file.filename;
+      thumb.style.cssText='flex:0 0 104px;width:104px;height:84px;padding:2px;border:1px solid #dce4ea;border-radius:9px;overflow:hidden;background:#f6f8f9;scroll-snap-align:start;cursor:zoom-in';
+      const image=document.createElement('img');image.src=file.url+'?inline=1';image.alt=file.filename;image.loading='lazy';
+      image.style.cssText='width:100%;height:100%;object-fit:cover;border-radius:6px';
+      thumb.append(image);thumb.onclick=()=>openAttachmentCarousel(files,index);strip.append(thumb);
+    });
+    if(files.length>1){
+      const carousel=document.createElement('div');carousel.style.cssText='display:grid;gap:3px;min-width:0';
+      const nav=document.createElement('div');nav.style.cssText='display:flex;gap:7px;justify-content:flex-end;align-items:center';
+      const count=document.createElement('small');count.className='hint';count.textContent=files.length+' photos';nav.append(count);
+      for(const [symbol,direction,label] of [['‹',-1,'Previous photos'],['›',1,'Next photos']]){
+        const arrow=document.createElement('button');arrow.type='button';arrow.className='btn';arrow.textContent=symbol;
+        arrow.setAttribute('aria-label',label);arrow.style.cssText='font-size:17px;padding:2px 10px';
+        arrow.onclick=()=>strip.scrollBy({left:direction*230,behavior:'smooth'});nav.append(arrow);
+      }
+      carousel.append(nav,strip);return carousel;
+    }
+    return strip;
+  }
 
   function openEstimateInvoiceHelper(job = null, initialType = "estimate", container = null, ctx = null) {
     // Keep edits to existing saved docs direct; helper is only for new job estimate/invoice.
@@ -13475,6 +14092,7 @@ const updated = await apiUpdateJob(job.id, {
     }
 
     openDrawer(initialType === "invoice" ? "Invoice Helper" : "Estimate Helper", async (drawerBody, overlay) => {
+      if(ctx?.mosesJobFlow)overlay.style.zIndex='11250';
       const pricing = await apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 }));
       const forms = Array.isArray(job && job.completion_forms) ? job.completion_forms : [];
 
@@ -13557,10 +14175,22 @@ const updated = await apiUpdateJob(job.id, {
               <button class="btn" id="helper_reference_close">Hide</button>
             </div>
             <div style="display:grid; gap:10px; margin-top:10px;">
-              ${wanted.length ? wanted.map(f => formSummaryHtml(f, label)).join("") : `<div class="hint">No ${label.toLowerCase()} forms found for this job.</div>`}
+              <div data-pds-source-gallery></div>
             </div>
           </div>
         `;
+        const sourceGallery=panel.querySelector('[data-pds-source-gallery]');
+        if(!wanted.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No '+label.toLowerCase()+' forms found for this job.';sourceGallery.append(empty);}
+        for(const f of wanted){
+          const entry=document.createElement('div');entry.innerHTML=formSummaryHtml(f,label);
+          const saved=entry.firstElementChild;
+          const gallery=pdsFormPhotoCarousel(job?.id,f);
+          if(gallery.childElementCount){
+            const caption=document.createElement('small');caption.textContent='Attached images · Click to enlarge';
+            saved.append(caption,gallery);
+          }
+          sourceGallery.append(saved);
+        }
         const close = panel.querySelector("#helper_reference_close");
         if (close) close.addEventListener("click", () => { panel.style.display = "none"; panel.innerHTML = ""; });
       }
@@ -13568,7 +14198,7 @@ const updated = await apiUpdateJob(job.id, {
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `
-        <h3>${initialType === "invoice" ? "Invoice Helper" : "Estimate Helper"}</h3>
+        <h3>${ctx?.mosesJobFlow ? 'Moses · '+(initialType === 'invoice'?'Invoice':'Estimate')+' Recommendation Review' : (initialType === "invoice" ? "Invoice Helper" : "Estimate Helper")}</h3>
         <div class="hint">Answer a few quick questions to prefill the editable ${initialType === "invoice" ? "invoice" : "estimate"}. You can still edit everything before saving.</div>
 
         <div class="card" style="padding:12px; margin-top:12px;">
@@ -13666,8 +14296,10 @@ const updated = await apiUpdateJob(job.id, {
             <div id="helper_selected_parts" style="display:grid; gap:8px; margin-top:8px;"></div>
           </div>
 
+          <div id="helper_linked_estimate" class="card" style="padding:12px;margin-top:12px;display:none;"></div>
           <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:12px;">
-            <button class="btn btn-orange" id="helper_continue">Continue to Editable ${initialType === "invoice" ? "Invoice" : "Estimate"}</button>
+            ${ctx?.mosesJobFlow ? '<button class="btn" type="button" id="helper_view_job">View Job</button><button class="btn" type="button" id="helper_new_part">New Part</button>' : ''}
+            <button class="btn btn-orange" id="helper_continue">${ctx?.mosesJobFlow ? 'Generate ' : 'Continue to Editable '}${initialType === "invoice" ? "Invoice" : "Estimate"}</button>
             <button class="btn" id="helper_cancel">Cancel</button>
           </div>
         </div>
@@ -13677,6 +14309,50 @@ const updated = await apiUpdateJob(job.id, {
       const questions = card.querySelector("#helper_questions");
       const laborType = card.querySelector("#helper_labor_type");
       const otherWrap = card.querySelector("#helper_other_wrap");
+      let linkedEstimates=[];
+      const linkedSource=card.querySelector('#helper_linked_estimate');
+      const linkedSelect=document.createElement('select');linkedSelect.className='input';linkedSelect.setAttribute('aria-label','Saved estimate to use for this invoice');
+      let linkedWarning=document.createElement('small');linkedWarning.className='hint';
+      if(ctx?.mosesJobFlow){
+        questions.style.display='block';
+        card.querySelector('#help_yes').disabled=true;
+        card.querySelector('#help_yes').closest('.card').style.display='none';
+        const openJob=card.querySelector('#helper_view_job');
+        openJob.onclick=()=>{
+          const overlay=openDrawer('Job Details', container=>renderJobDetails(container,job,{}));
+          overlay.style.zIndex='11300';
+        };
+        card.querySelector('#helper_new_part').onclick=async()=>{
+          const created=await pdsQuickCatalogEditor();
+          if(created){helperSelectedParts.push({Item:created.part_number||created.Item||'',Description:created.description||created.Description||'',Price:Number(created.price??created.Price??0),item_type:created.item_type||'part'});renderHelperSelectedParts();}
+        };
+        // Show the saved recommendation and its form-specific images immediately.
+        if(forms.some(isRecommendationForm))renderReferencePanel('recommendation');
+        else renderReferencePanel('completion');
+      }
+      if(ctx?.mosesJobFlow && initialType==='invoice' && job?.id){
+        linkedSource.style.display='grid';linkedSource.style.gap='8px';
+        const title=document.createElement('strong');title.textContent='Invoice from saved Doorks estimate (optional)';
+        linkedSelect.append(new Option('Independent T&M invoice · No linked estimate',''));
+        linkedSource.append(title,linkedSelect,linkedWarning);
+        try{
+          // Document source is read-only; selecting a quote never bills or sends.
+          const docs=await apiListDocuments({type:'estimate'});
+          linkedEstimates=pdsLinkedEstimateCandidates(job,docs);
+          for(const doc of linkedEstimates)linkedSelect.append(new Option('Estimate '+doc.number+' · '+(doc.date||'Saved')+' · '+(doc.completed_by||'PDS'),doc.filename));
+          const preferred=[job.sent_quote_number,job.estimate_number].map(cleanDocRef).filter(Boolean);
+          const matches=linkedEstimates.filter(doc=>preferred.includes(cleanDocRef(doc.number)));
+          if(matches.length===1)linkedSelect.value=matches[0].filename;
+          else if(!preferred.length && linkedEstimates.length===1)linkedSelect.value=linkedEstimates[0].filename;
+          const updateSourceNote=()=>{
+            const selected=linkedEstimates.find(doc=>doc.filename===linkedSelect.value);
+            linkedWarning.textContent=selected
+              ?'Estimate '+selected.number+' · '+(selected.items?.length||0)+' saved lines · '+(selected.work?'Saved scope available':'No saved scope')+'. You will review completed-work wording, quantities and prices in the editable invoice. No extra trip, labor, fuel or parts will be added.'
+              :'No saved estimate selected. Create an independent T&M invoice from actual work and materials.';
+          };
+          linkedSelect.onchange=updateSourceNote;updateSourceNote();
+        }catch(error){linkedWarning.textContent='Saved estimates unavailable: '+(error.message||error)+'. You may still create an independent invoice.';}
+      }
 
       function updateLaborMode() {
         otherWrap.style.display = laborType.value === "other" ? "grid" : "none";
@@ -13752,6 +14428,11 @@ const updated = await apiUpdateJob(job.id, {
       });
 
       card.querySelector("#helper_continue").addEventListener("click", () => {
+        const linkedEstimate=linkedEstimates.find(doc=>doc.filename===linkedSelect.value);
+        if(linkedEstimate && !Array.isArray(linkedEstimate.items)){
+          alert('This estimate has no verified structured pricing lines. Open its saved document to review before invoicing.');return;
+        }
+        if(linkedEstimate && !window.confirm('Confirm the work in estimate '+linkedEstimate.number+' was actually completed as quoted. The editable invoice will use its saved line items and prices, with completed-work wording for review. Continue?'))return;
         const helperPrefill = {
           tripQty: Number(card.querySelector("#helper_trip_qty").value || 0),
           fuelQty: Number(card.querySelector("#helper_fuel_qty").value || 0),
@@ -13765,8 +14446,14 @@ const updated = await apiUpdateJob(job.id, {
           autoFill: card.querySelector("#helper_auto_fill").value === "yes",
           sourceIndex: card.querySelector("#helper_source_form") && card.querySelector("#helper_source_form").value !== "" ? Number(card.querySelector("#helper_source_form").value) : null,
         };
+        if(linkedEstimate){
+          // Never layer helper trip, fuel, labor or parts onto copied quote lines.
+          helperPrefill.tripQty=0;helperPrefill.fuelQty=0;helperPrefill.hours=0;
+          helperPrefill.freightAmount=0;helperPrefill.parts=[];helperPrefill.partsText='';helperPrefill.autoFill=false;
+        }
         if (overlay) overlay.remove();
-        openEstimateInvoiceDrawer(job, initialType, container, { ...(ctx || {}), skipHelper: true, helperPrefill });
+        openEstimateInvoiceDrawer(job, initialType, container, { ...(ctx || {}), skipHelper: true, helperPrefill,
+          invoiceSourceEstimate:linkedEstimate||null });
       });
     });
   }
@@ -14127,8 +14814,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     el('receiveInventoryTab').onclick=()=>showReceivingTab(false);
     el('receiveReceivingTab').onclick=()=>showReceivingTab(true);
     showReceivingTab(false);
-    el('receivePacking').onclick=()=>renderDocumentVault(platform,'packing_slip',()=>renderPoReceiving(platform,backAction));
-    el('receiveReceipts').onclick=()=>renderDocumentVault(platform,'receipt',()=>renderPoReceiving(platform,backAction));
+    // PDS Field Flow and Accounting share one receipt/packing-slip register (no duplicate files).
+    el('receivePacking').onclick=()=>{if(platform==='pds'){window.__pdsReceiptViewType='Packing Slip';renderAccountingView('receipts')}else renderDocumentVault(platform,'packing_slip',()=>renderPoReceiving(platform,backAction))};
+    el('receiveReceipts').onclick=()=>{if(platform==='pds'){window.__pdsReceiptViewType='Receipt';renderAccountingView('receipts')}else renderDocumentVault(platform,'receipt',()=>renderPoReceiving(platform,backAction))};
     let data={orders:[],events:[],received_stock_by_sku:{}},liveStock=null,stockAdjustments=[],pdsStock=null;
     async function reload(){
       try{
@@ -15872,8 +16560,8 @@ function renderDataUploadView() {
       <h3>Data Import</h3>
       <div class="card" style="margin:12px 0;border:1px solid #d5e5da;padding:16px">
         <h3 style="margin-top:0">PDS Import Review</h3>
-        <p class="hint">CSV or Excel records can be mapped to saved suppliers or parts after duplicate review. PDF, DOCX, TXT and image files are preview-only; no live records are altered.</p>
-        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Parts Suppliers — Import</option><option value="parts">Parts / Items — Import</option><option value="customers">Customers — Preview</option><option value="contacts">Contacts — Preview</option><option value="addresses">Addresses — Preview</option><option value="service_vendors">Service Vendors — Preview</option><option value="jobs">Jobs / Sales Leads — Preview</option><option value="invoices">Invoices — Preview</option><option value="purchase_orders">Purchase Orders — Preview</option><option value="other">Other Documents — Preview</option></select></label>
+        <p class="hint">CSV/Excel: review duplicates, then import only new Suppliers, Parts, Customers, Contacts, Addresses or Service Vendors. Jobs, Invoices, POs and other documents stay preview-only; use their normal job/document upload workflow. PDF, DOCX, TXT and images are also preview-only.</p>
+        <label>Import type <select class="input" id="qb_import_kind"><option value="vendors">Parts Suppliers — Import</option><option value="parts">Parts / Items — Import</option><option value="customers">Customers — Import</option><option value="contacts">Contacts — Import</option><option value="addresses">Addresses — Import</option><option value="service_vendors">Service Vendors — Import</option><option value="jobs">Jobs / Sales Leads — Preview</option><option value="invoices">Invoices — Preview</option><option value="purchase_orders">Purchase Orders — Preview</option><option value="other">Other Documents — Preview</option></select></label>
         <input class="input" id="qb_import_file" type="file" accept=".csv,.xlsx,.pdf,.docx,.txt,.png,.jpg,.jpeg,.webp" style="margin-top:10px;width:100%" />
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn btn-orange" type="button" id="qb_preview">Preview &amp; Check Duplicates</button><button class="btn" type="button" id="qb_import_commit" disabled>Import New Records</button></div>
         <p class="hint" id="qb_import_status" role="status">Nothing is changed during preview. Existing records will never be overwritten.</p>
@@ -15974,8 +16662,8 @@ function renderDataUploadView() {
         const form=new FormData();form.append('file',file);
         const previewResponse=await fetch('/pds-purchase-orders/import/file-preview',{method:'POST',credentials:'same-origin',body:form});
         const extracted=await previewResponse.json();if(!previewResponse.ok)throw Error(extracted.detail||'File preview failed');
-        if(!extracted.can_import_supplier_parts||!['vendors','parts'].includes(qbKind.value)){
-          qbStatus.textContent='Preview only for '+qbKind.selectedOptions[0].textContent+' — records are not imported from this destination yet.';
+        if(!extracted.can_import_records||!(extracted.importable_kinds||[]).includes(qbKind.value)){
+          qbStatus.textContent='Review only for '+qbKind.selectedOptions[0].textContent+' — no records have been imported. For historical numbered documents, use Business Hub → Document Library → Alternate.';
           const content=document.createElement('div');content.style.cssText='padding:12px;border:1px solid #dce3e9;border-radius:8px;white-space:pre-wrap;overflow-wrap:anywhere;max-height:290px;overflow:auto';
           content.textContent=extracted.text_preview||(extracted.rows||[]).slice(0,30).map(row=>Object.entries(row).map(([k,v])=>k+': '+v).join(' · ')).join('\n')||'No readable text. Review the original file.';
           qbPreviewHost.append(content);return;
@@ -16814,8 +17502,9 @@ function renderSaddlebackView() {
       showLoggedOutSplash();
       return;
     }
-    renderCalendarView();
     await initializePlatform();
+    if(activePlatform!=='pds')return;
+    renderCalendarView();
     apiListTimeOff({ limit: 500 }).then(items => {
       const pendingCount = (items || []).filter(item => isActionableTimeOffRequest(item)).length;
       const timeOffBadge = el('badgeTimeOff');

@@ -2,8 +2,10 @@ from pathlib import Path
 APP=Path(__file__).resolve().parents[1].joinpath("static/app.js").read_text()
 DRAFTS=Path(__file__).resolve().parents[1].joinpath("static/moses_drafts.js").read_text()
 
-def test_queue_excludes_parts_on_order():
-    assert "const parts=jobs.filter(j=>['quote','complete/quote','to be quoted','to be invoiced','complete']" in APP
+def test_queue_uses_estimate_invoice_and_supplier_pricing():
+    assert "const kinds=[['quotes','Quotes'],['pricing','Supplier Pricing'],['invoices','Invoices']]" in APP
+    assert "const parts=jobs.filter(" not in APP
+    assert "const invoices=jobs.filter(" in APP
 
 def test_parts_review_links_to_actual_saved_draft():
     assert "draft.textContent='Add to Quote Draft'" in APP
@@ -12,9 +14,10 @@ def test_parts_review_links_to_actual_saved_draft():
 def test_status_uses_platform_pill():
     assert "const statusChip=statusPill(String(job.status||'Dispatch'))" in APP
 
-def test_import_destinations_preview_only_without_commit():
-    assert '<option value="service_vendors">Service Vendors — Preview</option>' in APP
-    assert "!['vendors','parts'].includes(qbKind.value)" in APP
+def test_data_import_requires_explicit_preview_then_commit_for_supported_records():
+    assert '<option value="service_vendors">Service Vendors — Import</option>' in APP
+    assert 'importable_kinds' in APP and 'can_import_records' in APP
+    assert "Review only for "+"'" in APP
 
 def test_drafts_search_and_compact():
     assert "search.placeholder='Search customer, job # or status'" in DRAFTS
@@ -33,7 +36,7 @@ def test_office_hub_moves_ledger_to_accounting_only():
     assert "{id:'manual-ledger',icon:'🧾',label:'Supplier Bills & Payments'" in APP
 
 def test_job_flow_draft_estimate_uses_saved_draft_or_regular_generator():
-    assert "action.textContent=active==='quotes'?'Draft Estimate'" in APP
+    assert "active==='quotes'?'Draft Estimate':'Draft Invoice'" in APP
     assert "const saved=await fetchJSON('/moses-drafts').catch(()=>({items:[]}))" in APP
     assert "await openEstimateInvoiceDrawer(full,'estimate')" in APP
     assert "window.openMosesDrafts({jobId:String(job.id)})" in APP

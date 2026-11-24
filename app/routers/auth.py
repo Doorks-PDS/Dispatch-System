@@ -107,6 +107,7 @@ def auth_login(payload: LoginRequest, request: Request):
         raise HTTPException(status_code=401, detail="Unable to complete login")
     request.session.pop("pending_user_id", None)
     request.session["user_id"] = safe_user.get("id", "")
+    request.session["active_platform"] = "pds"
     return {"ok": True, "requires_pin": False, "user": safe_user}
 
 
@@ -124,6 +125,7 @@ def auth_login_pin(payload: PinRequest, request: Request):
     login_guard.success(request,pending_user_id,"pin")
     request.session.pop("pending_user_id", None)
     request.session["user_id"] = user.get("id", "")
+    request.session["active_platform"] = "pds"
     return {"ok": True, "user": user}
 
 

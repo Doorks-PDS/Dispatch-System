@@ -29,6 +29,10 @@ def current(request: Request):
     admin = getattr(request.state, "auth_role", "") == "office_admin"
     platform = str(request.session.get("active_platform") or "pds") if admin else "pds"
     if platform not in PLATFORMS: platform = "pds"
+    # A legacy/default PDS display without a saved session leaves strict PDS APIs
+    # rejecting staff and other workspace data until the user switches away/back.
+    if request.session.get("active_platform") != platform:
+        request.session["active_platform"] = platform
     return {"platform": platform, "can_switch": admin, "available": list(PLATFORMS) if admin else ["pds"]}
 
 @router.post("/switch")

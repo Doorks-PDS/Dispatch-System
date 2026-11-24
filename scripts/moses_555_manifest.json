@@ -1,0 +1,61 @@
+{
+  "release": "Moses 5.55",
+  "base": "Moses 5.54 installed locally; old 5.49 test label allowed",
+  "files": {
+    "app/routers/auth.py": {
+      "before": "7ac1a7b8deeb765bf6ae73c1c97a4b876064bc0c3ab8e3d4d4bf9f6526f6abde",
+      "after": "c96645002d7bc7856f013cefcc92bc274e063c84d1114255e74564933519402b"
+    },
+    "app/routers/platforms.py": {
+      "before": "2254bc7a61c39ed4741d2d758993974738e97b73fe2f799a6996c3ad5ef51573",
+      "after": "e7c7475cdb229fb632c954ce4c99cd26aff8224eda66fddc94068de905844641"
+    },
+    "app/routers/pds_supplier_quotes.py": {
+      "before": "f48ac5260d6acede4c818111bb25c14855f2cd7157d789d43047cda8ad2f70cb",
+      "after": "660c2b7b44deb7f6928682ec98b0ae5f9dc17a229e34532d911b35d6669ce8b6"
+    },
+    "app/services/moses_email_transport.py": {
+      "before": "8663aa5d7a5c1a5b9fb538dca0e30358955ff59ca6af2e671bdab2cc47e513ef",
+      "after": "c48a7ad1437d2983c476c3a17353f4c34c26c7d25f87357bdd18d3f62d2f37b7"
+    },
+    "static/app.js": {
+      "before": "967725d2aeae65c8cadc00847f9370b2144b028a52ff9ee1ef645961a505d1d4",
+      "after": "19ee22a314c1670d9b41fd3a4c1b5988d1bda08d81c6c43ce5d448e2cdc1053e"
+    },
+    "static/style.css": {
+      "before": "65d7eea96804bb76198d59f3ba0f949f2a191492923518904ab7a756dd8137e0",
+      "after": "217198e4e37a502b55d0ca0a2a2acefc2d5aebc4b61a36ffb78a12ee6b012adc"
+    },
+    "tests/test_moses_45_direct_workflows.py": {
+      "before": "9c1da68434b13999c1620b4926e1d52867eb1cc44f96405540c54a31a94158cb",
+      "after": "677c32f0cd0f7d9f237d9634b01f9c840f15d33686a9f994488ee8eaf4966852"
+    },
+    "tests/test_moses_47_queue.py": {
+      "before": "4aff4cfb589b68070ff206827991d32db278cbabf50512a43c101b025fb53cbf",
+      "after": "5fa0b81e9815f5de55b09240bfd901b7c310fbb61fbcfec18872e5ffe44c6918"
+    },
+    "tests/test_moses_549_qb_roles_po_creator.py": {
+      "before": [
+        "0a5ac74e12cc24566988cc98366cab0229b3549bee6a795f3ba6bc57b727ebf9",
+        "269ff6488011617add95e176e8b5784513e87c2f07fbc875eeda038c55b8a25c"
+      ],
+      "after": "269ff6488011617add95e176e8b5784513e87c2f07fbc875eeda038c55b8a25c"
+    },
+    "tests/test_moses_554_job_flow_calendar.py": {
+      "before": "4e53be990e7ea6b2b1ca76cc1ee12dacb65994786ab80336981e1f36149d79fe",
+      "after": "1a3df8432cb973321125ce7411ba96aa6b273066d4f7471fa5326c47a559c481"
+    },
+    "tests/test_moses_555_supplier_pricing_flow.py": {
+      "before": null,
+      "after": "de2a28ed739a01c7078c34f15fb17ff2b37f3fc8f3a43982f20def84159426e3"
+    },
+    "tests/test_moses_555_workspace_session_and_badges.py": {
+      "before": null,
+      "after": "9c8025a896aab96f60e61ab79a5646fcbba81d5b10c2979cb13745e6e790e501"
+    },
+    "MOSES_555_RELEASE.md": {
+      "before": null,
+      "after": "9b85dadf9e6c9d1a5891d698d05c12b78e806fe8d7c2e253bd7394055ca67d36"
+    }
+  }
+}

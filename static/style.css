@@ -523,3 +523,15 @@ body[data-platform="doorks"] .btn-orange,body[data-platform="sdc"] .btn-orange{c
 .pds-doc-totals-grid .jobrow-top{gap:12px;align-items:flex-start}
 .pds-doc-totals-grid .jobrow-top>:last-child{white-space:nowrap;margin-left:auto;text-align:right}
 @media(max-width:700px){.pds-doc-source-controls .btn{width:100%}.pds-doc-lines-scroll{margin-inline:-6px}.pds-doc-line-table td{padding:5px!important}.pds-doc-totals-grid{grid-template-columns:minmax(0,1fr)!important}}
+
+/* PDS ordinary-save progress */
+@keyframes pds-save-spin {to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.pds-save-spinner{animation:none!important}}
+
+/* Moses 5.55: notification counts never displace a hub title/subtitle.
+   Applies to all PDS sidebar nav buttons; badges have independent positioning. */
+.navbtn{position:relative;}
+.navbtn:has(>small){display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:3px;padding-right:52px;min-height:62px;}
+.navbtn:has(>small)>span:first-child{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;}
+.navbtn:has(>small)>small{display:block;min-width:0;width:100%;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;text-align:left;}
+.navbtn>.badge{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;flex:none;}

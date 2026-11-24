@@ -23,7 +23,8 @@ def test_quote_parts_review_does_not_send_or_save():
     assert "new_door" in APP and "replacement_part" in APP
     assert "do not invent a cost" in APP
     assert "Do not send emails, alter job records or issue an estimate without approval" in APP
-    assert "partsBtn.textContent='Parts & Pricing'" in APP
+    assert "partsBtn.textContent='Parts & Pricing'" not in APP
+    assert "openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice'" in APP
 
 def test_ui_assets_versioned():
     assert '/static/app.js?v=MOSES_5_48' in UI
@@ -34,12 +35,13 @@ def test_approved_time_off_is_shown_above_jobs_without_mutations():
     start = APP.index("// Approved time off appears as a minimal calendar marker")
     end = APP.index("dayJobs.forEach(j =>", start)
     fragment = APP[start:end]
-    assert "apiListTimeOff({limit: 500})" in fragment
+    assert "apiListTimeOff({limit: 5000, status: 'approved'})" in fragment
     assert "=== 'approved'" in fragment
-    assert "from <= dt && dt <= through" in fragment
-    assert "name + ' Out'" in fragment
+    assert "from<=dt && dt<=through" in fragment
+    assert "names.join(', ')+' Out'" in fragment
     assert "items.appendChild(marker)" in fragment
-    assert "new Set()" in fragment
+    assert "new Set(dayAbsences.map(" in fragment
+    assert "openCalendarTimeOffDetails(dt,dayAbsences)" in fragment
     assert "apiUpdateTimeOff" not in fragment
     assert "apiCreateTimeOff" not in fragment
     assert "apiUpdateJob" not in fragment
