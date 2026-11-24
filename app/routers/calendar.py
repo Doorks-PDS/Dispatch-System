@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -9,6 +10,30 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 router = APIRouter(prefix="/calendar", tags=["calendar"])
+
+# Keep unbounded documents/videos from consuming the persistent dispatch disk.
+# Configurable for customers with larger drawings, but never unlimited by default.
+MAX_CALENDAR_ATTACHMENT_BYTES = max(1, int(os.getenv('PDS_CALENDAR_ATTACHMENT_MAX_MB', '20'))) * 1024 * 1024
+MAX_CALENDAR_UPLOAD_BATCH_BYTES = max(1, int(os.getenv('PDS_CALENDAR_ATTACHMENT_BATCH_MAX_MB', '50'))) * 1024 * 1024
+
+
+async def _bounded_calendar_files(files: List[UploadFile]) -> List[Tuple[str, bytes]]:
+    blobs: List[Tuple[str, bytes]] = []
+    total = 0
+    for f in files:
+        name = (f.filename or "upload").replace("/", "_").replace("\\", "_")
+        # Read only one byte beyond the limit, rather than loading an entire large file.
+        content = await f.read(MAX_CALENDAR_ATTACHMENT_BYTES + 1)
+        if len(content) > MAX_CALENDAR_ATTACHMENT_BYTES:
+            raise HTTPException(413, f"Attachment exceeds the {MAX_CALENDAR_ATTACHMENT_BYTES // (1024 * 1024)} MB per-file limit")
+        total += len(content)
+        if total > MAX_CALENDAR_UPLOAD_BATCH_BYTES:
+            raise HTTPException(413, "Calendar attachment batch exceeds configured size limit")
+        blobs.append((name, content))
+    return blobs
+
+
+
 
 
 def _store(request: Request):
@@ -240,14 +265,13 @@ async def upload_job_attachments(
 ):
     _require(request, x_api_key)
     try:
-        blobs: List[Tuple[str, bytes]] = []
-        for f in files:
-            name = (f.filename or "upload").replace("/", "_").replace("\\", "_")
-            blobs.append((name, await f.read()))
+        blobs = await _bounded_calendar_files(files)
         saved = _store(request).add_job_attachments(job_id, blobs)
         return {"ok": True, "files": saved}
     except KeyError:
         raise HTTPException(status_code=404, detail="Job not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -277,14 +301,13 @@ async def upload_completion_attachments(
 ):
     _require(request, x_api_key)
     try:
-        blobs: List[Tuple[str, bytes]] = []
-        for f in files:
-            name = (f.filename or "upload").replace("/", "_").replace("\\", "_")
-            blobs.append((name, await f.read()))
+        blobs = await _bounded_calendar_files(files)
         saved = _store(request).add_completion_attachments(job_id, form_id, blobs)
         return {"ok": True, "files": saved}
     except KeyError:
         raise HTTPException(status_code=404, detail="Completion form not found")
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 

@@ -23,8 +23,17 @@ def guard(request,platform):
     if platform not in ('pds','doorks','sdc'):raise HTTPException(404,'Unknown workspace')
     if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Login required')
     role=getattr(request.state,'auth_role',None)
-    if role not in ('office','office_admin'):raise HTTPException(403,'Office access required')
+    if role not in ('office','office_admin') and not (platform=='pds' and role in ('lead','tech')):
+        raise HTTPException(403,'Business document access required')
     if request.session.get('active_platform','pds')!=platform:raise HTTPException(403,'Switch workspace first')
+    return role
+
+
+def allowed_reference(request,platform,scope,kind):
+    role=guard(request,platform)
+    if role in ('office','office_admin'):return
+    if scope!='business' or kind not in ({'estimate','invoice'} if role=='tech' else {'estimate','invoice','purchase_order'}):
+        raise HTTPException(403,'This role may access only approved business document types')
 
 def paths(request,platform):
     folder=Path(request.app.state.data_dir)/'document_vault'/platform
@@ -50,18 +59,27 @@ def validate_type(t):
 def trim(v,n=200):return str(v or '').strip()[:n]
 
 @router.get('/{platform}')
-def listing(platform:str,request:Request,document_type:Optional[str]=None,library_scope:Optional[str]=None):
-    guard(request,platform)
+def listing(platform:str,request:Request,document_type:Optional[str]=None,library_scope:Optional[str]=None,job_number:Optional[str]=None):
+    role=guard(request,platform)
     if document_type:validate_type(document_type)
     if library_scope is not None and library_scope not in ('business','accounting'):raise HTTPException(400,'Invalid library scope')
+    if role in ('tech','lead') and library_scope!='business':
+        raise HTTPException(403,'Field users may view linked business references only')
     with _lock:
         items=read(paths(request,platform)[1])
-    return {'items':[x for x in items if (not document_type or x['document_type']==document_type) and (not library_scope or x.get('library_scope','accounting')==library_scope)]}
+    filtered=[x for x in items if (not document_type or x['document_type']==document_type)
+              and (not library_scope or x.get('library_scope','accounting')==library_scope)
+              and (not job_number or str(x.get('job_number') or '').strip().casefold()==job_number.strip().casefold())]
+    if role in ('tech','lead'):
+        allowed={'estimate','invoice'} if role=='tech' else {'estimate','invoice','purchase_order'}
+        filtered=[x for x in filtered if x.get('library_scope')=='business' and x.get('document_type') in allowed]
+    return {'items':filtered}
 
 @router.post('/{platform}')
 async def create(platform:str,request:Request,document_type:str=Form(...),vendor:str=Form(''),document_number:str=Form(''),document_date:str=Form(''),po_number:str=Form(''),job_number:str=Form(''),notes:str=Form(''),extracted_json:str=Form(''),library_scope:str=Form('accounting'),file:Optional[UploadFile]=File(None)):
     guard(request,platform);validate_type(document_type)
     if library_scope not in ('business','accounting'):raise HTTPException(400,'Invalid library scope')
+    allowed_reference(request,platform,library_scope,document_type)
     if len(notes)>4000 or len(extracted_json)>12000:raise HTTPException(400,'Text too long')
     try:parsed=json.loads(extracted_json) if extracted_json else {}
     except ValueError:raise HTTPException(400,'Invalid extracted data')
@@ -75,7 +93,10 @@ async def create(platform:str,request:Request,document_type:str=Form(...),vendor
     if not raw and not notes.strip() and not parsed:raise HTTPException(400,'Upload a document or enter text')
     folder,index=paths(request,platform);identifier=uuid.uuid4().hex
     stored=identifier+suffix if raw else ''
-    record={'id':identifier,'library_scope':library_scope,'document_type':document_type,'vendor':trim(vendor),'document_number':trim(document_number),'document_date':trim(document_date,20),'po_number':trim(po_number),'job_number':trim(job_number),'notes':notes,'extracted':parsed,'original_filename':original,'attachment':stored,'created_at':datetime.now(timezone.utc).isoformat(),'review_status':'Saved - not posted'}
+    record={'id':identifier,'library_scope':library_scope,'document_type':document_type,
+            'source':'external' if library_scope=='business' and document_type in ('estimate','invoice','purchase_order') else 'reference',
+            'created_by':str(getattr(request.state,'auth_user',{}).get('name') or getattr(request.state,'auth_user',{}).get('username') or ''),
+            'vendor':trim(vendor),'document_number':trim(document_number),'document_date':trim(document_date,20),'po_number':trim(po_number),'job_number':trim(job_number),'notes':notes,'extracted':parsed,'original_filename':original,'attachment':stored,'created_at':datetime.now(timezone.utc).isoformat(),'review_status':'Saved - not posted'}
     with _lock:
         items=read(index)
         if raw:
@@ -92,7 +113,9 @@ def download(platform:str,identifier:str,request:Request):
     guard(request,platform)
     folder,index=paths(request,platform)
     item=next((r for r in read(index) if r['id']==identifier),None)
-    if not item or not item.get('attachment'):raise HTTPException(404,'Attachment unavailable')
+    if not item:raise HTTPException(404,'Attachment unavailable')
+    allowed_reference(request,platform,item.get('library_scope','accounting'),item.get('document_type'))
+    if not item.get('attachment'):raise HTTPException(404,'Attachment unavailable')
     path=folder/'attachments'/Path(item['attachment']).name
     if not path.is_file():raise HTTPException(404,'Attachment missing')
     return FileResponse(path,filename=item.get('original_filename') or 'document')
@@ -100,6 +123,8 @@ def download(platform:str,identifier:str,request:Request):
 @router.post('/{platform}/preview-text')
 def preview_text(platform:str,request:Request,payload:TextPreview):
     guard(request,platform);validate_type(payload.document_type)
+    if getattr(request.state,'auth_role',None) in ('tech','lead'):
+        allowed_reference(request,platform,'business',payload.document_type)
     if len(payload.text)>12000:raise HTTPException(400,'Text too long')
     text=payload.text
     fields={}
@@ -111,6 +136,8 @@ def preview_text(platform:str,request:Request,payload:TextPreview):
 @router.post('/{platform}/preview-file')
 async def preview_file(platform:str,request:Request,document_type:str=Form(...),file:UploadFile=File(...)):
     guard(request,platform);validate_type(document_type)
+    if getattr(request.state,'auth_role',None) in ('tech','lead'):
+        allowed_reference(request,platform,'business',document_type)
     suffix=Path(file.filename or '').suffix.lower()
     if suffix not in MIME:raise HTTPException(400,'PDF or image only')
     raw=await file.read(MAX+1)

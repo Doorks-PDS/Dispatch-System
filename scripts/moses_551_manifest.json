@@ -1,0 +1,138 @@
+{
+  "release": "5.51",
+  "base": "5.46",
+  "files": {
+    "MOSES_547_RELEASE.md": {
+      "before": null,
+      "after": "bbb8db820b835a2f4c7b97d126cf286820a86f1770cb82276db711f8ab1c887c"
+    },
+    "MOSES_548_RELEASE.md": {
+      "before": null,
+      "after": "2ae79778328cb7a56bb11238eae0c118610c0fcbbd5c25ce27d2f19f7162838a"
+    },
+    "MOSES_549_RELEASE.md": {
+      "before": null,
+      "after": "e7aa8e3d835274058f36ca45f834e09a0c4f1c781fbe8cfa1a00ed0b2cbcfd5d"
+    },
+    "MOSES_550_RELEASE.md": {
+      "before": null,
+      "after": "88aebca22ba1ded2bb61394bc638c66c65171a9933a0fb99034ef4b80c97685d"
+    },
+    "MOSES_551_RELEASE.md": {
+      "before": null,
+      "after": "67fd24182596dd27db3a54f65e69675e2251ede0ca2c5b81a96319e03a0fe33c"
+    },
+    "app/routers/calendar.py": {
+      "before": "324e01ee368ed4d9c8e53b5beeeb240aded02c43c92073f56972c2fb5b5b6878",
+      "after": "4587e881cdfdf51eb600e30608205956ee61964d4cd1f5076adca76311a31793"
+    },
+    "app/routers/data.py": {
+      "before": "e9cb9d6e2bc18516ecbc116f7e74b0b13d643b8211f563ac8e53d5aa2ad127de",
+      "after": "459816953c86755c484f61e43cd1ba0feac0ea76438e23a424b6c6ad4824cb0b"
+    },
+    "app/routers/document_vault.py": {
+      "before": "bd90ab5300f589a6bdbf82dd48899c896ed6589e75a555cad9919e332133ac7b",
+      "after": "9b33e2147b9ff21043495f4ea2212cccacb8985a490769ca486e39bbe3012175"
+    },
+    "app/routers/documents.py": {
+      "before": "2afdd555d2565c684438600198343a9b5dea07c1d906d3269658d6a553abfa98",
+      "after": "a2d988111635e108533bd59085b630c1fef0368f074d7c8e2a3cb567a3968e2a"
+    },
+    "app/routers/moses.py": {
+      "before": "9976d54018da86d82a23182ec7642942c7fad0d1ffaded7a9b5cd87dd7688377",
+      "after": "3347de46ecdf8fbd0554c267907575a14b401749dfd86afcba6ed8106d1ea7ec"
+    },
+    "app/routers/pds_purchase_orders.py": {
+      "before": "2c3a519d2ed78654d15c20201deacff719aa94e049c57d6fbd2549c4cdbc955b",
+      "after": "345e617556343d26dfa8d5f6cbf6b8befedc3db0a5569bf95dbea3435b668580"
+    },
+    "app/routers/pds_van_stock.py": {
+      "before": "7153f9d04f12bdb5cd8e6a46ebedd19bb4fc55ace5ca0574dadbdd3065830fa3",
+      "after": "35838288236c07887d8f277063dde207981e44c7d576dc4ca619037b3e7bf090"
+    },
+    "app/services/moses_pds_document_email.py": {
+      "before": "f52ddb24a0928749a960ce6a143a40e54819881658dde37237ea1e899d874e76",
+      "after": "c0573db26c70920b79f48bb10a651b2aebadbd8853a7e550df5eabea9a6c5a62"
+    },
+    "scripts/check_moses_547.py": {
+      "before": null,
+      "after": "91ffbb2b7cbb8ca7c49b567dadf78beef5b791f257d31d281a75b235796124d6"
+    },
+    "scripts/check_moses_548.py": {
+      "before": null,
+      "after": "b81c11a67a9c584c16b503e3c6bc5bed96ecbce8535a2b0239b815899ccbf116"
+    },
+    "scripts/check_moses_549.py": {
+      "before": null,
+      "after": "2889cd9c47494d5692c0b28a26205b8ebad74cf2fbbb620b5bb41af162d215cb"
+    },
+    "scripts/check_moses_550.py": {
+      "before": null,
+      "after": "32a1dfe6b61ffca73c41cb1de9715806c3dba977de9735c4196579ab7047e3b1"
+    },
+    "scripts/check_moses_551.py": {
+      "before": null,
+      "after": "a8d1b78d3397ac431fbdc8805c1093d06d11d9fea400c5937a57cc5e18c36ac2"
+    },
+    "scripts/moses_547_manifest.json": {
+      "before": null,
+      "after": "35e9e68b114044162d8307222cf776fd7f76f9c0f3c5dbef194d80d5864d8de5"
+    },
+    "scripts/moses_548_manifest.json": {
+      "before": null,
+      "after": "9ca21912765baa889294360e50716325fb53397ae0685783b4128c403b85c86f"
+    },
+    "scripts/moses_549_manifest.json": {
+      "before": null,
+      "after": "d484e1f64b6a06f4cd37e3f3ee3fb07eed16ae6635b17835e6b061962edbf432"
+    },
+    "static/app.js": {
+      "before": "4d935092b88aaaf9fd770b506de1b00ced78caef8332cd2f6d0fbe89fc866c05",
+      "after": "9bdfbb49cd6575dde8d6acb05485b8c227f14039bc470a603306c64ac6f810ef"
+    },
+    "static/moses_identity_review.js": {
+      "before": "84e7c0a6e57c145efc97de76edf73b8258b14b259bd40ebd35805e99cd83ab3e",
+      "after": "c6904dbc115fa05252afbd2c661bf3c8a37dea8fa71ecfdbd56573aa4d8712c3"
+    },
+    "static/style.css": {
+      "before": "db9bfaf276ef874bd7c50e08f8b8fb15dfd4a884694d520d6a104123102d8cc4",
+      "after": "58923b22b39f257f86bcf5d09611c4c7d312f9a6815d8dfc713a52613ced455f"
+    },
+    "templates/ui.html": {
+      "before": "ce2d4a32751adc1fd036610a9ae40c74200044f2c921bfd831f5d67c2f00be1e",
+      "after": "c050139075b6504aa2ca1191909096edc995489be94fd2457c886e28d49fe30a"
+    },
+    "tests/test_doorks_rev101_document_and_requests.py": {
+      "before": "f1a6a0596dd5ee5c7dbb22a7c91ad9c4e4e4e218ff6f1b4bd1b25f9134514ceb",
+      "after": "4860ea17a6aa6672bbc6fd999a73508cb752536e1b1fc75df6c7b84a571028b2"
+    },
+    "tests/test_moses_38_interface.py": {
+      "before": "c3932ac9a4e1e4845814b078a5c8d5fe99350b66ae9547b8268631d5ee30c38b",
+      "after": "129736a5effc653585ddca91978e48a8e73114ea48b26e55778b1fc4a976f57b"
+    },
+    "tests/test_moses_547_intake_qb_po.py": {
+      "before": null,
+      "after": "0dd0e3999c1cf45762d43fa843904c6cec8712fdcb97108af1936afd4ee3fb8b"
+    },
+    "tests/test_moses_548_calendar_fit.py": {
+      "before": null,
+      "after": "bd1a5fcbe1d68a887194c4686d023356ebf8f3fe20091ae6009e304876244824"
+    },
+    "tests/test_moses_549_qb_roles_po_creator.py": {
+      "before": null,
+      "after": "0a5ac74e12cc24566988cc98366cab0229b3549bee6a795f3ba6bc57b727ebf9"
+    },
+    "tests/test_moses_550_generator_roles.py": {
+      "before": null,
+      "after": "84ae5457036bd5a78af45b534a52c884d92d81ea6dc26d8bad9b28fd2640aec7"
+    },
+    "tests/test_moses_551_generator_quick_add.py": {
+      "before": null,
+      "after": "3f3b16ddfb98ac5fead8f04535561767602c53b8fbe8ada53b7207e4aed1d05d"
+    },
+    "tests/test_pds_543_ui_routes.py": {
+      "before": "0e574b85511b2138939db4b9dfe05075c0b19601ec5dc3b7168a70f6d6d94982",
+      "after": "bb62bd9f51242d718ebd69c041f5f6a151de424d9e6fcd91af514e1cb0600615"
+    }
+  }
+}

@@ -18,7 +18,21 @@ def _store(request: Request):
 
 
 def _require(request: Request, x_api_key: Optional[str]):
-    return request.app.state.require_key(x_api_key)
+    return request.app.state.require_key(x_api_key, request)
+
+
+def _document_permission(request: Request, x_api_key: Optional[str], kind: str, action: str = 'create'):
+    """Role checks for numbered documents; view-only isn't a write permission."""
+    role = _require(request, x_api_key)
+    if request.session.get('active_platform', 'pds') != 'pds':
+        return role  # Do not change authorization for other workspaces here.
+    if role in ('office_admin', 'office', 'admin'):
+        return role
+    if action in ('create', 'edit') and role == 'lead' and kind in ('estimate', 'invoice'):
+        return role
+    if action in ('create', 'edit') and role == 'tech' and kind in ('estimate', 'invoice'):
+        return role
+    raise HTTPException(403, f'{role} cannot {action} {kind or "this document"}s')
 
 
 class DocCreate(BaseModel):
@@ -520,6 +534,8 @@ def list_documents(
 ):
     _require(request, x_api_key)
     items = _store(request).list_documents(job_id=job_id)
+    if _require(request, x_api_key) == 'tech':
+        items = [item for item in items if item.get('type') in ('estimate', 'invoice')]
     if type:
         items = [item for item in items if str(item.get("type") or "") == str(type)]
     items = [_doc_response(item) for item in items]
@@ -528,21 +544,23 @@ def list_documents(
 
 @router.post("/estimate")
 def create_estimate(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
-    _require(request, x_api_key)
+    _document_permission(request, x_api_key, 'estimate')
     item = _store(request).create_pdf("estimate", payload.dict())
     return {"ok": True, "doc": _doc_response(item)}
 
 
 @router.post("/invoice")
 def create_invoice(request: Request, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
-    _require(request, x_api_key)
+    _document_permission(request, x_api_key, 'invoice')
     item = _store(request).create_pdf("invoice", payload.dict())
     return {"ok": True, "doc": _doc_response(item)}
 
 
 @router.put("/{filename}")
 def update_document(request: Request, filename: str, payload: DocCreate, x_api_key: Optional[str] = Header(default=None)):
-    _require(request, x_api_key)
+    existing = _store(request).get_document(filename)
+    if not existing: raise HTTPException(404, 'Document not found')
+    _document_permission(request, x_api_key, existing.get('type') or '', 'edit')
     try:
         item = _store(request).update_document(filename, payload.dict())
         return {"ok": True, "doc": _doc_response(item)}
@@ -554,7 +572,9 @@ def update_document(request: Request, filename: str, payload: DocCreate, x_api_k
 
 @router.delete("/{filename}")
 def delete_document(request: Request, filename: str, x_api_key: Optional[str] = Header(default=None)):
-    _require(request, x_api_key)
+    existing = _store(request).get_document(filename)
+    if not existing: raise HTTPException(404, 'Document not found')
+    _document_permission(request, x_api_key, existing.get('type') or '', 'delete')
     try:
         store = _store(request)
         doc = store.get_document(filename) or {}
@@ -597,7 +617,11 @@ def delete_document(request: Request, filename: str, x_api_key: Optional[str] = 
 
 @router.get("/download/{filename}")
 def download_document(request: Request, filename: str, x_api_key: Optional[str] = Header(default=None), inline: bool = Query(default=False)):
-    _require(request, x_api_key)
+    role = _require(request, x_api_key)
+    if role == 'tech':
+        doc = _store(request).get_document(filename)
+        if not doc or doc.get('type') not in ('estimate', 'invoice'):
+            raise HTTPException(403, 'Technicians can access estimates and invoices only')
     path = request.app.state.documents_store.dir / filename
     if not path.exists():
         raise HTTPException(status_code=404, detail="Document not found")

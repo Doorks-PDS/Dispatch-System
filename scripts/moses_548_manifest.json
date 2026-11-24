@@ -1,0 +1,29 @@
+{
+  "based_on": "Doorks / Moses 5.47 with corrected 5.46 baseline",
+  "files": {
+    "static/app.js": {
+      "before": "52f3b841bc01f6d1994f52087e5ee8e6780a435d114802a7a8bffcf2a737926f",
+      "after": "6f9b5aeccafdc8f0026a487c866badf2b3892f58326aff7c87a588854d5c526a"
+    },
+    "static/style.css": {
+      "before": "db9bfaf276ef874bd7c50e08f8b8fb15dfd4a884694d520d6a104123102d8cc4",
+      "after": "b9785c723a1d940f1b414d0dbdb282b8f053b8b76d282997bd2673430aa68aa2"
+    },
+    "templates/ui.html": {
+      "before": "ce2d4a32751adc1fd036610a9ae40c74200044f2c921bfd831f5d67c2f00be1e",
+      "after": "c050139075b6504aa2ca1191909096edc995489be94fd2457c886e28d49fe30a"
+    },
+    "app/routers/calendar.py": {
+      "before": "324e01ee368ed4d9c8e53b5beeeb240aded02c43c92073f56972c2fb5b5b6878",
+      "after": "4587e881cdfdf51eb600e30608205956ee61964d4cd1f5076adca76311a31793"
+    },
+    "tests/test_moses_38_interface.py": {
+      "before": "c3932ac9a4e1e4845814b078a5c8d5fe99350b66ae9547b8268631d5ee30c38b",
+      "after": "129736a5effc653585ddca91978e48a8e73114ea48b26e55778b1fc4a976f57b"
+    },
+    "tests/test_moses_548_calendar_fit.py": {
+      "before": null,
+      "after": "bd1a5fcbe1d68a887194c4686d023356ebf8f3fe20091ae6009e304876244824"
+    }
+  }
+}

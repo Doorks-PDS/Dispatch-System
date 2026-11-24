@@ -28,4 +28,4 @@ def test_interactive_van_pds_business_and_door_record_layout_is_real_source():
     assert 'document.createElement("details")' in js
     assert '🚪 Door Records (optional)' in js
     assert "const entries=platform==='pds'&&pdsStock" in js
-    assert "activePlatform==='pds' && tracked.has(String(p.id))" in js
+    assert "activePlatform==='pds' && p.item_type!=='service' && tracked.has(String(p.id))" in js

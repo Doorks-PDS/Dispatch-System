@@ -16,10 +16,29 @@ class POInput(BaseModel):
 def _guard(request: Request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Login required')
-    if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin'):
-        raise HTTPException(403, 'Office access required')
+    if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin', 'lead'):
+        raise HTTPException(403, 'Office or lead access required')
     if request.session.get('active_platform', 'pds') not in ('pds', None):
         raise HTTPException(403, 'Switch to PDS workspace')
+
+def _actor(request: Request):
+    """Authoritative identity from signed-in user; never accept creator from the PO payload."""
+    user = getattr(request.state, 'auth_user', None)
+    if not isinstance(user, dict):
+        raise HTTPException(401, 'Signed-in employee required')
+    identity = str(user.get('id') or user.get('username') or '').strip()
+    name = str(user.get('name') or user.get('username') or '').strip()
+    if not identity or not name:
+        raise HTTPException(401, 'Signed-in employee identity unavailable')
+    return {'id': identity[:160], 'name': name[:160],
+            'role': str(getattr(request.state, 'auth_role', '') or '')[:50]}
+
+
+def _office_guard(request: Request):
+    _guard(request)
+    if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin'):
+        raise HTTPException(403, 'Office access required for supplier, receiving and inventory changes')
+
 
 def _paths(request: Request, *, create=True):
     folder = Path(request.app.state.data_dir) / 'pds_purchase_orders'
@@ -62,6 +81,10 @@ def list_orders(request: Request):
 @router.post('')
 def create_order(payload: POInput, request: Request):
     _guard(request)
+    actor = _actor(request)  # fail before allocating a PO number or writing files
+    if getattr(request.state, 'auth_role', None) == 'lead':
+        if any(str(payload.data.get(k) or '').strip() for k in ('received_status','payment_status')):
+            raise HTTPException(403, 'Receiving and supplier payment status require office approval')
     from app.services.doorks_po_lock import po_write_lock
     with po_write_lock(request, 'pds'), _lock:
         records, sequence = _paths(request)
@@ -77,7 +100,9 @@ def create_order(payload: POInput, request: Request):
         _write(sequence, {'last':last+1})
         now = datetime.now(timezone.utc).isoformat()
         record = {'id':str(uuid.uuid4()), 'po_number':number, 'created_at':now, 'updated_at':now,
-                  **_clean(payload.data)}
+                  **_clean(payload.data), 'created_by':actor['name'],
+                  'created_by_id':actor['id'], 'created_by_role':actor['role'],
+                  'updated_by':actor['name'], 'updated_by_id':actor['id']}
         items.append(record)
         _write(records, items)
         return record
@@ -85,6 +110,9 @@ def create_order(payload: POInput, request: Request):
 @router.patch('/{record_id}')
 def update_order(record_id: str, payload: POInput, request: Request):
     _guard(request)
+    if getattr(request.state, 'auth_role', None) == 'lead':
+        if any(str(payload.data.get(k) or '').strip() for k in ('received_status','payment_status')):
+            raise HTTPException(403, 'Receiving and supplier payment status require office approval')
     from app.services.doorks_po_lock import po_write_lock
     with po_write_lock(request, 'pds'), _lock:
         records, _ = _paths(request)
@@ -95,7 +123,11 @@ def update_order(record_id: str, payload: POInput, request: Request):
         for item in items:
             if item.get('id') == record_id:
                 item.update(_clean(payload.data))
+                actor = _actor(request)
                 item['updated_at'] = datetime.now(timezone.utc).isoformat()
+                item['updated_by'] = actor['name']
+                item['updated_by_id'] = actor['id']
+                # created_by / created_by_id / created_at are immutable, including for legacy POs.
                 _write(records, items)
                 return item
         raise HTTPException(404, 'Purchase order not found')
@@ -125,6 +157,8 @@ def list_suppliers(request:Request):
 
 @router.post("/suppliers")
 def create_supplier(payload:POInput,request:Request):
+    # Leads can create supplier contacts needed for their POs; only office may
+    # modify, deactivate, delete or perform inventory/receiving operations.
     _guard(request)
     with _lock:
         path=_supplier_path(request);items=_read(path,[])
@@ -138,7 +172,7 @@ def create_supplier(payload:POInput,request:Request):
 
 @router.patch("/suppliers/{supplier_id}")
 def update_supplier(supplier_id:str,payload:POInput,request:Request):
-    _guard(request)
+    _office_guard(request)
     with _lock:
         path=_supplier_path(request);items=_read(path,[])
         data=_supplier_clean(payload.data)
@@ -154,7 +188,7 @@ def update_supplier(supplier_id:str,payload:POInput,request:Request):
 
 @router.patch('/suppliers/{supplier_id}/status')
 def set_supplier_status(supplier_id:str,payload:dict,request:Request):
-    _guard(request)
+    _office_guard(request)
     if not isinstance(payload.get('active'),bool):raise HTTPException(400,'active must be boolean')
     with _lock:
         path=_supplier_path(request);items=_read(path,[])
@@ -169,7 +203,7 @@ def set_supplier_status(supplier_id:str,payload:dict,request:Request):
 
 @router.delete('/suppliers/{supplier_id}')
 def delete_supplier(supplier_id:str,request:Request):
-    _guard(request)
+    _office_guard(request)
     with _lock:
         path=_supplier_path(request);items=_read(path,[])
         item=next((x for x in items if x.get('id')==supplier_id),None)
@@ -197,7 +231,7 @@ class ReceiveInput(BaseModel):
 
 def _receive_context(request, platform):
     if platform == "pds":
-        _guard(request)
+        _office_guard(request)
         orders_path, _ = _paths(request, create=False)
         return orders_path
     if platform not in ("doorks", "sdc"):
@@ -408,7 +442,7 @@ class ImportBatch(BaseModel):
 
 
 def _import_guard(request: Request):
-    _guard(request)
+    _office_guard(request)
     if getattr(request.state, 'auth_role', None) != 'office_admin':
         raise HTTPException(403, 'Office admin approval required for data imports')
 
@@ -661,7 +695,7 @@ def service_vendors(request:Request):
 
 @router.post('/service-vendors')
 def add_service_vendor(payload:POInput,request:Request):
-    _guard(request)
+    _office_guard(request)
     data=_service_vendor_clean(payload.data)
     with _lock:
         path=_service_vendor_path(request);records=_read(path,[])
@@ -673,7 +707,7 @@ def add_service_vendor(payload:POInput,request:Request):
 
 @router.patch('/service-vendors/{vendor_id}')
 def edit_service_vendor(vendor_id:str,payload:POInput,request:Request):
-    _guard(request)
+    _office_guard(request)
     data=_service_vendor_clean(payload.data)
     with _lock:
         path=_service_vendor_path(request);records=_read(path,[])
@@ -686,7 +720,7 @@ def edit_service_vendor(vendor_id:str,payload:POInput,request:Request):
 
 @router.patch('/service-vendors/{vendor_id}/status')
 def status_service_vendor(vendor_id:str,payload:dict,request:Request):
-    _guard(request)
+    _office_guard(request)
     if not isinstance(payload.get('active'),bool):raise HTTPException(422,'Active must be boolean')
     with _lock:
         path=_service_vendor_path(request);records=_read(path,[])

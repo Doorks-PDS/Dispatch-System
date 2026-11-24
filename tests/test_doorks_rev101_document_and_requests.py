@@ -6,7 +6,8 @@ def test_shared_document_validation_used_by_office_and_vendor():
     office=(ROOT/'static/app.js').read_text()
     assert 'function validateDocumentLines(' in shared
     assert 'const validate=()=>validateDocumentLines(items)' in shared
-    assert 'DoorksSharedTicket?.validateDocumentLines?.(items)' in office
+    assert 'DoorksSharedTicket?.validateDocumentLines?.(enteredDocItems())' in office
+    assert 'function enteredDocItems()' in office  # blank editor row is not issued
     assert 'if (!lineCheck.valid)' in office
 
 def test_request_validation_is_role_specific_and_server_checked():

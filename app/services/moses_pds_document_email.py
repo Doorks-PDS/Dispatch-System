@@ -28,11 +28,14 @@ def _now():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _guard(request):
+def _guard(request, kind=None):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Sign in to use Moses')
-    if request.session.get('active_platform') != 'pds' or getattr(request.state, 'auth_role', None) != 'office_admin':
-        raise HTTPException(403, 'PDS office-admin access required')
+    role = getattr(request.state, 'auth_role', None)
+    if request.session.get('active_platform') != 'pds' or role not in ('office_admin', 'office', 'lead', 'tech'):
+        raise HTTPException(403, 'PDS workspace document access required')
+    if role == 'tech' and kind is not None and kind not in ('estimate', 'invoice'):
+        raise HTTPException(403, 'Technicians may email estimates and invoices only')
 
 
 def _actor(request):
@@ -81,7 +84,7 @@ def _save(path, rows):
 
 
 def _snapshot(request, kind, number):
-    _guard(request)
+    _guard(request, kind)
     prefix = KINDS.get(kind)
     if not prefix or not re.fullmatch(prefix + r'[0-9]{5,}', number or '', re.I):
         raise HTTPException(422, 'Use an exact saved estimate or invoice number')
@@ -175,6 +178,8 @@ def propose(request, kind, number):
         fp = _fingerprint(snap)
         prior = next((r for r in rows if r.get('fingerprint') == fp and r.get('state') in ('pending', 'sent')), None)
         if prior:
+            if prior.get('state') == 'pending' and getattr(request.state, 'auth_role', None) in ('tech', 'lead') and prior.get('requested_by') != _actor(request):
+                raise HTTPException(409, 'Another employee has an active approval for this document')
             if prior['state'] == 'sent':
                 raise HTTPException(409, 'Already sent; review delivery history before resending')
             return {'proposal': _public(prior), 'approval_required': True, 'sent': False}
@@ -228,6 +233,9 @@ def decide(request, proposal_id, approve):
         row = next((r for r in rows if r.get('id') == proposal_id), None)
         if not row:
             raise HTTPException(404, 'Email proposal not found')
+        _guard(request, row.get('snapshot', {}).get('kind'))
+        if getattr(request.state, 'auth_role', None) in ('tech', 'lead') and row.get('requested_by') != _actor(request):
+            raise HTTPException(403, 'You may decide only an email you prepared')
         if row['state'] != 'pending':
             raise HTTPException(409, 'Proposal already processed')
         if not approve:
@@ -329,7 +337,7 @@ def _delivery_events(request, provider_ids):
 
 
 def history(request, kind, number):
-    _guard(request)
+    _guard(request, kind)
     prefix = KINDS.get(kind)
     if not prefix or not re.fullmatch(prefix + r'[0-9]{5,}', number or '', re.I):
         raise HTTPException(422, 'Use an exact saved estimate or invoice number')

@@ -3901,6 +3901,8 @@
       image_url: payload.image_url || "",
       product_url: payload.product_url || "",
       supplier_rate: payload.supplier_rate ?? "",
+      min_stock: payload.item_type === "service" ? null : (payload.min_stock ?? null),
+      item_type: payload.item_type === "service" ? "service" : "part",
     };
     const url = body.id ? `/data/parts/${encodeURIComponent(body.id)}` : "/data/parts";
     const method = body.id ? "PUT" : "POST";
@@ -5579,6 +5581,25 @@ function renderAttachmentSection(titleText, items, options = {}) {
     });
   }
 
+  async function pdsExternalReferences({type='',jobNumber=''}={}) {
+    const params=new URLSearchParams({library_scope:'business'});
+    if(type)params.set('document_type',type);
+    if(jobNumber)params.set('job_number',jobNumber);
+    const response=await fetchJSON('/document-vault/pds?'+params.toString());
+    return (response.items||[]).filter(x=>x.source==='external' && ['estimate','invoice','purchase_order'].includes(x.document_type));
+  }
+  function pdsExternalReferenceRow(ref) {
+    const row=document.createElement('div');row.className='jobrow';
+    const title=document.createElement('strong');title.textContent='External '+(ref.document_type==='purchase_order'?'Purchase Order':ref.document_type==='invoice'?'Invoice':'Estimate')+' '+(ref.document_number||ref.po_number||'Unnumbered');
+    const detail=document.createElement('div');detail.className='hint';detail.textContent=[ref.job_number?'Job #'+ref.job_number:'No linked job',ref.vendor,ref.created_by?'Uploaded by '+ref.created_by:'',ref.review_status||'Saved reference only'].filter(Boolean).join(' · ');
+    const open=document.createElement('a');open.className='btn';open.textContent='Open Original';open.href='/document-vault/pds/'+encodeURIComponent(ref.id)+'/file';open.target='_blank';open.rel='noopener noreferrer';
+    const note=document.createElement('div');note.className='hint';note.textContent='QuickBooks / externally issued reference; not a PDS-issued document or accounting posting.';
+    row.append(title,detail,note);
+    if(ref.attachment)row.append(open);
+    else {const missing=document.createElement('small');missing.className='hint';missing.textContent='Reference details only — no original file uploaded';row.append(missing);}
+    return row;
+  }
+
   function renderDocumentsSection(job) {
     const wrap = document.createElement("div");
     wrap.style.marginTop = "10px";
@@ -5596,19 +5617,22 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
     const jobsPO = job.kind === 'dispatch' && String(job.job_number || '').trim();
     const poRequest = jobsPO ? fetchJSON('/pds-purchase-orders') : Promise.resolve({items: []});
-    Promise.allSettled([apiListDocuments({ job_id: job.id }), poRequest]).then(results => {
+    Promise.allSettled([apiListDocuments({ job_id: job.id }), poRequest,
+      job.job_number ? pdsExternalReferences({jobNumber:String(job.job_number)}) : Promise.resolve([])]).then(results => {
       const documentsOK = results[0].status === 'fulfilled';
       const purchaseOrdersOK = results[1].status === 'fulfilled';
+      const externalOK = results[2].status === 'fulfilled';
+      const external = externalOK ? (results[2].value||[]) : [];
       const items = documentsOK ? (results[0].value || []) : [];
       const jobNumber = String(job.job_number || '').trim().toLowerCase();
       const pos = purchaseOrdersOK && jobsPO ? (results[1].value.items || []).filter(po =>
         String(po.work_order || po.work_order_number || '').trim().toLowerCase() === jobNumber
       ) : [];
       wrap.replaceChildren(title);
-      if (!items.length && !pos.length) {
+      if (!items.length && !pos.length && !external.length) {
         const empty = document.createElement('div');
         empty.className = 'hint';
-        empty.textContent = documentsOK && purchaseOrdersOK ? 'No linked documents.' : 'Some linked documents could not be loaded.';
+        empty.textContent = documentsOK && purchaseOrdersOK && externalOK ? 'No linked documents.' : 'Some linked documents could not be loaded.';
         wrap.appendChild(empty);
         return;
       }
@@ -5677,8 +5701,9 @@ function renderAttachmentSection(titleText, items, options = {}) {
         };
         row.append(name, meta, open); box.append(row);
       });
+      external.forEach(ref=>box.appendChild(pdsExternalReferenceRow(ref)));
       wrap.appendChild(box);
-      if (!documentsOK || !purchaseOrdersOK) {
+      if (!documentsOK || !purchaseOrdersOK || !externalOK) {
         const warning = document.createElement('div');warning.className = 'hint';
         warning.textContent = 'Some linked documents could not be loaded.';
         wrap.append(warning);
@@ -6309,7 +6334,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       secondaryActions.appendChild(b);
     }
 
-    if (shouldShowInvoice(job)) {
+    if (shouldShowInvoice(job) && ['tech','lead','office','office_admin','admin'].includes(String(currentUser?.role||''))) {
       const b = document.createElement("button");
       styleActionButton(b, "blue", true);
       b.textContent = "Invoice";
@@ -6318,13 +6343,36 @@ function renderAttachmentSection(titleText, items, options = {}) {
     }
 
 
-    if (job.kind === "dispatch" && job.id && ['office','office_admin','admin'].includes(String(currentUser?.role||''))) {
+    if (job.kind === "dispatch" && job.id && ['office','office_admin','admin','lead','tech'].includes(String(currentUser?.role||''))) {
+      const canCreatePO=['office','office_admin','admin','lead'].includes(String(currentUser?.role||''));
+      if(canCreatePO){
       const poButton=document.createElement('button');poButton.type='button';styleActionButton(poButton,'blue',true);poButton.textContent='Purchase Order';
       poButton.onclick=()=>{
         window.__pdsJobPODraft={customer:String(job.customer||''),job_number:String(job.job_number||''),description:String(job.job_notes||job.description||'')};
         renderUnifiedPurchaseOrders('pds',true,()=>renderAllJobsView());
       };
       secondaryActions.appendChild(poButton);
+      }
+      // Alternate documents use the same existing Document Library; never issue new PDS document numbers.
+      // Keep the action visually aligned with Estimate, Invoice and Purchase Order.
+      const alternateUpload=document.createElement('button');alternateUpload.type='button';styleActionButton(alternateUpload,'blue',true);
+      alternateUpload.textContent='Alternate Upload';
+      alternateUpload.title='Attach an existing estimate, invoice or purchase order (including QuickBooks) using its original number';
+      alternateUpload.setAttribute('aria-expanded','false');
+      const alternateChoices=document.createElement('div');alternateChoices.hidden=true;
+      alternateChoices.className='pds-alternate-document-choices';
+      alternateChoices.style.cssText='gap:7px;flex-wrap:wrap;align-items:center;width:100%';alternateChoices.style.display='none';
+      const openAlternate=(type)=>{
+        window.__pdsJobAlternateUpload={document_type:type,job_number:String(job.job_number||''),document_number:type==='purchase_order'?String(job.po_number||job.po_no||''):type==='estimate'?String(job.estimate_number||''):String(job.invoice_number||'')};
+        renderDocumentVault('pds',type,()=>renderAllJobsView(),'business');
+      };
+      const alternateOptions=String(currentUser?.role||'')==='tech'?[['Estimate','estimate'],['Invoice','invoice']]:[['Estimate','estimate'],['Invoice','invoice'],['PO','purchase_order']];
+      for(const [label,type] of alternateOptions){
+        const choice=document.createElement('button');choice.type='button';styleActionButton(choice,'blue',true);
+        choice.textContent=label;choice.onclick=()=>openAlternate(type);alternateChoices.appendChild(choice);
+      }
+      alternateUpload.onclick=()=>{alternateChoices.hidden=!alternateChoices.hidden;alternateChoices.style.display=alternateChoices.hidden?'none':'flex';alternateUpload.setAttribute('aria-expanded',String(!alternateChoices.hidden));};
+      secondaryActions.append(alternateUpload,alternateChoices);
     }
 
     if (["Quote", "Complete/Quote"].includes(String(job.status || ""))) {
@@ -7645,6 +7693,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         byDate[dt].push(j);
       }
 
+      const visibleDayCells = [];
       const day = new Date(start);
       while (day <= end) {
         const cell = document.createElement("div");
@@ -7684,7 +7733,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           }
         }
 
-        dayJobs.slice(0, 5).forEach(j => {
+        dayJobs.forEach(j => {
           const it = document.createElement("div");
           it.className = "cal-item";
           it.appendChild(dotEl(j.status));
@@ -7698,12 +7747,43 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
         cell.appendChild(dayNum);
         cell.appendChild(items);
+        cell.title = `${dayJobs.length} scheduled item${dayJobs.length === 1 ? '' : 's'} — click to view full day`;
+        visibleDayCells.push({ items, jobs: [...items.querySelectorAll('.cal-item')] });
 
         cell.addEventListener("click", () => openDailySchedule(dt, dayJobs));
         grid.appendChild(cell);
         day.setDate(day.getDate() + 1);
       }
 
+      // Measure the ACTUAL usable space in each day, not an arbitrary five-job cap.
+      // Never clip a partial pill; clicking the date still opens every saved job.
+      // Approved time-off markers take priority over regular job pills.
+      const fitCalendarItems = () => {
+        for (const { items, jobs } of visibleDayCells) {
+          for (const item of jobs) item.hidden = false;
+          if (!jobs.length) continue;
+          const available = items.clientHeight;
+          if (!available) continue;
+          const style = getComputedStyle(items);
+          const gap = parseFloat(style.rowGap || style.gap) || 0;
+          const markers = [...items.children].filter(item => !item.classList.contains('cal-item'));
+          const markerHeight = markers.reduce((sum, item) => sum + item.getBoundingClientRect().height + gap, 0);
+          const rowHeight = Math.ceil(jobs[0].getBoundingClientRect().height);
+          const rowSpace = rowHeight + gap;
+          const capacity = rowSpace > 0 ? Math.max(0, Math.floor((available - markerHeight + gap) / rowSpace)) : jobs.length;
+          jobs.forEach((item, index) => { item.hidden = index >= capacity; });
+        }
+      };
+      requestAnimationFrame(fitCalendarItems);
+      // Calendar width and viewport height can change (desktop, mobile, drawer).
+      // Observe the grid, not each pill, to avoid layout feedback loops.
+      if (typeof ResizeObserver !== 'undefined') {
+        const observer = new ResizeObserver(() => requestAnimationFrame(fitCalendarItems));
+        observer.observe(grid);
+        const oldRefresh = grid.__calendarObserver;
+        if (oldRefresh) oldRefresh.disconnect();
+        grid.__calendarObserver = observer;
+      }
       refreshBadges();
     }
 
@@ -7950,17 +8030,34 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             const response=await fetch("/dispatch-ai/extract",{method:"POST",credentials:"same-origin",body:fd});
             const result=await response.json();if(!response.ok)throw Error(result.detail||"AI extraction failed");
             const fields=result.fields||{};
-            const mapping={contact:"#nj_contact",phone:"#nj_phone",email:"#nj_email",po_number:"#nj_po",estimate_number:"#nj_est",invoice_number:"#nj_inv",job_number:"#nj_job_number",office_notes:"#nj_office_notes"};
-            let count=0;
-            for(const [key,selector] of Object.entries(mapping)){
-              const input=card.querySelector(selector),value=fields[key];
-              if(input&&typeof value==="string"&&value.trim()&&!input.value.trim()){
-                input.value=value.trim();input.dispatchEvent(new Event("input",{bubbles:true}));count++;
-              }
+            // Review/edit extracted values before applying them to the saved job form.
+            aiPanel.querySelector('[data-moses-field-review]')?.remove();
+            const review=document.createElement('section');review.dataset.mosesFieldReview='true';
+            review.style.cssText='display:grid;gap:9px;padding:12px;margin-top:10px;border:1px solid #cdd8e3;border-radius:12px;background:#f8fafc';
+            const heading=document.createElement('strong');heading.textContent='Review extracted work-order details';review.append(heading);
+            const hint=document.createElement('p');hint.className='hint';hint.textContent='Edit any suggestion. Check only the fields to apply; existing data will not be replaced without confirmation. Customer and service address are verified separately below.';review.append(hint);
+            const mapping={contact:['Contact','#nj_contact'],phone:['Phone','#nj_phone'],email:['Email','#nj_email'],po_number:['PO #','#nj_po'],estimate_number:['Estimate #','#nj_est'],invoice_number:['Invoice #','#nj_inv'],job_number:['Job #','#nj_job_number'],office_notes:['Office notes','#nj_office_notes'],job_notes:['Job description',null],date:['Job date','#nj_date']};
+            const selections=[];
+            for(const [key,[title,selector]] of Object.entries(mapping)){
+              const value=fields[key];if(typeof value!=='string'||!value.trim())continue;
+              const line=document.createElement('label');line.style.cssText='display:grid;grid-template-columns:24px 125px minmax(0,1fr);gap:7px;align-items:center';
+              const checked=document.createElement('input');checked.type='checkbox';checked.checked=true;
+              const caption=document.createElement('span');caption.textContent=title;caption.style.fontWeight='600';
+              const input=document.createElement(key==='office_notes'||key==='job_notes'?'textarea':'input');input.className='input';input.value=value.trim();
+              if(key==='date')input.type='date';line.append(checked,caption,input);review.append(line);selections.push({checked,input,selector,key});
             }
-            if(fields.job_notes&&!ta.value.trim()){ta.value=String(fields.job_notes);count++;}
-            if(fields.date&&!row0.querySelector("#nj_date").value)row0.querySelector("#nj_date").value=fields.date;
-            statusBox.textContent=`Moses extracted ${count} other field(s). Choose and verify customer/service-location matches below before saving. ${result.message||""}`;
+            const apply=document.createElement('button');apply.className='btn btn-orange';apply.type='button';apply.textContent='Apply selected details to dispatch form';
+            apply.onclick=()=>{
+              const replacements=selections.filter(({checked,input,selector,key})=>checked.checked&&input.value.trim()&&((key==='job_notes'&&ta.value.trim())||(key!=='job_notes'&&(selector?card.querySelector(selector):null)?.value?.trim())));
+              if(replacements.length&&!confirm(`Replace ${replacements.length} already populated field(s) with the reviewed suggestions?`))return;
+              let count=0;
+              for(const {checked,input,selector,key} of selections){if(!checked.checked||!input.value.trim())continue;
+                const target=key==='job_notes'?ta:card.querySelector(selector);if(!target)continue;
+                target.value=input.value.trim();target.dispatchEvent(new Event('input',{bubbles:true}));count++;
+              }
+              statusBox.textContent=`Applied ${count} reviewed detail(s). Verify saved customer and address separately before Save.`;
+            };review.append(apply);aiPanel.querySelector('div')?.append(review);
+            statusBox.textContent=`Moses extracted ${selections.length} suggested detail(s). Nothing has been saved. ${result.message||''}`;
             if(!window.MosesIdentityReview?.mount)throw Error('Moses identity review component is unavailable; refresh and retry.');
             window.MosesIdentityReview.mount({host:aiPanel,fields,customers,addresses:knownAddresses,
               customerInput:newJobCustomerInput,addressInput,statusBox});
@@ -9129,6 +9226,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const wrap = document.createElement("div");
         wrap.className = "card";
         wrap.innerHTML = `
+          <div><div class="label">Catalog Type</div><select class="input" id="part_item_type"><option value="part">📦 Part / Product</option><option value="service">🛠️ Service / Subcontractor</option></select></div>
           <div class="grid2">
             <div><div class="label">Manufacturer</div><input class="input" id="part_mfg" value="${escapeHtml(part.Manufacturer || part.manufacturer || "")}" /></div>
             <div><div class="label">Part #</div><input class="input" id="part_item" value="${escapeHtml(part.Item || part.item || "")}" /></div>
@@ -9142,13 +9240,40 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div style="margin-top:10px;"><div class="label">Photo URL</div><input class="input" id="part_image_url" placeholder="https://... or uploaded photo" value="${escapeHtml(part.image_url || "")}" /></div>
           <img id="part_photo_preview" alt="Part image preview" style="max-width:200px;max-height:140px;object-fit:contain;display:none" />
         `;
+        wrap.querySelector('#part_item_type').value=part.item_type==='service'?'service':'part';
+        wrap.querySelector('#part_item_type').addEventListener('change',()=>{
+          const minimum=wrap.querySelector('#part_min_stock');
+          minimum.disabled=wrap.querySelector('#part_item_type').value==='service';
+          if(minimum.disabled)minimum.value='';
+        });
+        wrap.querySelector('#part_item_type').dispatchEvent(new Event('change'));
         const preview=wrap.querySelector('#part_photo_preview');
         const showPhoto=()=>{const url=wrap.querySelector('#part_image_url').value.trim();const valid=/^https:\/\//i.test(url)||url.startsWith('/moses/part-image/pds/');preview.style.display=valid?'block':'none';if(valid)preview.src=url;};
         wrap.querySelector('#part_image_url').addEventListener('input',showPhoto);showPhoto();
         const website=document.createElement('div');website.style.cssText='display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap';
         website.innerHTML='<button type="button" class="btn" id="part_url_read">✨ Moses — Read Product URL</button><span class="hint" id="part_url_status"></span>';
         wrap.appendChild(website);
-        website.querySelector('#part_url_read').onclick=async()=>{const url=wrap.querySelector('#part_product_url').value.trim(),status=website.querySelector('#part_url_status');if(!url){status.textContent='Enter an HTTPS product URL first';return;}status.textContent='Reading public product page…';try{const r=await fetchJSON('/moses/part-from-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});const d=r.fields||{};for(const [key,id] of [['manufacturer','#part_mfg'],['part_number','#part_item'],['description','#part_desc'],['supplier','#part_supplier'],['image_url','#part_image_url']])if(d[key])wrap.querySelector(id).value=d[key];showPhoto();status.textContent='Suggestions loaded — verify before saving';}catch(e){status.textContent='Could not read product page: '+e.message;}};
+        const partDraft=document.createElement('section');partDraft.className='card';partDraft.style.cssText='padding:10px;display:grid;gap:8px;margin-top:10px';partDraft.hidden=true;wrap.append(partDraft);
+        website.querySelector('#part_url_read').onclick=async()=>{
+          const url=wrap.querySelector('#part_product_url').value.trim(),status=website.querySelector('#part_url_status');
+          if(!url){status.textContent='Enter an HTTPS product URL first';return;}
+          status.textContent='Reading public product page…';partDraft.hidden=true;partDraft.replaceChildren();
+          try{
+            const result=await fetchJSON('/moses/part-from-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+            const rows=[['manufacturer','#part_mfg','Manufacturer'],['part_number','#part_item','Part #'],['description','#part_desc','Description'],['supplier','#part_supplier','Supplier'],['image_url','#part_image_url','Photo URL']];
+            let count=0;const header=document.createElement('strong');header.textContent='Moses Website Suggestions — Review';partDraft.append(header);
+            for(const [key,id,label] of rows){const value=String(result.fields?.[key]||'').trim();if(!value)continue;count++;
+              const row=document.createElement('label');row.style.cssText='display:flex;gap:8px;align-items:flex-start;font-size:13px;overflow-wrap:anywhere';
+              const check=document.createElement('input');check.type='checkbox';check.checked=true;check.dataset.target=id;check.dataset.suggested=value;
+              const caption=document.createElement('span');caption.textContent=label+': '+value;row.append(check,caption);partDraft.append(row);
+            }
+            if(count){const apply=document.createElement('button');apply.type='button';apply.className='btn';apply.textContent='Apply Checked Fields';apply.onclick=()=>{
+              for(const checked of partDraft.querySelectorAll('[data-target]'))if(checked.checked){const target=wrap.querySelector(checked.dataset.target);if(target)target.value=checked.dataset.suggested;}
+              showPhoto();status.textContent='Suggestions applied. Check all values before saving.';
+            };partDraft.append(apply);partDraft.hidden=false;status.textContent='Review suggested fields. '+(result.source||'');}
+            else{status.textContent='No usable catalog details found. Fill the form manually or upload a photo.';}
+          }catch(err){status.textContent='Website intake could not read this supplier: '+(err.message||err)+'. Enter details manually.';}
+        };
         const upload=document.createElement('label');upload.style.cssText='display:grid;gap:5px;margin-top:10px';upload.textContent='Upload Part Photo (JPG, PNG, WEBP; max 5 MB)';const input=document.createElement('input');input.type='file';input.accept='.jpg,.jpeg,.png,.webp';upload.append(input);wrap.append(upload);input.onchange=async()=>{const file=input.files?.[0];if(!file)return;const status=website.querySelector('#part_url_status');if(file.size>5*1024*1024){status.textContent='Photo is larger than 5 MB';return;}try{const fd=new FormData();fd.append('file',file);const r=await fetch('/moses/part-image/pds',{method:'POST',body:fd,credentials:'same-origin'});const d=await r.json();if(!r.ok)throw Error(d.detail||'Upload failed');wrap.querySelector('#part_image_url').value=d.url;showPhoto();status.textContent='Photo uploaded. Save the part to link it.';}catch(e){status.textContent='Photo upload failed: '+e.message;}};
         const actions = document.createElement("div");
         actions.style.display = "flex"; actions.style.gap = "8px"; actions.style.marginTop = "12px";
@@ -9162,6 +9287,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         save.addEventListener("click", async ()=>{
           await apiSavePart({
             id: part.id || "",
+            item_type: wrap.querySelector('#part_item_type').value,
             manufacturer: wrap.querySelector("#part_mfg").value.trim(),
             item: wrap.querySelector("#part_item").value.trim(),
             description: wrap.querySelector("#part_desc").value.trim(),
@@ -9192,8 +9318,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const row = document.createElement("div");
         row.className = "jobrow";
         row.style.cursor = "pointer";
-        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${escapeHtml(p.Item || p.item || "")}${p.stock_low?" ⚠️ Low stock":""}</div><div class="hint">${p.stock_recorded?Number(p.stock_on_hand||0)+" in Stock":"Stock not counted"} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
-        if(activePlatform==='pds' && tracked.has(String(p.id))){
+        row.innerHTML = `<div class="jobrow-top"><div class="jobrow-name">${p.item_type==='service'?'🛠️ Service · ':''}${escapeHtml(p.Item || p.item || "")}${p.stock_low?" ⚠️ Low stock":""}</div><div class="hint">${p.item_type==='service'?'Non-stock service':(p.stock_recorded?Number(p.stock_on_hand||0)+' in Stock':'Stock not counted')} · Customer $${money(p.Price || p.price || 0)}</div></div><div class="jobrow-addr">${escapeHtml(p.Manufacturer || p.manufacturer || "")} - ${escapeHtml(p.Description || p.description || "")}${p.supplier ? " · Supplier: "+escapeHtml(p.supplier) : ""}${p.supplier_rate!==''&&p.supplier_rate!=null ? " · Supplier Rate: $"+money(p.supplier_rate) : ""}</div>`;
+        if(activePlatform==='pds' && p.item_type!=='service' && tracked.has(String(p.id))){
           const saved=tracked.get(String(p.id));const quantities=document.createElement('div');quantities.className='hint';quantities.style.cssText='padding:6px 0 2px;font-weight:650';
           quantities.textContent='PDS quantities · Warehouse: '+(saved.stock_recorded?saved.warehouse:'not counted')+' · Vans: '+saved.van_total+' · Total physically tracked: '+saved.total_tracked;
           row.append(quantities);
@@ -9203,7 +9329,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;margin:8px 0;flex-wrap:wrap';
         const edit=document.createElement('button');edit.className='btn';edit.textContent='View / Edit Part';
         edit.onclick=()=>openPartEditor(p);
-        const stock=document.createElement('button');stock.className='btn';stock.textContent='Adjust Stock';
+        const stock=document.createElement('button');stock.className='btn';stock.textContent='Adjust Stock';stock.disabled=p.item_type==='service';stock.title=p.item_type==='service'?'Services have no physical inventory':'';
         stock.onclick=async()=>{
           const deltaText=prompt('Stock adjustment (positive quantity to receive, negative to remove):','');
           if(deltaText===null)return;
@@ -12514,18 +12640,135 @@ function renderEmployeesView() {
       qty: Number(item.qty ?? 1),
       rate: Number(item.rate || 0),
       kind,
-      taxable: typeof item.taxable === "boolean" ? item.taxable : !(kind === "labor" || kind === "fee"),
+      taxable: typeof item.taxable === "boolean" ? item.taxable : !(kind === "labor" || kind === "fee" || kind === "service"),
     };
   }
 
-  function defaultDocItems() {
+  function defaultDocItems(pricing = {}) {
     return [
-      createDocLineItem({ code: "TRIP", description: "Trip Charge", qty: 1, rate: 175, kind: "fee", taxable: false }),
-      createDocLineItem({ code: "FUEL", description: "Fuel Surcharge", qty: 1, rate: 20, kind: "fee", taxable: false }),
+      createDocLineItem({ code: "TRIP", description: "Trip Charge", qty: 1, rate: Number(pricing.trip ?? 190), kind: "trip", taxable: false }),
+      createDocLineItem({ code: "FUEL", description: "Fuel Surcharge", qty: 1, rate: Number(pricing.fuel ?? 20), kind: "fuel", taxable: false }),
+      createDocLineItem({ code: "", description: "", qty: 1, rate: 0, kind: "other", taxable: false }),
     ];
   }
 
 
+
+  // 5.51: Quick-add editors operate on the current document without navigating
+  // away or saving the estimate/invoice/PO. No generated number is allocated.
+  function pdsQuickRecordEditor(title, fields, onSave, options={}) {
+    return new Promise(resolve=>{
+      const backdrop=document.createElement('div');
+      backdrop.className='pds-quick-record-overlay';
+      backdrop.style.cssText='position:fixed;inset:0;z-index:19000;background:rgba(16,24,40,.65);display:flex;align-items:center;justify-content:center;padding:14px;overflow:auto';
+      const form=document.createElement('form');form.className='card';form.setAttribute('role','dialog');form.setAttribute('aria-label',title);
+      form.style.cssText='width:min(100%,720px);max-height:calc(100dvh - 32px);overflow:auto;display:grid;gap:12px;padding:22px;background:#fff';
+      const head=document.createElement('div');head.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px';
+      const name=document.createElement('h3');name.style.margin='0';name.textContent=title;
+      const close=document.createElement('button');close.type='button';close.className='btn';close.textContent='✕';close.setAttribute('aria-label','Close without saving');
+      head.append(name,close);form.append(head);
+      const hint=document.createElement('p');hint.className='hint';hint.style.margin='0';hint.textContent=options.hint||'Saved to PDS records after review. The current document will remain open.';form.append(hint);
+      const grid=document.createElement('div');grid.style.cssText='display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,245px),1fr));gap:12px';
+      for(const [key,label,kind,required] of fields){
+        const wrap=document.createElement('label');wrap.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';wrap.textContent=label;
+        const field=kind==='textarea'?document.createElement('textarea'):document.createElement('input');field.name=key;field.className='input';
+        if(kind==='textarea')field.rows=3;else field.type=kind==='number'?'number':kind==='url'?'url':kind==='email'?'email':'text';
+        if(kind==='number'){field.min='0';field.step='.01';}
+        if(required)field.required=true;
+        wrap.append(field);grid.append(wrap);
+      }
+      form.append(grid);
+      const message=document.createElement('p');message.setAttribute('role','status');message.className='hint';message.style.margin='0';
+      const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+      const submit=document.createElement('button');submit.type='submit';submit.className='btn btn-orange';submit.textContent='Save & Use';
+      const cancel=document.createElement('button');cancel.type='button';cancel.className='btn';cancel.textContent='Cancel';actions.append(submit,cancel);
+      form.append(message,actions);backdrop.append(form);document.body.append(backdrop);
+      const dismiss=(result=null)=>{backdrop.remove();resolve(result);};close.onclick=cancel.onclick=()=>dismiss();
+      backdrop.addEventListener('click',event=>{if(event.target===backdrop)dismiss();});
+      const api={form,grid,message,submit,actions};
+      if(typeof options.setup==='function')options.setup(api);
+      form.onsubmit=async event=>{
+        event.preventDefault();submit.disabled=true;message.textContent='Saving to PDS…';
+        try{const values=Object.fromEntries([...new FormData(form).entries()].map(([k,v])=>[k,String(v).trim()]));const saved=await onSave(values,api);dismiss(saved);}
+        catch(error){message.textContent='Not saved: '+(error.message||String(error));submit.disabled=false;}
+      };
+      form.querySelector('[name]')?.focus();
+    });
+  }
+
+  function pdsQuickCustomerEditor(existing=[]){
+    return pdsQuickRecordEditor('＋ New Customer / Contact',[
+      ['company_name','Company / Customer Name','text',true],['address','Street Address','text'],
+      ['city','City','text'],['state','State','text'],['zip_code','ZIP','text'],
+      ['phone_number','Company Phone','text'],['email','Company Email','email'],
+      ['contact_name','Primary Contact (optional)','text'],['contact_phone','Contact Phone','text'],
+      ['contact_email','Contact Email','email']
+    ],async data=>{
+      const normalized=name=>String(name||'').trim().toLowerCase().replace(/^the\s+/,'');
+      if(existing.some(customer=>normalized(customer.company_name)===normalized(data.company_name))){
+        throw Error('A saved customer with a matching name exists. Select it from the Customer field instead of creating a duplicate.');
+      }
+      const customer=await apiCreateCustomer(data);
+      if(data.contact_name){
+        try{await apiCreateContact({name:data.contact_name,company_name:data.company_name,customer_id:customer.id||'',phone_number:data.contact_phone,email:data.contact_email});}
+        catch(err){alert('Customer saved, but the contact was not saved: '+(err.message||err));}
+      }
+      return customer;
+    });
+  }
+
+  function pdsQuickCatalogEditor(defaultType='part'){
+    return pdsQuickRecordEditor('✨ New Part or Service',[
+      ['item_type','Item Type','text'],['part_number','Part # / Service Code','text',true],
+      ['description','Description','textarea',true],['manufacturer','Manufacturer / Provider','text'],
+      ['supplier','Preferred Supplier / Subcontractor','text'],['price','Customer Price ($)','number'],
+      ['supplier_rate','Supplier Cost ($)','number'],['product_url','Product Website (HTTPS)','url'],
+      ['image_url','Photo URL (HTTPS, optional)','url']
+    ],async(data)=>{
+      data.item_type=['part','service'].includes(data.item_type)?data.item_type:'part';
+      if(data.item_type==='service'&&!data.description)throw Error('Describe the service');
+      return await apiSavePart(data);
+    },{hint:'Save to the PDS catalog first, then insert the item into this document. Services are not warehouse stock.',setup:({form,grid,message})=>{
+      const type=form.querySelector('[name="item_type"]');const select=document.createElement('select');select.name='item_type';select.className='input';
+      for(const [value,label] of [['part','📦 Part / Product'],['service','🛠️ Service / Subcontractor']]){const opt=document.createElement('option');opt.value=value;opt.textContent=label;select.append(opt);}select.value=defaultType;type.replaceWith(select);
+      const tools=document.createElement('section');tools.className='card';tools.style.cssText='display:grid;gap:8px;padding:12px;background:#f7f9fc';
+      const head=document.createElement('strong');head.textContent='✨ Moses — Website / Photo Intake';
+      const note=document.createElement('small');note.className='hint';note.textContent='Read public product metadata, inspect suggestions, then choose Apply. Website lookup never saves a record or changes pricing.';
+      const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+      const read=document.createElement('button');read.type='button';read.className='btn';read.textContent='🔎 Read Product Website';
+      const upload=document.createElement('input');upload.type='file';upload.accept='.png,.jpg,.jpeg,.webp';upload.setAttribute('aria-label','Upload part photo');upload.style.maxWidth='230px';
+      buttons.append(read,upload);const findings=document.createElement('div');findings.style.cssText='display:grid;gap:6px';
+      tools.append(head,note,buttons,findings);grid.after(tools);
+      const resultKeys=[['part_number','Part #'],['description','Description'],['manufacturer','Manufacturer'],['supplier','Supplier'],['image_url','Photo URL']];
+      read.onclick=async()=>{
+        const url=form.elements.namedItem('product_url').value.trim();if(!url){message.textContent='Enter an HTTPS product URL first';return;}
+        read.disabled=true;message.textContent='Moses is reading public product metadata…';findings.replaceChildren();
+        try{
+          const result=await fetchJSON('/moses/part-from-url',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url})});
+          let count=0;
+          for(const [key,label] of resultKeys){const value=String(result.fields?.[key]||'').trim();if(!value)continue;count++;
+            const row=document.createElement('label');row.style.cssText='display:flex;gap:8px;align-items:start;font-size:13px';
+            const check=document.createElement('input');check.type='checkbox';check.checked=true;check.dataset.applyField=key;
+            const detail=document.createElement('span');detail.style.overflowWrap='anywhere';detail.textContent=label+': '+value;row.append(check,detail);findings.append(row);
+          }
+          if(!count){message.textContent='Page read, but no product-specific fields were found. Enter details manually.';return;}
+          const apply=document.createElement('button');apply.type='button';apply.className='btn';apply.textContent='Apply Selected Suggestions';
+          apply.onclick=()=>{for(const check of findings.querySelectorAll('[data-apply-field]')){if(!check.checked)continue;const key=check.dataset.applyField;const field=form.elements.namedItem(key);if(field&&result.fields?.[key])field.value=String(result.fields[key]);}message.textContent='Selected suggestions applied. Review details and press Save & Use.';};
+          findings.append(apply);message.textContent='Suggestions ready for review. Source: '+(result.source||'public website');
+        }catch(error){message.textContent='Website intake unavailable: '+(error.message||error)+'. You can still enter details manually.';}
+        finally{read.disabled=false;}
+      };
+      upload.onchange=async()=>{
+        const file=upload.files?.[0];if(!file)return;
+        if(file.size>5*1024*1024){message.textContent='Image must be 5 MB or smaller';return;}
+        message.textContent='Uploading photo…';
+        try{const payload=new FormData();payload.append('file',file);const response=await fetch('/moses/part-image/pds',{method:'POST',body:payload,credentials:'same-origin'});
+          const result=await response.json();if(!response.ok)throw Error(result.detail||'Photo upload failed');
+          form.elements.namedItem('image_url').value=result.url;message.textContent='Photo attached to catalog draft. Save to finish.';
+        }catch(err){message.textContent='Photo upload requires PDS office-admin access: '+(err.message||err);}
+      };
+    }});
+  }
 
   // Send saved PDS estimates/invoices from the server, never via the device mail application.
   async function openEstimateInvoiceEmail(doc, docType = "invoice") {
@@ -12719,9 +12962,10 @@ function serializeDocItems(items, laborOnly) {
     await doorksLoadSharedTicket();
     openDrawer("Estimate / Invoice", async (drawerBody, overlay) => {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
-      const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:175, fuel:20, labor:175, crew_labor:235, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
+      const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:190, fuel:20, labor:190, crew_labor:250, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
-      let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems().map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
+      const canCreatePdsPO = ['lead','office','office_admin','admin'].includes(String(currentUser?.role||''));
+      let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems(pricing).map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
       let currentPartResults = [];
       drawerBody.innerHTML = "";
       const card = document.createElement("div");
@@ -12734,7 +12978,7 @@ function serializeDocItems(items, laborOnly) {
           </div>
           <div class="card" style="min-width:260px; padding:12px;">
             <div class="label">Document Type</div>
-            <select class="input" id="doc_type"><option value="estimate">Estimate</option><option value="invoice">Invoice</option></select>
+            <select class="input" id="doc_type"><option value="estimate">Estimate</option><option value="invoice">Invoice</option>${canCreatePdsPO ? '<option value="purchase_order">Purchase Order</option>' : ''}</select>
             <div class="label" style="margin-top:8px;">Date</div>
             <input class="input" id="doc_date" type="date" />
             <div class="label" style="margin-top:8px;">Sales Tax % <span style="color:#b91c1c;">*</span></div>
@@ -12752,7 +12996,7 @@ function serializeDocItems(items, laborOnly) {
         <div class="grid2" style="margin-top:12px; align-items:start;">
           <div class="card" style="padding:12px;">
             <div class="label">Name / Address</div>
-            <input class="input" id="doc_customer" list="doc_customer_list" placeholder="Customer" style="margin-top:6px;" />
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:6px"><input class="input" id="doc_customer" list="doc_customer_list" placeholder="Find saved customer" style="flex:1 1 185px;min-width:0" /><button type="button" class="btn" id="doc_new_customer" title="Create customer and optionally a contact without leaving this document">＋ Customer</button></div>
             <input class="input" id="doc_address" name="doc_address" placeholder="Address" autocomplete="off" autocapitalize="off" spellcheck="false" data-lpignore="true" data-1p-ignore="true" style="margin-top:8px;" />
           </div>
           <div class="card" style="padding:12px;">
@@ -12766,28 +13010,20 @@ function serializeDocItems(items, laborOnly) {
           </div>
         </div>
         <div style="margin-top:12px;"><div class="label">Proposal / Invoice Body</div><textarea id="doc_work" placeholder="Proposal Includes / Invoice Includes..." style="min-height:140px;"></textarea></div>
-        <div class="card" id="doc_source_wrap" style="padding:12px; margin-top:12px;">
+        <div class="card pds-doc-source" id="doc_source_wrap" style="padding:12px; margin-top:12px;">
           <div class="label">Description Source</div>
-          <select class="input" id="doc_source_form"></select>
-          <div class="hint" style="margin-top:6px;">Choose which saved Completion/Recommendation Form should drive Auto Fill Description.</div>
-
+          <div class="pds-doc-source-controls">
+            <select class="input" id="doc_source_form" aria-label="Choose saved completion or recommendation form"></select>
+            <button type="button" class="btn" id="doc_auto_fill" title="Generate a reviewed description from the selected saved form">✨ Auto Fill</button>
+          </div>
         </div>
-        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; align-items:center;">
-          <button class="btn" id="doc_auto_fill">Auto Fill Description</button>
-          <button class="btn" id="add_trip">Trip Charge</button>
-          <button class="btn" id="add_fuel">Fuel Surcharge</button>
-          <button class="btn" id="add_freight">Freight Surcharge</button>
-          <button class="btn" id="add_single">Single Tech Labor</button>
-          <button class="btn" id="add_crew">Crew Tech Labor</button>
-          <button class="btn" id="add_blank">Add Blank Line</button>
+        <div class="card pds-doc-item-tools" style="padding:12px; margin-top:12px;">
+          <div class="pds-doc-item-heading"><div><strong>Line Items</strong><div class="hint">Add saved parts, trip, fuel, labor or freight.</div></div><button class="btn" type="button" id="add_blank" title="Add another editable line item" aria-label="Add line item">＋ Line</button></div>
+          <input class="input" type="search" id="part_lookup" placeholder="🔎 Search parts or charges…" aria-label="Search saved parts and standard charges" autocomplete="off" />
+          <div class="hint" id="part_lookup_hint" style="margin-top:5px;">Click to browse, or type a description or part number.</div>
+          <div id="part_lookup_results" class="pds-doc-suggestions" role="listbox" aria-label="Matching charges and parts"></div>
         </div>
-        <div class="card" style="padding:12px; margin-top:12px;">
-          <div class="label">Find Existing Parts</div>
-          <input class="input" id="part_lookup" placeholder="Type item number or description" autocomplete="off" />
-          <div class="hint" id="part_lookup_hint" style="margin-top:6px;">Start typing to search your saved parts list.</div>
-          <div id="part_lookup_results" style="display:grid; gap:8px; margin-top:8px;"></div>
-        </div>
-        <div style="margin-top:12px; overflow:auto;"><table style="width:100%; border-collapse:collapse; min-width:920px;"><thead><tr>
+        <div class="pds-doc-lines-scroll" style="margin-top:12px; overflow-x:auto;"><table class="pds-doc-line-table" style="width:100%; border-collapse:collapse; min-width:680px;"><thead><tr>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; min-width:130px;">Item</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; min-width:320px;">Description</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; width:90px;">Qty</th>
@@ -12796,7 +13032,7 @@ function serializeDocItems(items, laborOnly) {
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; width:110px;">Total</th>
           <th style="text-align:left; padding:8px; border-bottom:1px solid #e5e7eb; width:60px;"></th>
         </tr></thead><tbody id="doc_items"></tbody></table></div>
-        <div style="display:grid; grid-template-columns:1fr 320px; gap:12px; margin-top:12px;">
+        <div class="pds-doc-totals-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,270px),1fr)); gap:12px; margin-top:12px;">
           <div class="card" style="padding:12px;"><div class="jobrow-top"><div class="jobrow-name">Cost Breakdown</div></div>
             <div class="jobrow-top" style="margin-top:8px;"><div>Trip Charges</div><div id="doc_trip_total">$0.00</div></div>
             <div class="jobrow-top"><div>Fuel Surcharges</div><div id="doc_fuel_total">$0.00</div></div>
@@ -12814,6 +13050,16 @@ function serializeDocItems(items, laborOnly) {
         <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;"><button class="btn btn-orange" id="doc_generate">Generate PDF</button><button class="btn" id="doc_cancel">Cancel</button></div>`;
       drawerBody.appendChild(card);
       card.appendChild(buildCustomerDatalist("doc_customer_list", customers));
+      card.querySelector('#doc_new_customer').onclick=async()=>{
+        const created=await pdsQuickCustomerEditor(customers);
+        if(!created)return;
+        customers.push(created);
+        const list=card.querySelector('#doc_customer_list');
+        if(list){const option=document.createElement('option');option.value=created.company_name||'';list.append(option);}
+        const name=card.querySelector('#doc_customer');name.value=created.company_name||'';
+        const address=card.querySelector('#doc_address');if(address&&!address.value.trim())address.value=[created.address,[created.city,created.state,created.zip_code].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+        const ship=card.querySelector('#doc_ship');if(ship&&!ship.value.trim())ship.value=address.value||name.value;
+      };
       const completedSel = card.querySelector("#doc_completed_by");
       employees.forEach(e => { const opt=document.createElement("option"); opt.value=e.name||""; opt.textContent=e.name||""; completedSel.appendChild(opt); });
       const dom = { type:card.querySelector("#doc_type"), date:card.querySelector("#doc_date"), customer:card.querySelector("#doc_customer"), address:card.querySelector("#doc_address"), ship:card.querySelector("#doc_ship"), po:card.querySelector("#doc_po"), job:card.querySelector("#doc_job"), number:card.querySelector("#doc_number"), numberLabel:card.querySelector("#doc_number_label"), work:card.querySelector("#doc_work"), tbody:card.querySelector("#doc_items"), subtotal:card.querySelector("#doc_subtotal"), taxable:card.querySelector("#doc_taxable"), tax:card.querySelector("#doc_tax"), total:card.querySelector("#doc_total"), taxRateSelect:card.querySelector("#doc_tax_rate_select"), taxRateCustom:card.querySelector("#doc_tax_rate_custom"), taxRateHint:card.querySelector("#doc_tax_rate_hint"), partLookup:card.querySelector("#part_lookup"), partLookupHint:card.querySelector("#part_lookup_hint"), partResults:card.querySelector("#part_lookup_results"), tripTotal:card.querySelector("#doc_trip_total"), fuelTotal:card.querySelector("#doc_fuel_total"), laborTotal:card.querySelector("#doc_labor_total"), partsTotal:card.querySelector("#doc_parts_total"), otherTotal:card.querySelector("#doc_other_total"), completedBy:completedSel, terms:card.querySelector("#doc_terms"), sourceWrap:card.querySelector("#doc_source_wrap"), sourceForm:card.querySelector("#doc_source_form"), scopeWrap:null, scopeIntent:null };
@@ -12876,7 +13122,7 @@ function serializeDocItems(items, laborOnly) {
         if (normalized) { dom.taxRateSelect.value = "__custom__"; dom.taxRateCustom.value = normalized; dom.taxRateCustom.style.display = "block"; dom.taxRateHint.textContent = "Custom sales tax entered."; return; }
         dom.taxRateSelect.value = ""; dom.taxRateCustom.value = ""; dom.taxRateCustom.style.display = "none"; dom.taxRateHint.textContent = "Choose a city tax rate or select Custom."; }
       function getCurrentTaxRateValue() { return dom.taxRateSelect.value === "__custom__" ? String(dom.taxRateCustom.value || "").trim() : String(dom.taxRateSelect.value || "").trim(); }
-      dom.type.value = docType; dom.date.value = (editDoc && editDoc.date) || yyyyMmDd(new Date()); wireKnownAddressAutofill({ input: dom.address, customerInput: dom.customer, knownAddresses, extraAddresses: customers.map(c => c.address).filter(Boolean) }); if (editDoc && editDoc.tax_rate != null) setTaxRateValue(editDoc.tax_rate); else setTaxRateValue("");
+      dom.type.value = docType; if (editDoc) { dom.type.disabled = true; dom.type.title = 'Document type cannot be changed on an existing numbered document'; } dom.date.value = (editDoc && editDoc.date) || yyyyMmDd(new Date()); wireKnownAddressAutofill({ input: dom.address, customerInput: dom.customer, knownAddresses, extraAddresses: customers.map(c => c.address).filter(Boolean) }); if (editDoc && editDoc.tax_rate != null) setTaxRateValue(editDoc.tax_rate); else setTaxRateValue("");
       if (dom.terms) dom.terms.value = (editDoc && editDoc.terms) || "";
       if (job) { dom.customer.value = (editDoc && editDoc.customer) || job.customer || ""; dom.address.value = (editDoc && editDoc.address) || job.address || ""; dom.ship.value = (editDoc && editDoc.ship_to) || job.address || job.customer || ""; dom.po.value = (editDoc && editDoc.po_number) || job.po_number || ""; dom.job.value = (editDoc && editDoc.job_number) || job.job_number || ""; }
       if (editDoc) { dom.work.value = editDoc.work || ""; setTaxRateValue(editDoc.tax_rate ?? 7.75); dom.completedBy.value = editDoc.completed_by || ""; dom.number.value = editDoc.number || ""; }
@@ -12894,34 +13140,104 @@ function serializeDocItems(items, laborOnly) {
         dom.laborTotal.textContent=`$${money(sums.labor)}`; dom.partsTotal.textContent=`$${money(sums.parts)}`;
         dom.otherTotal.textContent=`$${money(sums.other)}`;
       }
-      function renderPartLookupResults(results){ currentPartResults=Array.isArray(results)?results:[]; dom.partResults.innerHTML=""; dom.partLookupHint.textContent=currentPartResults.length?`${currentPartResults.length} matching part${currentPartResults.length===1?"":"s"}`:"No matching parts found yet."; currentPartResults.slice(0,10).forEach(p=>{ const row=document.createElement("button"); row.className="btn"; row.style.textAlign="left"; row.innerHTML=`<strong>${escapeHtml(p.Item||"")}</strong><br><span class="hint">${escapeHtml(p.Description||"")}${p.Price?` - $${money(p.Price)}`:""}</span>`; row.addEventListener("click",()=>addPartToItems(p)); dom.partResults.appendChild(row); }); }
-      let searchTimer=null; async function searchParts(q){ try{ renderPartLookupResults(await apiListParts({ q, limit:25 })); } catch { renderPartLookupResults([]); } }
-      function addPartToItems(part){ if(!part) return; items.push(createDocLineItem({ code:part.Item||"", description:part.Description||"", qty:1, rate:Number(part.Price||0), kind:"part", taxable:true })); dom.partLookup.value=""; renderPartLookupResults([]); renderItems(); }
-      function findPartMatch(q){ const n=String(q||"").trim().toLowerCase(); if(!n) return null; return currentPartResults.find(p=>String(p.Item||"").trim().toLowerCase()===n) || currentPartResults.find(p=>String(p.Description||"").trim().toLowerCase()===n) || currentPartResults.find(p=>`${p.Item||""} ${p.Description||""}`.toLowerCase().includes(n)) || null; }
+      const commonCharges = [
+        {code:'TRIP', description:'Trip Charge', rate:Number(pricing.trip ?? 190), kind:'trip', taxable:false, icon:'🚗'},
+        {code:'FUEL', description:'Fuel Surcharge', rate:Number(pricing.fuel ?? 20), kind:'fuel', taxable:false, icon:'⛽'},
+        {code:'LABOR', description:'Single Tech Labor', rate:Number(pricing.labor || 175), kind:'labor', taxable:false, icon:'🛠️'},
+        {code:'CREW', description:'Crew Tech Labor', rate:Number(pricing.crew_labor || 235), kind:'labor', taxable:false, icon:'👥'},
+        {code:'FREIGHT', description:'Freight Surcharge', rate:0, kind:'fee', taxable:false, icon:'📦'},
+      ];
+      const filterCharges=q=>commonCharges.filter(p=>!q || `${p.code} ${p.description}`.toLowerCase().includes(q.toLowerCase()));
+      function insertItem(data){
+        const next=createDocLineItem(data);
+        const blank=items.findIndex(it=>!String(it.code||'').trim() && !String(it.description||'').trim());
+        if(blank>=0)items[blank]=next;else items.push(next);
+        dom.partLookup.value=''; dom.partResults.replaceChildren(); renderItems();
+      }
+      function renderPartLookupResults(results,q=''){
+        currentPartResults=Array.isArray(results)?results:[];
+        dom.partResults.replaceChildren();
+        const choices=[...filterCharges(q).map(p=>({item:p,charge:true})),...currentPartResults.slice(0,12).map(p=>({item:p,charge:false}))];
+        // Always offer creating a catalog record as the first search result.
+        const add=document.createElement('button');add.type='button';add.className='pds-doc-suggestion pds-new-catalog';add.setAttribute('role','option');
+        add.textContent='＋ Add New Part or Service  ·  Moses intake';
+        add.onclick=async()=>{const saved=await pdsQuickCatalogEditor();if(!saved)return;
+          insertItem({code:saved.part_number||'',description:saved.description||'',qty:1,rate:Number(saved.price||0),kind:saved.item_type==='service'?'service':'part',taxable:saved.item_type!=='service'});
+        };dom.partResults.append(add);
+        dom.partLookupHint.textContent=choices.length?`${choices.length} matching charges or parts · or add a new item`:'No matching catalog item. Add a new part or service above.';
+        for(const {item,charge} of choices.slice(0,15)){
+          const row=document.createElement('button'); row.type='button';row.className='pds-doc-suggestion';row.setAttribute('role','option');
+          const code=document.createElement('strong'); code.textContent=(charge?item.icon+' ': (item.item_type==='service'?'🛠️ ':'📦 '))+(charge?item.code:item.Item||item.part_number||'PART');
+          const desc=document.createElement('span');desc.textContent=(charge?item.description:item.Description||'')+' · $'+money(charge?item.rate:item.Price);
+          row.append(code,desc);
+          row.onclick=()=>insertItem(charge?item:{code:item.Item||item.part_number||'',description:item.Description||item.description||'',qty:1,rate:Number(item.Price??item.price??0),kind:item.item_type==='service'?'service':'part',taxable:item.item_type!=='service'});
+          dom.partResults.append(row);
+        }
+      }
+      let searchTimer=null;
+      async function searchParts(q){
+        // Built-in charges can always be selected; catalog results come from the saved PDS Parts List.
+        try{const parts=await apiListParts({q:q||'',limit:q?25:10});if(dom.partLookup.value.trim()!==q)return;renderPartLookupResults(parts,q);}catch{renderPartLookupResults([],q);}
+      }
+      function addPartToItems(part){if(part)insertItem({code:part.Item||part.part_number||'',description:part.Description||part.description||'',qty:1,rate:Number(part.Price??part.price??0),kind:part.item_type==='service'?'service':'part',taxable:part.item_type!=='service'});}
+      function findPartMatch(q){const n=String(q||'').trim().toLowerCase();if(!n)return null;return currentPartResults.find(p=>String(p.Item||'').trim().toLowerCase()===n)||currentPartResults.find(p=>String(p.Description||'').trim().toLowerCase()===n)||currentPartResults.find(p=>`${p.Item||''} ${p.Description||''}`.toLowerCase().includes(n))||null;}
+      function suggestForDescription(tr,line,value){
+        const cell=tr.querySelector('[data-k="description"]')?.closest('td');if(!cell)return;
+        cell.style.position='relative';
+        let results=cell.querySelector('.pds-doc-inline-results');
+        if(!results){results=document.createElement('div');results.className='pds-doc-inline-results';results.setAttribute('role','listbox');cell.append(results);}
+        results.replaceChildren();const q=String(value||'').trim();
+        clearTimeout(tr._pdsLookupTimer);
+        if(q.length<2)return;
+        const marker=q.toLowerCase();
+        tr._pdsLookupTimer=setTimeout(async()=>{
+          const current=tr.querySelector('[data-k="description"]');if(!current||current.value.trim().toLowerCase()!==marker)return;
+          const catalog=await apiListParts({q,limit:8}).catch(()=>[]);
+          if(!tr.isConnected||current.value.trim().toLowerCase()!==marker)return;
+          results.replaceChildren();
+          for(const choice of [...filterCharges(q).map(item=>({item,charge:true})),...catalog.slice(0,6).map(item=>({item,charge:false}))].slice(0,7)){
+            const btn=document.createElement('button');btn.type='button';btn.className='pds-doc-suggestion';btn.setAttribute('role','option');
+            btn.textContent=choice.charge?choice.item.description+' · $'+money(choice.item.rate):(choice.item.Item||'Part')+' — '+(choice.item.Description||'')+' · $'+money(choice.item.Price);
+            btn.onclick=()=>{const p=choice.item;Object.assign(line,choice.charge?createDocLineItem(p):createDocLineItem({code:p.Item||'',description:p.Description||'',qty:line.qty||1,rate:Number(p.Price||0),kind:p.item_type==='service'?'service':'part',taxable:p.item_type!=='service'}));renderItems();};
+            results.append(btn);
+          }
+        },200);
+      }
       function makeRow(item,idx){
         const shared=window.DoorksSharedTicket?.createDocumentLineRow;
         if(!shared)throw Error('Shared document line editor is unavailable');
         const tr=shared(item,idx,{mode:'office',onRemove:(i)=>{items.splice(i,1);renderItems()},onChange:()=>{
           tr.querySelector('[data-k="line_total"]').textContent='$'+money(Number(item.qty||0)*Number(item.rate||0));updateTotals();
         },onFieldChange:async (line,key,value)=>{
-          if(key!=='code')return;
+          if(key==='description'){suggestForDescription(tr,line,value);return;}
+          if(key!=='code'||!String(line.code||'').trim())return;
           const hit=await apiListParts({q:line.code,limit:10}).catch(()=>[]);
-          const part=hit.find(p=>String(p.Item||'').trim().toLowerCase()===String(line.code||'').trim().toLowerCase())||hit[0];
-          if(part){line.code=part.Item||line.code;line.description=part.Description||line.description;line.rate=Number(part.Price||line.rate||0);line.kind='part';line.taxable=true;renderItems()}
+          const part=hit.find(p=>String(p.Item||'').trim().toLowerCase()===String(line.code||'').trim().toLowerCase());
+          if(part){line.code=part.Item||line.code;line.description=part.Description||line.description;line.rate=Number(part.Price||line.rate||0);line.kind=part.item_type==='service'?'service':'part';line.taxable=part.item_type!=='service';renderItems()}
         }});
         return tr;
       }
       function renderItems(){ applyDocTypeMeta(); dom.tbody.innerHTML=""; items.forEach((item,idx)=>dom.tbody.appendChild(makeRow(item,idx))); updateTotals(); }
-      dom.partLookup.addEventListener("input", ()=>{ clearTimeout(searchTimer); const q=dom.partLookup.value.trim(); if(!q){ renderPartLookupResults([]); return; } searchTimer=setTimeout(()=>searchParts(q), 180); });
-      dom.partLookup.addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); addPartToItems(findPartMatch(dom.partLookup.value)||currentPartResults[0]); }});
-      card.querySelector("#add_trip").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:Number(pricing.trip || 175), kind:"trip", taxable:false })); renderItems(); });
-      card.querySelector("#add_fuel").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:Number(pricing.fuel || 20), kind:"fuel", taxable:false })); renderItems(); });
-      const freightBtn = card.querySelector("#add_freight"); if (freightBtn) freightBtn.addEventListener("click", ()=>{ const amt = prompt("Freight surcharge amount:", ""); if (amt === null) return; const n = Number(String(amt).replace(/[$,]/g, "") || 0); if (!Number.isFinite(n) || n < 0) return alert("Enter a valid freight amount."); items.push(createDocLineItem({ code:"FREIGHT", description:"Freight Surcharge", qty:1, rate:n, kind:"fee", taxable:false })); renderItems(); });
-      card.querySelector("#add_single").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"LABOR", description:"Single Tech Labor", qty:1, rate:Number(pricing.labor || 175), kind:"labor", taxable:false })); renderItems(); });
-      card.querySelector("#add_crew").addEventListener("click", ()=>{ items.push(createDocLineItem({ code:"CREW", description:"Crew Tech Labor", qty:1, rate:Number(pricing.crew_labor || 235), kind:"labor", taxable:false })); renderItems(); });
-      card.querySelector("#add_blank").addEventListener("click", ()=>{ items.push(createDocLineItem({ kind:"other" })); renderItems(); });
+      dom.partLookup.addEventListener('focus',()=>searchParts(dom.partLookup.value.trim()));
+      dom.partLookup.addEventListener('input',()=>{clearTimeout(searchTimer);searchTimer=setTimeout(()=>searchParts(dom.partLookup.value.trim()),180);});
+      dom.partLookup.addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();const q=dom.partLookup.value.trim();const preset=filterCharges(q)[0];if(preset)insertItem(preset);else addPartToItems(findPartMatch(q)||currentPartResults[0]);}});
+      card.querySelector('#add_blank').addEventListener('click',()=>{items.push(createDocLineItem({kind:'other',qty:1,rate:0,taxable:false}));renderItems();const rows=dom.tbody.querySelectorAll('tr');rows[rows.length-1]?.querySelector('[data-k="description"]')?.focus();});
       card.querySelector("#doc_cancel").addEventListener("click", ()=> overlay.remove());
-      dom.type.addEventListener("change", ()=>{ renderItems(); syncDescriptionControls(); });
+      dom.type.addEventListener("change", ()=>{
+        if (dom.type.value === 'purchase_order') {
+          if (!canCreatePdsPO) { dom.type.value = docType; return; }
+          if (!confirm('Open the PDS Purchase Order editor? This uses supplier/receiving records instead of the customer estimate/invoice PDF editor. Unsaved customer document edits will not transfer.')) { dom.type.value = docType; return; }
+          if (job && !editDoc) window.__pdsJobPODraft = {
+            customer: String(dom.customer.value || job.customer || ''),
+            job_number: String(dom.job.value || job.job_number || ''),
+            description: String(dom.work.value || job.job_notes || job.description || '')
+          };
+          overlay?.remove();
+          renderUnifiedPurchaseOrders('pds', true, ()=>renderEstimatePage());
+          return;
+        }
+        renderItems(); syncDescriptionControls();
+      });
       dom.taxRateSelect.addEventListener("change", ()=>{
         if (dom.taxRateSelect.value === "__custom__") {
           dom.taxRateCustom.style.display = "block";
@@ -12974,8 +13290,8 @@ function serializeDocItems(items, laborOnly) {
             dates: [dom.date.value || ""],
           });
           dom.work.value = String((resp && resp.description) || "");
-          if (!items.some(it => it.kind === "trip")) items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:Number(pricing.trip || 175), kind:"trip", taxable:false }));
-          if (!items.some(it => it.kind === "fuel")) items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:Number(pricing.fuel || 20), kind:"fuel", taxable:false }));
+          if (!items.some(it => it.kind === "trip")) items.push(createDocLineItem({ code:"TRIP", description:"Trip Charge", qty:1, rate:Number(pricing.trip ?? 190), kind:"trip", taxable:false }));
+          if (!items.some(it => it.kind === "fuel")) items.push(createDocLineItem({ code:"FUEL", description:"Fuel Surcharge", qty:1, rate:Number(pricing.fuel ?? 20), kind:"fuel", taxable:false }));
           renderItems();
         } catch (e) { alert(e.message || String(e)); }
       });
@@ -13087,15 +13403,17 @@ function serializeDocItems(items, laborOnly) {
       if (!editDoc) setTaxRateValue("");
       renderItems();
 
+      function enteredDocItems(){return items.filter(it=>String(it.code||'').trim()||String(it.description||'').trim());}
       function buildCurrentDocPayloadForExport() {
+        const savedItems=enteredDocItems();
         return {
           job_id: job ? job.id : ((editDoc && editDoc.job_id) || ""),
           customer: dom.customer.value.trim(),
           email: job ? (job.email || "") : "",
           address: dom.address.value.trim(),
           work: dom.work.value.trim(),
-          labor: serializeDocItems(items, true),
-          parts: serializeDocItems(items, false),
+          labor: serializeDocItems(savedItems, true),
+          parts: serializeDocItems(savedItems, false),
           number: dom.number.value.trim(),
           po_number: dom.po.value.trim(),
           invoice_number: docType === "invoice" ? dom.number.value.trim() : "",
@@ -13104,7 +13422,7 @@ function serializeDocItems(items, laborOnly) {
           tax_rate: Number(getCurrentTaxRateValue() || 0),
           terms: dom.terms ? dom.terms.value : "",
           completed_by: dom.completedBy.value || "",
-          items: items,
+          items: savedItems,
           date: dom.date.value || "",
           ship_to: dom.ship.value.trim()
         };
@@ -13129,10 +13447,10 @@ card.querySelector("#doc_generate").addEventListener("click", async ()=>{ try {
         if (ctx?.mosesDraft && items.some(it => it.kind === 'part' && Number(it.qty || 0) > 0 && Number(it.rate || 0) <= 0)) {
           alert('One or more Moses catalog parts have no verified selling price. Review and price each part before generating the estimate.');return;
         }
-         if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const lineCheck = window.DoorksSharedTicket?.validateDocumentLines?.(items);
+         if (!String(dom.completedBy.value || "").trim()) { alert("Please select who prepared this document before saving."); dom.completedBy.focus(); return; } if (!String(getCurrentTaxRateValue() || "").trim()) { alert("Please select the correct sales tax before saving."); if (dom.taxRateSelect.value === "__custom__") dom.taxRateCustom.focus(); else dom.taxRateSelect.focus(); return; } if (dom.terms && !String(dom.terms.value || "").trim()) { alert("Please select payment terms before saving."); dom.terms.focus(); return; } const lineCheck = window.DoorksSharedTicket?.validateDocumentLines?.(enteredDocItems());
       if (!lineCheck) { alert("Shared document validation is unavailable. Please reload before issuing a document."); return; }
       if (!lineCheck.valid) { alert(lineCheck.errors.join("\n")); return; }
-      const draftCheck=window.DoorksSharedTicket?.validateDocumentDraft?.({role:'office',items,customer:dom.customer.value,number:dom.number.value,preparedBy:dom.completedBy.value,taxRate:Number(getCurrentTaxRateValue())});
+      const draftCheck=window.DoorksSharedTicket?.validateDocumentDraft?.({role:'office',items:enteredDocItems(),customer:dom.customer.value,number:dom.number.value,preparedBy:dom.completedBy.value,taxRate:Number(getCurrentTaxRateValue())});
       if(!draftCheck){alert('Shared document draft validation is unavailable. Please reload.');return;}
       if(!draftCheck.valid){alert(draftCheck.errors.join("\n"));return;}
       const payload = buildCurrentDocPayloadForExport(); const resp = editDoc ? await apiUpdateDocument(editDoc.filename, { ...payload, type: docType }) : (docType === "invoice" ? await apiCreateInvoice(payload) : await apiCreateEstimate(payload)); if (job && !editDoc) { const newDocNumber = (resp.doc && resp.doc.number) || dom.number.value.trim();
@@ -13617,7 +13935,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const hubIntro=document.createElement('div');hubIntro.className='card pds-office-business-hub';hubIntro.innerHTML='<h2>Business Hub</h2><div id="pdsBusinessCards"></div>';
     root.append(hubIntro);
     makeHubCards(hubIntro.querySelector('#pdsBusinessCards'),[
-      {icon:'📝',label:'Generator',description:'Create estimates and invoices.',open:()=>btnGen.click()},
+      {icon:'📝',label:'Generator',description:'Create estimates, invoices or purchase orders.',open:()=>btnGen.click()},
       {icon:'📋',label:'Estimates',description:'Search and manage saved estimates.',open:()=>btnEst.click()},
       {icon:'🧾',label:'Invoices',description:'Search and manage saved invoices.',open:()=>btnInv.click()},
       {icon:'📦',label:'Purchase Orders',description:'Manage PDS supplier purchase orders.',open:()=>btnPO.click()},
@@ -13645,7 +13963,10 @@ function openEstimateDrawer(job, container = null, ctx = null) {
 
     async function renderDocList(type) {
       body.innerHTML = "";
-      const docs = await apiListDocuments({ type }).catch(() => []);
+      const [docs, external] = await Promise.all([
+        apiListDocuments({ type }).catch(() => []),
+        pdsExternalReferences({type}).catch(() => [])
+      ]);
       const card = document.createElement("div");
       card.className = "card";
       card.innerHTML = `<div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap"><div><h3>${type === "estimate" ? "Saved Estimates" : "Saved Invoices"}</h3><div class="hint">View, edit, or delete saved documents.</div></div><button class="btn btn-orange" id="doc_new_button">+ New ${type === "estimate" ? "Estimate" : "Invoice"}</button></div><input class="input" id="doc_list_search" placeholder="Search ${type === "estimate" ? "estimates" : "invoices"} by #, customer, address, job #, PO #, prepared by..." style="margin-top:12px;" />`;
@@ -13664,7 +13985,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
           return hay.includes(q);
         });
         list.innerHTML = "";
-        if (!filtered.length) {
+        const filteredExternal = external.filter(ref=>[ref.document_number,ref.po_number,ref.vendor,ref.job_number,ref.created_by].some(x=>String(x||'').toLowerCase().includes(q)));
+        if (!filtered.length && !filteredExternal.length) {
           list.innerHTML = `<div class="hint">No matching ${type}s found.</div>`;
           return;
         }
@@ -13704,10 +14026,12 @@ function openEstimateDrawer(job, container = null, ctx = null) {
             await apiDeleteDocument(doc.filename);
             renderDocList(type);
           });
-          actions.append(open, emailBtn, edit, del);
+          if(['office_admin','office','admin'].includes(String(currentUser?.role||'')))actions.append(open,emailBtn,edit,del);
+          else actions.append(open,emailBtn,edit);
           row.appendChild(actions);
           list.appendChild(row);
         });
+        filteredExternal.forEach(ref=>list.appendChild(pdsExternalReferenceRow(ref)));
       };
 
       renderRows("");
@@ -13718,9 +14042,10 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
 
     function renderGeneratorTab() {
-      body.innerHTML = `<div class="card"><h3>Estimate / Invoice</h3><div class="hint">Open a blank document and choose estimate or invoice inside the builder.</div><div style="margin-top:10px; display:flex; gap:8px; flex-wrap:wrap;"><button class="btn btn-orange" id="openDocBuilder">Open Builder</button><button class="btn" id="openPricingSettings">Billing Settings</button></div></div>`;
-      const btn = document.getElementById("openDocBuilder");
-      if (btn) btn.addEventListener("click", () => openEstimateInvoiceDrawer(null, "estimate", null, { refreshDocs: renderActiveTab }));
+      const canPO=['lead','office','office_admin','admin'].includes(String(currentUser?.role||''));
+      body.innerHTML = `<div class="card"><h3>Document Generator</h3><p class="hint">Choose a customer document or a supplier purchase order. All records stay in their respective saved lists.</p><div style="display:flex;gap:9px;flex-wrap:wrap;align-items:end"><label style="display:grid;gap:5px;min-width:200px;flex:1"><span class="label">Create</span><select class="input" id="newDocumentKind"><option value="estimate">📝 Estimate</option><option value="invoice">🧾 Invoice</option>${canPO?'<option value="purchase_order">📦 Purchase Order</option>':''}</select></label><button class="btn btn-orange" id="openDocBuilder">Open Editor</button><button class="btn" id="openPricingSettings">Billing Settings</button></div></div>`;
+      const btn = document.getElementById('openDocBuilder');
+      if(btn)btn.addEventListener('click',()=>{const type=document.getElementById('newDocumentKind').value;if(type==='purchase_order'){if(!canPO)return;renderUnifiedPurchaseOrders('pds',true,()=>renderEstimatePage());return;}openEstimateInvoiceDrawer(null,type,null,{refreshDocs:renderActiveTab});});
       const ps = document.getElementById("openPricingSettings");
       if (ps) ps.addEventListener("click", renderPricingSettingsView);
     }
@@ -13767,6 +14092,24 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     function draw(){const filter=q('dvFilter').value,search=q('dvSearch').value.toLowerCase(),host=q('dvList');host.replaceChildren();const matching=records.filter(x=>(!filter||x.document_type===filter)&&(!search||[x.vendor,x.document_number,x.po_number,x.job_number,x.document_date,x.original_filename,x.notes].some(v=>String(v||'').toLowerCase().includes(search))));const count=document.createElement('p');count.className='hint';count.textContent=`${matching.length} document(s) · ${filter?types[filter]:'All types'}`;host.append(count);for(const item of matching){const card=document.createElement('div');card.className='card';card.style.margin='8px 0';const title=document.createElement('strong');title.textContent=(types[item.document_type]||'Document')+' · '+(item.vendor||'Unspecified supplier')+' · '+(item.document_number||'No number');const meta=document.createElement('p');meta.className='hint';meta.textContent=[item.document_date,item.po_number?'PO '+item.po_number:'',item.original_filename||'',item.review_status].filter(Boolean).join(' · ');card.append(title,meta);if(item.attachment){const url='/document-vault/'+platform+'/'+encodeURIComponent(item.id)+'/file';const imageFile=/\.(png|jpe?g|gif|webp|bmp)$/i.test(item.original_filename||'');const view=document.createElement('button');view.className='btn';view.textContent='View Details';view.onclick=()=>{const backdrop=document.createElement('div');backdrop.style.cssText='position:fixed;inset:0;z-index:12000;background:#17213388;display:flex;justify-content:flex-end';const drawer=document.createElement('aside');drawer.style.cssText='background:white;width:min(720px,100vw);height:100%;overflow:auto;padding:24px;box-sizing:border-box';const heading=document.createElement('h2');heading.textContent=(types[item.document_type]||'Document')+' · '+(item.document_number||item.vendor||'Record');const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>backdrop.remove();drawer.append(heading,close);for(const [label,value] of [['Supplier',item.vendor],['Document number',item.document_number],['Date',item.document_date],['Purchase order',item.po_number],['Related job',item.job_number],['Original file',item.original_filename],['Review status',item.review_status],['Notes',item.notes]]){if(!value)continue;const row=document.createElement('p');row.style.cssText='border-bottom:1px solid #e1e5eb;padding:12px 0;overflow-wrap:anywhere';const name=document.createElement('strong');name.textContent=label+': ';row.append(name,document.createTextNode(String(value)));drawer.append(row);}if(imageFile){const image=document.createElement('img');image.src=url;image.alt=item.original_filename||'Document preview';image.style.cssText='width:100%;max-height:520px;object-fit:contain;border-radius:12px';drawer.append(image);}const download=document.createElement('a');download.className='btn';download.href=url;download.target='_blank';download.rel='noopener';download.textContent='Open / Download Original';drawer.append(download);backdrop.append(drawer);backdrop.ondblclick=e=>{if(e.target===backdrop)backdrop.remove()};document.body.append(backdrop);};card.append(view);if(imageFile){const image=document.createElement('img');image.src=url;image.alt=item.original_filename||'Document preview';image.loading='lazy';image.style.cssText='display:block;max-width:220px;max-height:150px;object-fit:contain;border-radius:10px;margin:10px 0';card.append(image);}}if(item.notes){const details=document.createElement('details');const summary=document.createElement('summary');summary.textContent='Notes';const body=document.createElement('p');body.textContent=item.notes;details.append(summary,body);card.append(details);}host.append(card);}}
     q('dvFilter').onchange=draw;q('dvSearch').oninput=draw;
     q('dvNew').onclick=()=>{form.reset();form.elements.document_type.value=q('dvFilter').value||initialType||(libraryScope==='business'?'other':'receipt');q('dvEditor').hidden=false;q('dvStatus').textContent='';q('dvEditor').scrollIntoView({behavior:'smooth',block:'start'});};
+    if(platform==='pds'&&window.__pdsJobImportedPO){
+      const ref=window.__pdsJobImportedPO;window.__pdsJobImportedPO=null;
+      q('dvNew').click();form.elements.document_type.value='purchase_order';
+      form.elements.job_number.value=ref.job_number||'';
+      form.elements.po_number.value=ref.po_number||'';
+      form.elements.document_number.value=ref.po_number||'';
+      q('dvStatus').textContent='Attach the original QuickBooks purchase order and preserve its number. This is a linked reference, not a newly issued PDS PO or inventory receipt.';
+    }
+    if(platform==='pds'&&window.__pdsJobAlternateUpload){
+      const ref=window.__pdsJobAlternateUpload;window.__pdsJobAlternateUpload=null;
+      const type=['estimate','invoice','purchase_order'].includes(ref.document_type)?ref.document_type:'other';
+      q('dvNew').click();form.elements.document_type.value=type;
+      form.elements.job_number.value=ref.job_number||'';
+      form.elements.document_number.value=ref.document_number||'';
+      if(type==='purchase_order')form.elements.po_number.value=ref.document_number||'';
+      q('dvStatus').textContent='Attach the original document and confirm its number and job association. This reference does not issue a PDS document, post accounting, or receive stock.';
+    }
+
     q('dvCancel').onclick=()=>q('dvEditor').hidden=true;
     q('dvAnalyze').onclick=async()=>{const status=q('dvAiStatus'),button=q('dvAnalyze'),file=form.elements.file.files[0],paste=form.elements.paste.value.trim();if(!file&&!paste){status.textContent='Select a file or paste text first.';return;}button.disabled=true;status.textContent='Analyzing…';try{let result;if(file){const fd=new FormData();fd.append('document_type',form.elements.document_type.value);fd.append('file',file);const response=await fetch('/document-vault/'+platform+'/preview-file',{method:'POST',body:fd,credentials:'same-origin'});result=await response.json();if(!response.ok)throw new Error(result.detail||'AI extraction failed');}else{result=await fetchJSON('/document-vault/'+platform+'/preview-text',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({document_type:form.elements.document_type.value,text:paste})});}for(const [key,value] of Object.entries(result.fields||{})){if(form.elements[key]&&value&&!form.elements[key].value)form.elements[key].value=value;}if(paste&&!form.elements.notes.value)form.elements.notes.value=paste.slice(0,4000);status.textContent=(result.source||'Suggestions')+' — '+(result.message||'Review before saving.');}catch(e){status.textContent=e.message||String(e);}finally{button.disabled=false;}};
     form.onsubmit=async e=>{e.preventDefault();const save=q('dvSave');save.disabled=true;q('dvStatus').textContent='Saving…';try{const fd=new FormData();for(const name of ['document_type','vendor','document_number','document_date','po_number','job_number'])fd.append(name,form.elements[name].value);fd.append('notes',form.elements.notes.value||form.elements.paste.value.slice(0,4000));fd.append('library_scope',libraryScope);if(form.elements.file.files[0])fd.append('file',form.elements.file.files[0]);const response=await fetch('/document-vault/'+platform,{method:'POST',body:fd,credentials:'same-origin'});const result=await response.json();if(!response.ok)throw new Error(result.detail||'Save failed');q('dvEditor').hidden=true;await refresh();}catch(err){q('dvStatus').textContent=err.message||String(err);}finally{save.disabled=false;}};
@@ -13864,7 +14207,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         let limit=40;
         const drawTable=()=>{
           table.replaceChildren();const q=search.value.trim().toLowerCase();
-          const matches=(pdsStock.items||[]).filter(p=>[p.part_number,p.description,p.manufacturer,p.supplier].some(v=>String(v||'').toLowerCase().includes(q))&&(!lowCheck.checked||p.low));
+          const matches=(pdsStock.items||[]).filter(p=>p.item_type!=="service"&&[p.part_number,p.description,p.manufacturer,p.supplier].some(v=>String(v||'').toLowerCase().includes(q))&&(!lowCheck.checked||p.low));
           report.textContent=`${matches.length} matching parts · ${(pdsStock.items||[]).filter(x=>x.low).length} warehouse alerts`;
           const grid=document.createElement('table');grid.style.cssText='width:100%;border-collapse:collapse;font-size:13px;text-align:left';
           const thead=document.createElement('thead');const hr=document.createElement('tr');for(const title of ['Part # / Description','Warehouse','Vans','Total','Status','Warehouse Actions']){const th=document.createElement('th');th.textContent=title;th.style.cssText='padding:10px;border-bottom:1px solid #dce4ec;background:#f3f6f9';hr.append(th);}thead.append(hr);grid.append(thead);
@@ -13978,6 +14321,27 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const supplierSearch=document.createElement('input');supplierSearch.type='search';supplierSearch.className='input';supplierSearch.placeholder='Type supplier name…';supplierSearch.setAttribute('list','upoSupplierOptions');
     const supplierOptions=document.createElement('datalist');supplierOptions.id='upoSupplierOptions';
     selectLabel.insertBefore(supplierSearch,supplierSelect);selectLabel.append(supplierOptions);supplierSelect.style.display='none';
+    if(isPds){
+      const addVendor=document.createElement('button');addVendor.type='button';addVendor.className='btn';addVendor.textContent='＋ Add Vendor';addVendor.style.marginTop='6px';
+      selectLabel.append(addVendor);
+      addVendor.onclick=async()=>{
+        const added=await pdsQuickRecordEditor('＋ New Supplier / Vendor',[
+          ['name','Supplier / Vendor Name','text',true],['contact','Contact Name','text'],
+          ['email','Email','email'],['phone','Phone','text'],['address','Mailing / Supplier Address','textarea'],
+          ['payment_terms','Payment Terms','text'],['notes','Notes','textarea']
+        ],async data=>{
+          if(suppliers.some(s=>String(s.name||'').trim().toLowerCase()===data.name.toLowerCase()))throw Error('Supplier already exists. Select the saved supplier instead.');
+          const result=await fetchJSON('/pds-purchase-orders/suppliers',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
+          return result.item;
+        });
+        if(!added)return;
+        suppliers.push(added);
+        const option=document.createElement('option');option.value=added.id;option.textContent=added.name;supplierSelect.append(option);
+        const suggestion=document.createElement('option');suggestion.value=added.name;supplierOptions.append(suggestion);
+        supplierSelect.value=added.id;supplierSearch.value=added.name;
+        form.elements.vendor.value=added.name;form.elements.vendor_address.value=added.address||'';
+      };
+    }
     supplierSearch.oninput=()=>{const name=supplierSearch.value.trim().toLowerCase();const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===name);supplierSelect.value=supplier?.id||'';if(supplier){form.elements.vendor.value=supplier.name||'';form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||supplier.street_address||[supplier.address_line1,supplier.address_line2,[supplier.city,supplier.state,supplier.zip||supplier.postal_code].filter(Boolean).join(', ')].filter(Boolean).join('\n')||'';}};
     form.elements.vendor.addEventListener('input',()=>{supplierSelect.value='';const supplier=suppliers.find(x=>String(x.name||'').toLowerCase()===form.elements.vendor.value.trim().toLowerCase());if(supplier)form.elements.vendor_address.value=supplier.address||supplier.business_address||supplier.mailing_address||supplier.street_address||[supplier.address_line1,supplier.address_line2,[supplier.city,supplier.state,supplier.zip||supplier.postal_code].filter(Boolean).join(', ')].filter(Boolean).join('\n')||'';});
     const customerSearch=document.createElement('input');customerSearch.type='search';customerSearch.className='input';customerSearch.placeholder='Type to find a saved customer…';customerSearch.setAttribute('list','upoCustomerOptions');
@@ -14086,12 +14450,19 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
       if(!item&&platform==='doorks'&&window.__doorksJobDraft){const job=window.__doorksJobDraft;form.elements.customer.value=job.customer;form.elements.work_order_number.value=job.job_number;form.elements.notes.value=job.description;customerSearch.value=job.customer;window.__doorksJobDraft=null;}
       if(!item){form.elements.ship_to.value=platform==='doorks'?(poDefaults.default_ship_to||poDefaults.business_address||company+'\n'+address):company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');if(window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type==='purchase_order'){form.elements.notes.value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}}
+      if(!item&&platform==='pds'&&window.__pdsJobPODraft){
+        const ref=window.__pdsJobPODraft;window.__pdsJobPODraft=null;
+        form.elements.customer.value=ref.customer||'';
+        customerSearch.value=ref.customer||'';
+        form.elements.work_order_number.value=ref.job_number||'';
+        if(ref.description)form.elements.notes.value=ref.description;
+      }
       supplierSelect.value=item?.supplier_id||item?.vendor_id||'';supplierSearch.value=item?.vendor||'';customerSearch.value=item?.customer||(platform==='doorks'?form.elements.customer.value:'');q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
       (item?parseLines(item):[{}]).forEach(addLine);total();q('upoMessage').textContent='';if(platform!=='pds')q('upoEditor').scrollIntoView({behavior:'smooth',block:'start'});};
-    q('upoNew').onclick=()=>edit(null);if(!isPds){const ai=document.createElement('button');ai.className='btn';ai.textContent='✨ AI Intake';ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));q('upoNew').before(ai);}
+    q('upoNew').onclick=()=>edit(null);if(isPds&&window.__pdsJobPODraft)edit(null);if(!isPds){const ai=document.createElement('button');ai.className='btn';ai.textContent='✨ AI Intake';ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));q('upoNew').before(ai);}
     const docHtml=item=>{const lines=parseLines(item),sub=lines.reduce((a,x)=>a+Number(x.quantity||0)*Number(x.rate||0),0),tax=Number(item.tax||0),shipping=Number(item.shipping||0),sum=sub+tax+shipping;
       const vendorAddress=item.vendor_address||suppliers.find(x=>x.id===(item.supplier_id||item.vendor_id))?.address||'';
-      const header=`<div style="display:flex;justify-content:space-between;gap:30px;align-items:flex-start"><div><h2 style="margin:0 0 8px">${esc(platform==='doorks'?(poDefaults.business_name||company):company)}</h2><div style="white-space:pre-line">${esc(address)}</div>${platform==='doorks'?`<div>${esc([poDefaults.business_phone,poDefaults.business_email,poDefaults.website].filter(Boolean).join(' · '))}</div>`:''}${isPds?'<div>760-233-5037 · www.prioritydoors.com</div>':''}</div><div style="text-align:right"><h1 style="margin:0 0 12px">Purchase Order</h1><b>Date:</b> ${esc(item.date||'')}<br><b>P.O. No.:</b> ${esc(item.po_number||'Draft')}</div></div>`;
+      const header=`<div style="display:flex;justify-content:space-between;gap:30px;align-items:flex-start"><div><h2 style="margin:0 0 8px">${esc(platform==='doorks'?(poDefaults.business_name||company):company)}</h2><div style="white-space:pre-line">${esc(address)}</div>${platform==='doorks'?`<div>${esc([poDefaults.business_phone,poDefaults.business_email,poDefaults.website].filter(Boolean).join(' · '))}</div>`:''}${isPds?'<div>760-233-5037 · www.prioritydoors.com</div>':''}</div><div style="text-align:right"><h1 style="margin:0 0 12px">Purchase Order</h1><b>Date:</b> ${esc(item.date||'')}<br><b>P.O. No.:</b> ${esc(item.po_number||'Draft')}<br><b>Created by:</b> ${esc(item.created_by||'Legacy / not recorded')}<br><b>Created:</b> ${esc(item.created_at||'—')}</div></div>`;
       const blocks=`<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin:28px 0"><div style="border:1px solid #9ca3af;min-height:110px;padding:12px"><b>Vendor</b><hr>${esc(item.vendor||'')}<div style="white-space:pre-line">${esc(vendorAddress)}</div></div><div style="border:1px solid #9ca3af;min-height:110px;padding:12px"><b>Ship To</b><hr><div style="white-space:pre-line">${esc(item.ship_to||company+'\n'+address)}</div></div></div>`;
       const refs=`<div style="display:flex;justify-content:flex-end;margin:10px 0 18px"><table style="border-collapse:collapse"><tr>${['Salesperson','Job Number','SRO #'].map(x=>'<th style="border:1px solid #9ca3af;padding:7px">'+x+'</th>').join('')}</tr><tr>${[item.salesperson,item.work_order_number||item.work_order,item.sro_number].map(x=>'<td style="border:1px solid #9ca3af;padding:7px">'+esc(x)+'</td>').join('')}</tr></table></div>`;
       const rows=lines.map((x,i)=>`<tr style="background:${i%2?'#f2f2f2':'white'}"><td>${esc(x.item)}</td><td>${esc(x.description)}</td><td style="text-align:right">${esc(x.quantity)}</td><td>${esc(x.unit)}</td><td style="text-align:right">${money(x.rate)}</td><td style="text-align:right">${money(Number(x.quantity)*Number(x.rate))}</td></tr>`).join('');
@@ -14129,11 +14500,16 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       finally{poEmailButton.disabled=false;}
     };
     q('upoPrint').onclick=()=>{if(!viewing)return;const w=window.open('','_blank');if(!w){alert('Allow pop-ups to print the PO.');return;}w.document.open();w.document.write('<!doctype html><html><head><title>'+esc(viewing.po_number||'Purchase Order')+'</title><style>@page{size:letter;margin:0.45in}body{margin:0}td{border:1px solid #aaa;padding:6px;vertical-align:top}table{page-break-inside:auto}tr{break-inside:avoid}</style></head><body>'+docHtml(viewing)+'</body></html>');w.document.close();w.focus();w.print();};
+    let externalPOs=[];
     const draw=()=>{const qtext=q('upoSearch').value.trim().toLowerCase(),list=q('upoList');list.replaceChildren();const shown=orders.filter(x=>!qtext||[x.po_number,x.vendor,x.customer,x.work_order_number,x.work_order,x.description,x.line_items,x.status].some(v=>String(v||'').toLowerCase().includes(qtext)));
-      const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${shown.length} of ${orders.length} purchase orders`;list.append(count);
-      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status,item.customer,item.work_order_number||item.work_order].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],['Edit',()=>edit(item)],['Delete',()=>deletePO(item)]]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
-      if(!shown.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching purchase orders.';list.append(empty);}};
-    const reload=async()=>{try{const response=await fetchJSON(endpoint);orders=response.items||[];draw();}catch(e){q('upoList').textContent='Unable to load POs: '+(e.message||e);}};
+      const outside=externalPOs.filter(ref=>[ref.document_number,ref.po_number,ref.vendor,ref.job_number,ref.created_by].some(x=>String(x||'').toLowerCase().includes(qtext)));
+      const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${shown.length} PDS orders and ${outside.length} external references`;list.append(count);
+      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status,item.customer,item.work_order_number||item.work_order,item.created_by?'Created by '+item.created_by:'Creator not recorded (legacy PO)'].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],['Edit',()=>edit(item)],...(['office_admin','admin'].includes(String(currentUser?.role||''))?[['Delete',()=>deletePO(item)]]:[])]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
+      if(isPds)outside.forEach(ref=>list.append(pdsExternalReferenceRow(ref)));
+      if(!shown.length && !outside.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching purchase orders.';list.append(empty);}};
+    const reload=async()=>{try{const [response,references]=await Promise.all([
+      fetchJSON(endpoint),isPds?pdsExternalReferences({type:'purchase_order'}).catch(()=>[]):Promise.resolve([])
+    ]);orders=response.items||[];externalPOs=references;draw();}catch(e){q('upoList').textContent='Unable to load POs: '+(e.message||e);}};
     q('upoSearch').oninput=draw;
     if(isPds&&window.__pdsPOFocusJob){q('upoSearch').value=String(window.__pdsPOFocusJob);window.__pdsPOFocusJob=null;}
     form.onsubmit=async event=>{event.preventDefault();const button=q('upoSave');button.disabled=true;const msg=q('upoMessage');msg.textContent='Saving…';try{

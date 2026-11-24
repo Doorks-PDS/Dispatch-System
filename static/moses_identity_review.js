@@ -14,16 +14,27 @@
     const front = v.split(',')[0].replace(/\b(?:San Diego|La Jolla|Escondido|Carlsbad|Oceanside|Irvine)\b.*$/i, '').trim();
     return {street: normStreet(front), zip:zip.slice(0,5)};
   }
+  // Similar names are suggestions, never an authorization to merge identities.
+  // Example: "Irvine Company" can suggest saved "The Irvine Company".
   function companyCandidates(name, records) {
     const key = words(name);
     if (!key) return [];
-    const names = new Map();
-    for (const row of (Array.isArray(records)?records:[])) {
-      if (!row || typeof row !== 'object') continue;
-      const label = str(row.company_name || row.name || row.customer_name);
-      if (label && words(label) === key && !names.has(label.toLowerCase())) names.set(label.toLowerCase(), {value:label,label});
+    const scored = [];
+    const seen = new Set();
+    const keyTokens = new Set(key.split(' ').filter(Boolean));
+    for(const row of (Array.isArray(records)?records:[])) {
+      if(!row || typeof row!=='object')continue;
+      const label = str(row.company_name||row.name||row.customer_name);
+      const canonical = words(label);
+      if(!canonical || seen.has(canonical))continue;
+      seen.add(canonical);
+      const tokens=new Set(canonical.split(' ').filter(Boolean));
+      const overlap=[...keyTokens].filter(t=>tokens.has(t)).length;
+      const similarity=overlap/Math.max(keyTokens.size,tokens.size,1);
+      if(canonical===key || (similarity>=0.65 && overlap>=1))
+        scored.push({value:label,label:label+(canonical===key?' · exact match':' · possible match'),score:canonical===key?2:similarity});
     }
-    return Array.from(names.values());
+    return scored.sort((a,b)=>b.score-a.score||a.label.localeCompare(b.label)).slice(0,12);
   }
   function addressCandidates(address, records, customer) {
     const wanted = addressParts(address);
@@ -55,10 +66,26 @@
     const customerSelect=el('select');customerSelect.className='input';
     const customerOptions = [{value:'',label:'Select a saved customer…'},...c];
     for(const option of customerOptions){const node=el('option',option.label);node.value=option.value;customerSelect.append(node);}
-    if(c.length===1)customerSelect.value=c[0].value;
+    // No automatic customer choice: similar names may be different legal entities.
+    customerSelect.value='';
     customerBlock.append(customerSelect);
+    const customerSearch=el('input');customerSearch.className='input';customerSearch.type='search';
+    customerSearch.placeholder='Browse / search all saved PDS customers';
+    customerSearch.style.marginTop='7px';customerBlock.append(customerSearch);
+    const allCustomers=Array.from(new Set((Array.isArray(customers)?customers:[])
+      .map(row=>str(row?.company_name||row?.name||row?.customer_name)).filter(Boolean)))
+      .sort((a,b)=>a.localeCompare(b));
+    customerSearch.addEventListener('input',()=>{
+      const term=words(customerSearch.value);const current=customerSelect.value;
+      customerSelect.replaceChildren();const empty=el('option','Select a saved customer…');empty.value='';customerSelect.append(empty);
+      for(const label of allCustomers.filter(label=>!term||words(label).includes(term)).slice(0,80)){
+        const option=el('option',label);option.value=label;customerSelect.append(option);
+      }
+      customerSelect.value=[...customerSelect.options].some(o=>o.value===current)?current:'';
+      updateAddresses();
+    });
     if(!c.length)customerBlock.append(el('small','No verified saved customer match. Use + New Customer or select an existing customer manually.'));
-    else if(c.length>1)customerBlock.append(el('small','Multiple customer names match. Choose the intended saved company.'));
+    else customerBlock.append(el('small','Suggested matches require confirmation. You can also browse every saved customer below.'));
     holder.append(customerBlock);
     const addrBlock=el('div');addrBlock.append(el('div','PDF service address: '+(rawAddress||'Not identified')));
     const addressSelect=el('select');addressSelect.className='input';
@@ -69,7 +96,7 @@
         .map(x=>({address:x.address||x.site_address||x.job_address,customer:x.company_name||x.name}));
       const found=addressCandidates(rawAddress,[...(addresses||[]),...profileAddresses],customerSelect.value);
       for(const a of found){const node=el('option',a.label);node.value=a.value;addressSelect.append(node);}
-      if(found.length===1)addressSelect.value=found[0].value;
+      // Never select an address solely on similarity: require an explicit choice.
       info.textContent=found.length?'Choose the saved job-site address and confirm.':'No matching saved address. Use + New Address or enter a manually verified site address.';
     }
     const info=el('small');addrBlock.append(addressSelect,info);holder.append(addrBlock);

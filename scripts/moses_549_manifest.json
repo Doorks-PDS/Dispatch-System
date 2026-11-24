@@ -1,0 +1,83 @@
+{
+  "main_branch_sha": "82745985cfed9caa09dbc0a17bd6180ab849e86c",
+  "main_branch_label": "Moses 5.46 (confirmed via GitHub read-only)",
+  "install_scope": "5.49 includes 5.47 and 5.48; no older ZIP required",
+  "files": {
+    "MOSES_547_RELEASE.md": {
+      "before": null,
+      "after": "bbb8db820b835a2f4c7b97d126cf286820a86f1770cb82276db711f8ab1c887c"
+    },
+    "MOSES_548_RELEASE.md": {
+      "before": null,
+      "after": "2ae79778328cb7a56bb11238eae0c118610c0fcbbd5c25ce27d2f19f7162838a"
+    },
+    "app/routers/calendar.py": {
+      "before": "324e01ee368ed4d9c8e53b5beeeb240aded02c43c92073f56972c2fb5b5b6878",
+      "after": "4587e881cdfdf51eb600e30608205956ee61964d4cd1f5076adca76311a31793"
+    },
+    "app/routers/document_vault.py": {
+      "before": "bd90ab5300f589a6bdbf82dd48899c896ed6589e75a555cad9919e332133ac7b",
+      "after": "17bed2822d3c9753fccdeb2d8cbeaa5da98c6e97a6be36429c61cda6e36b19f4"
+    },
+    "app/routers/documents.py": {
+      "before": "2afdd555d2565c684438600198343a9b5dea07c1d906d3269658d6a553abfa98",
+      "after": "e8cba931c123b2629c7e9ed441380a24c3033d074caadc9e9dcc8fc16f1c7f4f"
+    },
+    "app/routers/pds_purchase_orders.py": {
+      "before": "2c3a519d2ed78654d15c20201deacff719aa94e049c57d6fbd2549c4cdbc955b",
+      "after": "8e56039474daed42179e645df847edeac8b0a3abe105fdd1e16f3bcdfe7a4657"
+    },
+    "app/services/moses_pds_document_email.py": {
+      "before": "f52ddb24a0928749a960ce6a143a40e54819881658dde37237ea1e899d874e76",
+      "after": "05c560a1cb594a9c9fd6b47468769ed53a5c5191be7e54979497ae3cc1d87b76"
+    },
+    "scripts/check_moses_547.py": {
+      "before": null,
+      "after": "91ffbb2b7cbb8ca7c49b567dadf78beef5b791f257d31d281a75b235796124d6"
+    },
+    "scripts/check_moses_548.py": {
+      "before": null,
+      "after": "b81c11a67a9c584c16b503e3c6bc5bed96ecbce8535a2b0239b815899ccbf116"
+    },
+    "scripts/moses_547_manifest.json": {
+      "before": null,
+      "after": "35e9e68b114044162d8307222cf776fd7f76f9c0f3c5dbef194d80d5864d8de5"
+    },
+    "scripts/moses_548_manifest.json": {
+      "before": null,
+      "after": "9ca21912765baa889294360e50716325fb53397ae0685783b4128c403b85c86f"
+    },
+    "static/app.js": {
+      "before": "4d935092b88aaaf9fd770b506de1b00ced78caef8332cd2f6d0fbe89fc866c05",
+      "after": "01f92c590b5e220f7f8f6739c6e2ed0f1610f34ad0bf57e98782323f67bc8136"
+    },
+    "static/moses_identity_review.js": {
+      "before": "84e7c0a6e57c145efc97de76edf73b8258b14b259bd40ebd35805e99cd83ab3e",
+      "after": "c6904dbc115fa05252afbd2c661bf3c8a37dea8fa71ecfdbd56573aa4d8712c3"
+    },
+    "static/style.css": {
+      "before": "db9bfaf276ef874bd7c50e08f8b8fb15dfd4a884694d520d6a104123102d8cc4",
+      "after": "b9785c723a1d940f1b414d0dbdb282b8f053b8b76d282997bd2673430aa68aa2"
+    },
+    "templates/ui.html": {
+      "before": "ce2d4a32751adc1fd036610a9ae40c74200044f2c921bfd831f5d67c2f00be1e",
+      "after": "c050139075b6504aa2ca1191909096edc995489be94fd2457c886e28d49fe30a"
+    },
+    "tests/test_moses_38_interface.py": {
+      "before": "c3932ac9a4e1e4845814b078a5c8d5fe99350b66ae9547b8268631d5ee30c38b",
+      "after": "129736a5effc653585ddca91978e48a8e73114ea48b26e55778b1fc4a976f57b"
+    },
+    "tests/test_moses_547_intake_qb_po.py": {
+      "before": null,
+      "after": "0dd0e3999c1cf45762d43fa843904c6cec8712fdcb97108af1936afd4ee3fb8b"
+    },
+    "tests/test_moses_548_calendar_fit.py": {
+      "before": null,
+      "after": "bd1a5fcbe1d68a887194c4686d023356ebf8f3fe20091ae6009e304876244824"
+    },
+    "tests/test_moses_549_qb_roles_po_creator.py": {
+      "before": null,
+      "after": "54021c0919e3c7a7e26e7c964733c4d28a1ae83ba5e068f0fc5c98e8ec00d605"
+    }
+  }
+}

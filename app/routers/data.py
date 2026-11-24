@@ -318,8 +318,11 @@ def adjust_pds_part_stock(part_id: str, payload: PdsStockAdjustment, request: Re
     from datetime import datetime, timezone
     actor = _pds_stock_office(request)
     catalog = _read_json_file(_parts_path(request), {'items': []})
-    if not any(isinstance(p, dict) and _norm(p.get('id')) == part_id for p in catalog.get('items', [])):
+    found = next((p for p in catalog.get('items', []) if isinstance(p, dict) and _norm(p.get('id')) == part_id), None)
+    if not found:
         raise HTTPException(404, 'PDS part not found')
+    if found.get('item_type') == 'service':
+        raise HTTPException(400, 'Services are not warehouse inventory')
     path = _pds_stock_path(request)
     path.parent.mkdir(parents=True, exist_ok=True)
     lock_path = path.with_name(path.name + '.lock')
@@ -362,6 +365,7 @@ class PartPayload(BaseModel):
     product_url: str = ""
     supplier_rate: float | str = ""  # new optional field; legacy catalog prices retained
     min_stock: Optional[int] = Field(default=None, ge=0, le=100000)
+    item_type: str = "part"  # part or service; services never represent stocked inventory
 
 
 def _part_https_url(value: str) -> str:
@@ -396,6 +400,7 @@ def list_parts(
             continue
         row = {
             "id": _norm(item.get("id")),
+            "item_type": "service" if item.get("item_type") == "service" else "part",
             "manufacturer": _norm(item.get("manufacturer")),
             "part_number": _norm(item.get("part_number")),
             "supplier": _norm(item.get("supplier")),
@@ -406,15 +411,15 @@ def list_parts(
             "supplier_rate": item.get("supplier_rate", ""),
             "stock_on_hand": balances.get(_norm(item.get("id"))),
             "stock_recorded": _norm(item.get("id")) in balances,
-            "min_stock": item.get("min_stock"),
-            "stock_low": item.get("min_stock") is not None and _norm(item.get("id")) in balances and balances[_norm(item.get("id"))] < item["min_stock"],
+            "min_stock": item.get("min_stock") if item.get("item_type") != "service" else None,
+            "stock_low": item.get("item_type") != "service" and item.get("min_stock") is not None and _norm(item.get("id")) in balances and balances[_norm(item.get("id"))] < item["min_stock"],
             # compatibility with existing estimate lookup
             "Item": _norm(item.get("part_number")),
             "Description": _norm(item.get("description")),
             "Price": item.get("price", ""),
             "Preferred Vendor": _norm(item.get("supplier") or item.get("manufacturer")),
         }
-        hay = " ".join([row["manufacturer"], row["part_number"], row["description"], row["supplier"]]).lower()
+        hay = " ".join([row["manufacturer"], row["part_number"], row["description"], row["supplier"], row["item_type"]]).lower()
         if qn and qn not in hay:
             continue
         out.append(row)
@@ -426,11 +431,16 @@ def list_parts(
 @router.post("/parts")
 def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str] = Header(default=None)):
     _require_key(request, x_api_key)
+    if payload.item_type not in ("part", "service"):
+        raise HTTPException(400, "Catalog item must be a part or service")
+    if payload.item_type == "service" and payload.min_stock is not None:
+        raise HTTPException(400, "Services cannot have stock thresholds")
     path = _parts_path(request)
     data = _read_json_file(path, {"items": []})
     items = data.get("items", []) if isinstance(data, dict) else []
     item = {
         "id": uuid.uuid4().hex,
+        "item_type": payload.item_type,
         "manufacturer": _norm(payload.manufacturer),
         "part_number": _norm(payload.part_number),
         "supplier": _norm(payload.supplier),
@@ -450,11 +460,18 @@ def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str]
 @router.put("/parts/{part_id}")
 def update_part(request: Request, part_id: str, payload: PartPayload, x_api_key: Optional[str] = Header(default=None)):
     _require_key(request, x_api_key)
+    if payload.item_type not in ("part", "service"):
+        raise HTTPException(400, "Catalog item must be a part or service")
+    if payload.item_type == "service" and payload.min_stock is not None:
+        raise HTTPException(400, "Services cannot have stock thresholds")
     path = _parts_path(request)
     data = _read_json_file(path, {"items": []})
     items = data.get("items", []) if isinstance(data, dict) else []
     for i, item in enumerate(items):
         if _norm(item.get("id")) == _norm(part_id):
+            if payload.item_type != item.get("item_type", "part"):
+                raise HTTPException(409, "Catalog item type is fixed after creation; create a new part or service instead")
+            item["item_type"] = payload.item_type
             item["manufacturer"] = _norm(payload.manufacturer)
             item["part_number"] = _norm(payload.part_number)
             item["supplier"] = _norm(payload.supplier)

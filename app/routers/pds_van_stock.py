@@ -188,7 +188,8 @@ def _parts(request: Request) -> dict:
             raise ValueError('Invalid parts catalog entry')
     except (OSError, UnicodeError, ValueError, TypeError) as exc:
         raise HTTPException(503, 'PDS Parts List requires review; van stock changes disabled') from exc
-    return {str(p['id']): p for p in raw['items']}
+    # Service catalog entries are billable work, never physical van stock.
+    return {str(p['id']): p for p in raw['items'] if p.get('item_type', 'part') != 'service'}
 
 
 def _people(request: Request) -> dict:

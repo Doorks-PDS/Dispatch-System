@@ -26,13 +26,13 @@ def test_quote_parts_review_does_not_send_or_save():
     assert "partsBtn.textContent='Parts & Pricing'" in APP
 
 def test_ui_assets_versioned():
-    assert '/static/app.js?v=MOSES_3_8' in UI
+    assert '/static/app.js?v=MOSES_5_48' in UI
     assert '/static/moses_action_center.js?v=4' in UI
 
 
 def test_approved_time_off_is_shown_above_jobs_without_mutations():
     start = APP.index("// Approved time off appears as a minimal calendar marker")
-    end = APP.index("dayJobs.slice(0, 5).forEach(j =>", start)
+    end = APP.index("dayJobs.forEach(j =>", start)
     fragment = APP[start:end]
     assert "apiListTimeOff({limit: 500})" in fragment
     assert "=== 'approved'" in fragment

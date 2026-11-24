@@ -1,0 +1,13 @@
+{
+  "based_on": "Doorks Moses 5.46 corrected",
+  "files": {
+    "static/app.js": {
+      "before": "4d935092b88aaaf9fd770b506de1b00ced78caef8332cd2f6d0fbe89fc866c05",
+      "after": "52f3b841bc01f6d1994f52087e5ee8e6780a435d114802a7a8bffcf2a737926f"
+    },
+    "static/moses_identity_review.js": {
+      "before": "84e7c0a6e57c145efc97de76edf73b8258b14b259bd40ebd35805e99cd83ab3e",
+      "after": "c6904dbc115fa05252afbd2c661bf3c8a37dea8fa71ecfdbd56573aa4d8712c3"
+    }
+  }
+}

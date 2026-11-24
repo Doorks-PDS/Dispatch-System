@@ -395,6 +395,8 @@ textarea:focus{
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap:10px;
   width:100%;
+  /* Equal-height weeks prevent a crowded day from stretching the entire row. */
+  grid-auto-rows: minmax(0, auto);
 }
 .cal-dow{
   font-size:14px;
@@ -409,7 +411,9 @@ textarea:focus{
   border-radius:16px;
   padding:8px;
   background:#fff;
-  min-height:150px;
+  height:clamp(172px, 22vh, 268px);
+  min-height:0;
+  min-width:0;
   cursor:pointer;
   display:flex;
   flex-direction:column;
@@ -420,12 +424,15 @@ textarea:focus{
 }
 .cal-cell-muted{ opacity:.5; }
 .cal-daynum{
+  flex:none;
   font-weight:1000;
   margin-bottom:8px;
   font-size:14px;
 }
 .cal-items{
   display:flex;
+  flex:1 1 auto;
+  min-height:0;
   flex-direction:column;
   gap:6px;
   font-weight:900;
@@ -435,6 +442,7 @@ textarea:focus{
 }
 .cal-item{
   display:flex;
+  flex:none;
   align-items:center;
   padding:6px 8px;
   border-radius:10px;
@@ -490,3 +498,28 @@ body[data-platform="doorks"] .layout > .workspace{min-width:0;}
 .doorks-side-link:hover,.doorks-side-link:focus-visible{border-color:var(--orange);outline:2px solid color-mix(in srgb,var(--orange) 24%,transparent);}
 body[data-platform="doorks"] .btn-orange,body[data-platform="sdc"] .btn-orange{color:white;}
 @media(max-width:900px){body[data-platform="doorks"] .layout{grid-template-columns:1fr;}body[data-platform="doorks"] #doorksBusinessSidebar{display:flex;}}
+
+/* The date drawer is the source of truth for all jobs beyond visible full pills. */
+.cal-item[hidden]{display:none!important;}
+@media(max-width:900px){.cal-cell{height:clamp(152px,19vh,210px);padding:5px}.cal-items{gap:4px}.cal-item{padding:4px 5px}}
+
+/* PDS 5.50 — compact, searchable document generator; shared ticket data model unchanged. */
+.pds-doc-source-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:7px}
+.pds-doc-source-controls .input{flex:1 1 250px;min-width:0}
+.pds-doc-source-controls .btn{flex:0 0 auto;padding:8px 11px;font-size:13px;white-space:nowrap}
+.pds-doc-item-heading{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:9px}
+.pds-doc-item-heading .btn{font-size:13px;padding:7px 12px;white-space:nowrap}
+.pds-doc-item-tools .input{box-sizing:border-box;width:100%;min-width:0}
+.pds-doc-suggestions{display:grid;gap:4px;max-height:230px;overflow-y:auto;margin-top:6px}
+.pds-doc-suggestion{display:flex;align-items:center;gap:9px;width:100%;border:1px solid #e2e7ee;border-radius:9px;background:#fff;color:#263548;cursor:pointer;text-align:left;padding:8px 10px;font-size:12px;line-height:1.3}
+.pds-doc-suggestion strong{flex:0 0 auto;min-width:65px}
+.pds-doc-suggestion span{color:#5f6978;overflow-wrap:anywhere}
+.pds-doc-suggestion:hover,.pds-doc-suggestion:focus-visible{border-color:#fa8331;background:#fff7ef;outline:none}
+.pds-doc-line-table input.input{box-sizing:border-box;max-width:100%}
+.pds-doc-line-table th{font-size:12px;color:#566170}
+.pds-doc-line-table td{vertical-align:top}
+.pds-doc-inline-results{position:absolute;left:7px;right:7px;top:calc(100% - 4px);z-index:30;background:#fff;box-shadow:0 10px 28px #152c392a;border-radius:10px;max-height:220px;overflow:auto}
+.pds-doc-inline-results:empty{display:none}
+.pds-doc-totals-grid .jobrow-top{gap:12px;align-items:flex-start}
+.pds-doc-totals-grid .jobrow-top>:last-child{white-space:nowrap;margin-left:auto;text-align:right}
+@media(max-width:700px){.pds-doc-source-controls .btn{width:100%}.pds-doc-lines-scroll{margin-inline:-6px}.pds-doc-line-table td{padding:5px!important}.pds-doc-totals-grid{grid-template-columns:minmax(0,1fr)!important}}
