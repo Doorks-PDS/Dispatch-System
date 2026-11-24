@@ -858,7 +858,8 @@
   // PDS navigation cleanup: move existing controls without replacing their listeners.
   const pdsJobCol=navJobFlow?.parentElement;
   const pdsOfficeCol=navDataCenter?.parentElement;
-  if(pdsJobCol) [navJobFlow,navAllJobs,navMyAssignments,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
+  // Visible PDS Job Flow order: Job Flow, To-Do List, All Jobs, Door Records.
+  if(pdsJobCol) [navJobFlow,navMyAssignments,navAllJobs,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
   if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
   // PDS-only PRIO trial workspace. No payroll or real-money actions.
   const navPrioCoinPreview = document.createElement('button');

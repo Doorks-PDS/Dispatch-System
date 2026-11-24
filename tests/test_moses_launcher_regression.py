@@ -16,6 +16,6 @@ def test_moses_chat_panel_has_accessible_close_and_composer():
     assert "close.setAttribute('aria-label','Close Moses')" in APP
     assert "input.setAttribute('aria-label','Message Moses')" in APP
 
-def test_single_todo_navigation_is_after_all_jobs_before_door_records():
-    assert "[navJobFlow,navAllJobs,navMyAssignments,navDoorLogs]" in APP
+def test_single_todo_navigation_is_before_all_jobs_before_door_records():
+    assert "[navJobFlow,navMyAssignments,navAllJobs,navDoorLogs]" in APP
     assert "navMosesShortcut" not in APP

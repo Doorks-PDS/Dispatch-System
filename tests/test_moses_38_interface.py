@@ -27,7 +27,7 @@ def test_quote_parts_review_does_not_send_or_save():
     assert "openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice'" in APP
 
 def test_ui_assets_versioned():
-    assert '/static/app.js?v=MOSES_5_48' in UI
+    assert '/static/app.js?v=__APP_ASSET_VERSION__' in UI
     assert '/static/moses_action_center.js?v=4' in UI
 
 

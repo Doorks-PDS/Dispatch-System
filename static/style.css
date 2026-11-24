@@ -531,7 +531,8 @@ body[data-platform="doorks"] .btn-orange,body[data-platform="sdc"] .btn-orange{c
 /* Moses 5.55: notification counts never displace a hub title/subtitle.
    Applies to all PDS sidebar nav buttons; badges have independent positioning. */
 .navbtn{position:relative;}
-.navbtn:has(>small){display:flex;flex-direction:column;align-items:stretch;justify-content:center;gap:3px;padding-right:52px;min-height:62px;}
-.navbtn:has(>small)>span:first-child{display:block;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;}
-.navbtn:has(>small)>small{display:block;min-width:0;width:100%;margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;text-align:left;}
+.navbtn:has(>small){display:flex;flex-direction:row;align-items:center;justify-content:space-between;gap:8px;min-height:46px;}
+.navbtn:has(>.badge){padding-right:52px;}
+.navbtn:has(>small)>span:first-child{display:block;flex:0 1 auto;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;}
+.navbtn:has(>small)>small{display:block;flex:0 1 auto;min-width:0;width:auto;margin:0 0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.3;text-align:right;}
 .navbtn>.badge{position:absolute;right:12px;top:50%;transform:translateY(-50%);margin:0;flex:none;}

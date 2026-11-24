@@ -13,7 +13,7 @@ def test_calendar_shows_all_that_fit_without_five_job_limit():
     assert 'openDailySchedule(dt, dayJobs)' in app
     assert '.cal-item[hidden]{display:none!important;}' in css
     assert 'height:clamp(172px, 22vh, 268px)' in css
-    assert '/static/style.css?v=MOSES_5_48' in (ROOT / 'templates/ui.html').read_text()
+    assert '/static/style.css?v=__CSS_ASSET_VERSION__' in (ROOT / 'templates/ui.html').read_text()
 
 
 def test_calendar_attachment_size_limit_enforced_before_loading_whole_file():

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import os
 from pathlib import Path
 from typing import Optional, Tuple, List, Dict, Any
@@ -215,6 +216,10 @@ from app.routers.pds_prio_trials import router as pds_prio_trials_router
 app.include_router(pds_prio_trials_router)
 app.include_router(pds_purchase_orders_router)
 app.include_router(pds_van_stock_router)
+from app.routers.pds_supplier_quotes import router as pds_supplier_quotes_router
+app.include_router(pds_supplier_quotes_router)
+from app.routers.pds_office_reports import router as pds_office_reports_router
+app.include_router(pds_office_reports_router)
 from app.routers.document_vault import router as document_vault_router
 from app.routers.accounting_ledger import router as accounting_ledger_router
 app.include_router(document_vault_router)
@@ -345,7 +350,13 @@ def ui(_: Request):
     html = template_path.read_text(encoding="utf-8", errors="ignore")
     google_maps_api_key = os.getenv("GOOGLE_MAPS_API_KEY", "")
     html = html.replace("__GOOGLE_MAPS_API_KEY__", google_maps_api_key)
-    return HTMLResponse(content=html)
+    # Asset URLs change automatically when deployed CSS/JS changes.
+    # Prevent Safari from reusing an old 5.48 UI across releases.
+    for filename, placeholder in (("app.js", "__APP_ASSET_VERSION__"),
+                                  ("style.css", "__CSS_ASSET_VERSION__")):
+        digest = hashlib.sha256((STATIC_DIR / filename).read_bytes()).hexdigest()[:12]
+        html = html.replace(placeholder, digest)
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/forms")
