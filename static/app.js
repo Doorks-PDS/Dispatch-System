@@ -9073,7 +9073,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         const title=make('div');title.style.cssText='display:flex;align-items:center;gap:8px;justify-content:space-between;flex-wrap:wrap';
         title.append(make('strong',row.supplier_name||'Supplier needed'));
         const pill=make('span',stateLabel[row.status]||row.status,'badge');if(row.status==='send_uncertain')pill.style.color='#ad3e1c';title.append(pill);card.append(title);
-        card.append(make('div',row.quantity+' × '+row.description));
+        card.append(make('div',row.description));
         card.append(make('small',[row.job_number&&'Job #'+row.job_number,row.supplier_quote_number&&'Quote '+row.supplier_quote_number,row.supplier_cost!=null&&'Supplier $'+Number(row.supplier_cost).toFixed(2),row.lead_time&&'Lead '+row.lead_time].filter(Boolean).join(' · '),'hint'));
         const requestFiles=make('div');attachmentGallery(row,requestFiles,'request');card.append(requestFiles);
         const responseFiles=make('div');attachmentGallery(row,responseFiles,'response');if(responseFiles.childNodes.length){responseFiles.prepend(make('small','Supplier response','hint'));card.append(responseFiles)}
@@ -10301,10 +10301,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     });
   }
 
-  async function ensurePdsOfficeReportPin(label='Office Reports') {
+  async function ensurePdsOfficeReportPin(label='Office Reports', promptEveryTime=false) {
     try {
       const access=await fetchJSON('/pds-office-reports/access');
-      if(access.unlocked)return true;
+      if(access.unlocked && !promptEveryTime)return true;
       const pin=await requestMaskedOfficePin(label);
       if(pin===null)return false;
       await fetchJSON('/pds-office-reports/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
@@ -11207,7 +11207,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
 
   function renderPayrollView(reportPinVerified=false) {
-    if(!reportPinVerified){ensurePdsOfficeReportPin("Payroll").then(ok=>{if(ok)renderPayrollView(true)});return;}
+    // Require an actual server-confirmed unlock, never a truthy click event.
+    if(reportPinVerified !== true){ensurePdsOfficeReportPin("Payroll", true).then(ok=>{if(ok)renderPayrollView(true)});return;}
     setNavActive(navPayroll);
     setActiveChip("Office Flow");
     setWorkspace("Payroll");
@@ -17665,7 +17666,7 @@ function renderSaddlebackView() {
   if (navDataCenter) navDataCenter.addEventListener("click", renderDataCenterView);
   if (navAccounting) {const label=navAccounting.querySelector('span');if(label)label.textContent='Accounting Hub';}
   if (navAccounting) navAccounting.addEventListener("click", async () => { try { await fetchJSON("/accounting/lock", {method:"POST"}); } catch (e) { console.warn("Accounting lock",e); } await renderAccountingView(); });
-  if (navPayroll) navPayroll.addEventListener("click", renderPayrollView);
+  if (navPayroll) navPayroll.addEventListener("click", () => renderPayrollView());
   if (navEmployees) navEmployees.addEventListener("click", renderEmployeesView);
   if (navDataUpload) navDataUpload.addEventListener("click", renderDataUploadView);
   if (navSaddleback) navSaddleback.addEventListener("click", renderSaddlebackView);

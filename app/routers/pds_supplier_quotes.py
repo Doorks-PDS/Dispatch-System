@@ -190,26 +190,28 @@ def create_quote(payload: QuoteDraft, request: Request):
 
 def _safe_subject(row):
     subject = (row.get('email_subject') or '').strip() or (
-        'PDS Pricing Request' + (' — Job ' + row['job_number'] if row.get('job_number') else ''))
+        'PDS Supplier Pricing Request')
     if any(c in subject for c in '\r\n'):
         raise HTTPException(422, 'Invalid email subject')
     return subject[:180]
 
 
 def _email_details(row, supplier_name):
-    """One consistent, readable message used both for preview and actual send."""
+    """One readable supplier request, without internal job IDs or imposed quantities.
+
+    Job linkage and quantity remain internal metadata. The office composes the
+    requested scope directly; include quantities in that description if needed.
+    This exact text is used for preview and Resend delivery.
+    """
+    scope = str(row.get('description') or '').strip()
     message = [f'Hello {supplier_name},', '',
-               'Please provide a quote for the following:', '',
-               f"{row['quantity']} × {row['description']}"]
-    if row.get('job_number'):
-        message.append('Job: ' + row['job_number'])
+               'Please provide a quote for the following:', '', scope]
     if row.get('notes'):
-        message.extend(['', 'Specifications / notes:', row['notes']])
+        message.extend(['', str(row['notes']).strip()])
     if row.get('email_message'):
-        message.extend(['', row['email_message']])
-    message.extend(['', 'Please include your quote number, unit cost, freight (if applicable),'
-                    ' lead time and availability.', '',
-                    'Please reply directly to this email.', '', 'Priority Door Systems'])
+        message.extend(['', str(row['email_message']).strip()])
+    message.extend(['', 'Please include pricing, availability, lead time and any applicable freight charges.', '',
+                    'Thank you,', 'Priority Door Systems'])
     return '\n'.join(message)
 
 
