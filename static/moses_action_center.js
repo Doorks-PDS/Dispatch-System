@@ -26,40 +26,102 @@
     button.type = 'button';
     button.id = 'mosesActionCenterBtn';
     button.setAttribute('aria-label', 'Moses outstanding actions from saved workspace records');
+    // Match the clean Moses Job Flow surface without changing the chat or backend.
+    if (!document.getElementById('mosesActionCenterStyle')) {
+      const stylesheet = document.createElement('style');
+      stylesheet.id = 'mosesActionCenterStyle';
+      stylesheet.textContent = `
+        .moses-chat-shell.moses-action-view:not(.moses-chat-expanded){
+          width:min(1060px,calc(100vw - 28px))!important;right:50%!important;transform:translateX(50%)!important;bottom:14px!important;
+          height:min(88dvh,880px)!important;max-height:calc(100dvh - 28px)!important;
+          border-radius:17px!important
+        }
+        #mosesActionCenterArea{background:#fff!important;padding:14px 16px 20px!important}
+        .moses-center-toolbar{display:flex;justify-content:space-between;gap:8px;align-items:center;flex-wrap:wrap}
+        .moses-center-tabs{display:flex;gap:8px;flex-wrap:wrap;padding:4px 0 12px;
+          border-bottom:1px solid #e7ebee;position:sticky;top:0;background:#fff;z-index:1}
+        .moses-center-tabs button{white-space:nowrap;font-weight:700}
+        .moses-center-search{width:100%;min-height:42px;border:1px solid #d9e2e8;border-radius:12px;
+          box-sizing:border-box;padding:10px 13px;background:#fff;font:inherit}
+        .moses-center-group{display:grid;align-content:start;gap:10px}
+        .moses-center-group[hidden]{display:none!important}
+        .moses-center-card[hidden]{display:none!important}
+        .moses-center-card{display:grid;gap:8px;border:1px solid #dce3e9;border-radius:12px;padding:12px;
+          background:#fff;min-width:0}
+        .moses-center-card strong{font-size:14px}
+        .moses-center-card small{color:#64707d;font-size:12px;overflow-wrap:anywhere}
+        .moses-center-actions{display:flex;flex-wrap:wrap;gap:7px;align-items:center}
+        .moses-center-secondary{padding-top:5px;border-top:1px solid #f0f2f5}
+        .moses-center-secondary .btn{font-size:12px;min-height:32px}
+        .moses-center-empty{padding:16px;color:#687683;font-size:13px}
+        @media(max-width:640px){.moses-chat-shell.moses-action-view:not(.moses-chat-expanded){
+          inset:8px!important;width:auto!important;transform:none!important;height:calc(100dvh - 16px)!important;max-height:none!important;
+          border-radius:16px!important}#mosesActionCenterArea{padding:10px 12px 18px!important}}
+      `;
+      document.head.append(stylesheet);
+    }
     const area = document.createElement('section');
     area.id = 'mosesActionCenterArea';
     area.hidden = true;
     area.style.cssText = 'display:none;gap:10px;padding:12px 18px;margin:0;min-height:0;overflow-y:auto;overscroll-behavior:contain;border-top:1px solid #e1e5e9';
     const status = text('small', '');
     status.setAttribute('role', 'status');
-    area.append(status);
-    const refresh = text('button', '↻ Refresh', 'btn');
-    refresh.type = 'button';
-    const contents = document.createElement('div');
-    contents.style.cssText = 'display:grid;gap:10px';
-    area.append(refresh, contents);
+    let activeTab = 'work';
+    const toolbar = document.createElement('div');toolbar.className='moses-center-toolbar';
+    const heading = text('strong', 'Action Center');
+    const refresh = text('button', 'Refresh', 'btn');refresh.type = 'button';
+    toolbar.append(heading,refresh);
+    const tabs = document.createElement('nav');tabs.className='moses-center-tabs';
+    tabs.setAttribute('aria-label','Moses action queues');
+    const search = document.createElement('input');search.className='moses-center-search';
+    search.type='search';search.placeholder='Search customer, job # or action';
+    search.setAttribute('aria-label','Search Moses actions');
+    status.style.cssText='display:block;min-height:15px;color:#687683;font-size:12px';
+    const contents = document.createElement('div');contents.style.cssText='display:grid;gap:10px';
+    area.append(toolbar,tabs,search,status,contents);
+    const selectTab = (key) => {
+      activeTab=key;search.value='';
+      for(const group of contents.children) group.hidden=group.dataset.mosesTab!==activeTab;
+      for(const tab of tabs.children){
+        const selected=tab.dataset.mosesTab===activeTab;
+        tab.className=selected?'btn btn-orange':'btn';
+        tab.setAttribute('aria-pressed',String(selected));
+      }
+    };
+    const filterCards=()=>{
+      const value=search.value.trim().toLowerCase();
+      for(const card of contents.querySelectorAll('.moses-center-card')){
+        card.hidden=!!value&&!String(card.dataset.mosesSearch||'').includes(value);
+      }
+    };
+    search.addEventListener('input',filterCards);
     const renderCards = (source, title, actionType) => {
-      const section = document.createElement('details');
-      const tones={draft:['#eaf2ff','#3b64a0'],approval:['#fff1de','#aa6813'],work:['#ebf4ed','#397b50'],delivery:['#fff0ef','#af4a42']};
-      const [surface,accent]=tones[actionType]||['#f4f5f7','#536273'];
-      section.style.cssText='border:1px solid #dfe6e9;border-left:3px solid '+accent+';border-radius:11px;padding:0;overflow:hidden;background:#fff';
+      const section = document.createElement('section');section.className='moses-center-group';
+      section.dataset.mosesTab=actionType;
       const available = source && source.available === true;
       const total = available ? source.count : null;
-      const name = text('summary', title + ' (' + (total == null ? '—' : total) + ')');
-      name.style.cssText='padding:12px 13px;cursor:pointer;font-weight:700;background:'+surface+';color:'+accent;
-      section.append(name);
-      const inside=document.createElement('div');inside.style.cssText='display:grid;gap:8px;padding:9px 12px';section.append(inside);
+      const head=document.createElement('div');head.className='moses-center-toolbar';
+      head.append(text('strong', title+' ('+(total == null?'—':total)+')'));
+      if(actionType==='work'){
+        const all=text('button','Open Full Job Flow','btn btn-orange');all.type='button';
+        all.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-job-flow'));
+        head.append(all);
+      }
+      section.append(head);
+      const inside=document.createElement('div');inside.style.cssText='display:grid;gap:10px';section.append(inside);
       if (!available) {
-        inside.append(text('small', String(source?.note || 'Unavailable.')));
+        inside.append(text('small', String(source?.note || 'Unavailable.'), 'moses-center-empty'));
       } else if (!total) {
-        inside.append(text('small', 'No items.'));
+        inside.append(text('small', 'No items.', 'moses-center-empty'));
       }
       for (const item of (Array.isArray(source?.items) ? source.items : []).slice(0, 12)) {
         const card = document.createElement('article');
-        card.style.cssText = 'display:grid;gap:5px;border-top:1px solid #eef1f5;padding-top:8px';
-        card.append(text('strong', item.title || item.customer || item.kind || 'Saved action'));
-        card.append(text('small', [item.customer, item.job_number && `Job #${item.job_number}`,
-          item.status || item.state].filter(Boolean).join(' · ')));
+        card.className='moses-center-card';
+        card.dataset.mosesSearch=[item.title,item.customer,item.job_number,item.kind,item.status,item.state].filter(Boolean).join(' ').toLowerCase();
+        card.append(text('strong', item.customer || item.title || item.kind || 'Saved action'));
+        card.append(text('small', [item.job_number && `Job #${item.job_number}`,
+          item.status || item.state,item.customer ? item.title : ''].filter(Boolean).join(' · ')));
+        if (item.next_step && actionType === 'delivery') card.append(text('small',item.next_step));
         if (actionType === 'draft' && item.draft_id) {
           const inspect = text('button', 'Review draft', 'btn');
           inspect.type = 'button';
@@ -87,7 +149,8 @@
           card.append(inspect);
         }
         if (actionType === 'work' && item.record_id && (document.body.dataset.platform || '') === 'pds') {
-          const inspect = text('button', 'View details', 'btn');
+          const secondary=document.createElement('div');secondary.className='moses-center-actions moses-center-secondary';
+          const inspect = text('button', 'Inspect', 'btn');
           inspect.type = 'button';
           inspect.onclick = async () => {
             inspect.disabled = true;
@@ -108,21 +171,31 @@
               status.textContent = 'Cannot verify PDS job context: ' + err.message;
             } finally { inspect.disabled = false; }
           };
-          card.append(inspect);
-          const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:6px;flex-wrap:wrap';
+          secondary.append(inspect);
+          const buttons=document.createElement('div');buttons.className='moses-center-actions';
           const view=text('button','View Job','btn');view.type='button';
           view.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-job',{detail:{job_id:item.record_id}}));
           buttons.append(view);
           const statusLabel=String(item.status||'').toLowerCase();
-          const isInvoice=/invoice|complete|done/.test(statusLabel)&&!/quote/.test(statusLabel);
-          const task=text('button',isInvoice?'Prepare invoice':'Prepare estimate','btn');task.type='button';
-          task.onclick=()=>{
-            const prompt='Review PDS job '+(item.job_number||item.record_id)+' and '+(isInvoice?'prepare a draft invoice':'prepare an estimate draft')+' from verified saved job records and forms. Show anything missing and request approval before consequential changes.';
-            const input=q('#mosesChatMessage',panel);if(!input){status.textContent='Moses message input unavailable.';return;}
-            input.value=prompt;area.hidden=true;area.style.display='none';panel.classList.remove('moses-action-view');input.focus();
-            // User explicitly chose an action; never auto-execute financial changes.
-          };buttons.append(task);
-          if (!isInvoice) {
+          const isQuote=/quote|to be quoted/.test(statusLabel) || item.kind==='needs_quote';
+          const isInvoice=/invoice|complete|done/.test(statusLabel);
+          const needsParts=item.kind==='parts_on_order';
+          const run=(action,label,primary=false)=>{
+            const control=text('button',label,primary?'btn btn-orange':'btn');control.type='button';
+            control.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-jobflow-action',
+              {detail:{job_id:item.record_id,action}}));
+            buttons.append(control);
+          };
+          if(isQuote||needsParts)run('supplier','Request Supplier Quote');
+          if(isQuote)run('estimate','Estimate',true);
+          if(isInvoice)run('invoice','Invoice',true);
+          const ask=text('button','Ask Moses','btn');ask.type='button';
+          ask.onclick=()=>{
+            const input=q('#mosesChatMessage',panel);if(!input){status.textContent='Moses chat unavailable.';return;}
+            input.value='Review PDS job '+(item.job_number||item.record_id)+' and suggest the next authorized steps from its saved records. Do not save or send anything without approval.';
+            area.hidden=true;area.style.display='none';panel.classList.remove('moses-action-view');button.textContent='Action Center';input.focus();
+          };buttons.append(ask);
+          if (isQuote) {
             const split = text('button','Separate estimate scopes','btn');split.type='button';
             split.onclick=async()=>{
               split.disabled=true;
@@ -172,22 +245,25 @@
                 editor.append(save);card.append(editor);
               }catch(error){status.textContent='Cannot load saved completion scopes: '+error.message;}
               finally{split.disabled=false;}
-            };buttons.append(split);
+            };secondary.append(split);
           }
-          card.append(buttons);
+          card.append(buttons,secondary);
         }
         if (actionType === 'approval') {
           const open = text('button', 'Review existing approvals', 'btn');
           open.type = 'button';
           open.onclick = () => {
             const prior = Array.from(panel.querySelectorAll('button')).find(b => b.textContent.trim() === 'Review pending Moses actions');
-            if (prior) prior.click();
-            else status.textContent = 'Approval interface unavailable. No record changed.';
+            if (prior) {
+              area.hidden=true;area.style.display='none';panel.classList.remove('moses-action-view');
+              button.textContent='Action Center';prior.click();
+            } else status.textContent = 'Approval interface unavailable. No record changed.';
           };
           card.append(open);
         }
         inside.append(card);
       }
+      if(available && total>12)inside.append(text('small',actionType==='work'?'Showing 12 of '+total+'. Open Full Job Flow for the rest.':'Showing the first 12 of '+total+' records.','moses-center-empty'));
       contents.append(section);
     };
     const load = async () => {
@@ -209,17 +285,16 @@
           try {
             const sms = await request('/moses-action-center/pds/sms/proposals');
             const rows = Array.isArray(sms.proposals) ? sms.proposals : [];
-            const section = document.createElement('details');
-            const heading = text('summary', 'PDS text approvals (' + rows.length + ')');
-            heading.style.cssText='padding:12px;font-weight:700;cursor:pointer;background:#fff1de';
-            section.style.cssText='border:1px solid #e3e7eb;border-radius:12px;overflow:hidden';
-            section.append(heading);
+            const section = document.createElement('section');section.className='moses-center-group';
+            section.dataset.mosesTab='sms';
+            section.append(text('strong','PDS text approvals ('+rows.length+')'));
             const inside = document.createElement('div');
             inside.style.cssText='display:grid;gap:10px;padding:12px';
             if (!rows.length) inside.append(text('small','No text messages awaiting approval.'));
             for (const entry of rows) {
               const card = document.createElement('article');
-              card.style.cssText='display:grid;gap:8px;border-top:1px solid #e5e8eb;padding:10px 0';
+              card.className='moses-center-card';
+              card.dataset.mosesSearch=[entry.job_id,entry.status,entry.phone].filter(Boolean).join(' ').toLowerCase();
               card.append(text('strong', 'Job ' + (entry.job_id || '') + ' · ' + (entry.status || '')));
               card.append(text('small', entry.phone || ''));
               const body = text('div', entry.message || '');body.style.whiteSpace='pre-wrap';card.append(body);
@@ -244,12 +319,29 @@
               inside.append(card);
             }
             section.append(inside);contents.append(section);
-          } catch (error) {status.textContent='SMS approval inbox unavailable: '+error.message;}
+          } catch (error) {
+            const section=document.createElement('section');section.className='moses-center-group';
+            section.dataset.mosesTab='sms';
+            section.append(text('small','Text approval inbox unavailable: '+error.message,'moses-center-empty'));
+            contents.append(section);
+          }
         }
-        if (workspace === 'pds') renderCards(data.drafts, 'Moses draft reviews', 'draft');
-        renderCards(data.approvals, 'Awaiting your approval', 'approval');
-        if (workspace === 'pds') renderCards(data.work, 'PDS job follow-ups', 'work');
-        renderCards(data.delivery, 'Verified delivery exceptions', 'delivery');
+        if (workspace === 'pds') renderCards(data.drafts, 'Saved drafts', 'draft');
+        renderCards(data.approvals, 'Approvals', 'approval');
+        if (workspace === 'pds') renderCards(data.work, 'PDS jobs needing attention', 'work');
+        renderCards(data.delivery, 'Delivery issues', 'delivery');
+        const labels={work:'Jobs',draft:'Drafts',approval:'Approvals',delivery:'Delivery',sms:'Texts'};
+        const counts={work:data.work?.count,draft:data.drafts?.count,
+          approval:data.approvals?.count,delivery:data.delivery?.count,
+          sms:contents.querySelector('[data-moses-tab="sms"]')?.querySelectorAll('.moses-center-card').length||0};
+        const kinds=workspace==='pds'?['work','draft','approval','delivery','sms']:['approval','delivery'];
+        tabs.replaceChildren();
+        for(const kind of kinds){
+          const total=counts[kind];const tab=text('button',labels[kind]+' ('+(total==null?'—':total)+')','btn');
+          tab.type='button';tab.dataset.mosesTab=kind;tab.onclick=()=>selectTab(kind);tabs.append(tab);
+        }
+        if(!kinds.includes(activeTab))activeTab=kinds[0];
+        selectTab(activeTab);
         status.textContent = '';
       } catch (err) {
         contents.replaceChildren();
@@ -264,12 +356,16 @@
       button.textContent = area.hidden ? 'Action Center' : 'Back to chat';
       if (!area.hidden) await load();
     };
-    header.insertBefore(button, header.lastElementChild);
+    const headerActions=header.querySelector('.moses-header-actions');
+    if(headerActions)headerActions.prepend(button);
+    else header.append(button);
     header.after(area);
     // Always refresh when reopening after switching business platforms.
     const onClick = (ev) => {
       if (ev.target?.id === 'workspaceMosesBubble' && lastWorkspace !== (document.body.dataset.platform || '')) {
-        area.hidden = true; area.style.display = 'none'; panel.classList.remove('moses-action-view'); button.textContent='Action Center';contents.replaceChildren();
+        area.hidden = true; area.style.display = 'none'; panel.classList.remove('moses-action-view');
+        button.textContent='Action Center';contents.replaceChildren();tabs.replaceChildren();
+        activeTab=(document.body.dataset.platform||'')==='pds'?'work':'approval';
       }
     };
     document.addEventListener('click', onClick);

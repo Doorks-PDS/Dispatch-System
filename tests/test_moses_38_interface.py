@@ -13,10 +13,10 @@ def test_expand_scroll_voice_and_no_duplicate_quote_button():
     assert "moses-launch-glow{margin-right:9px" in APP
 
 def test_action_center_is_collapsible_and_scrollable():
-    assert "const section = document.createElement('details')" in CENTER
+    assert "const section = document.createElement('section')" in CENTER
     assert "overflow-y:auto" in CENTER
     assert "panel.classList.toggle('moses-action-view'" in CENTER
-    assert "Prepare invoice" in CENTER and "Prepare estimate" in CENTER
+    assert "run('invoice','Invoice'" in CENTER and "run('estimate','Estimate'" in CENTER
 
 def test_quote_parts_review_does_not_send_or_save():
     assert "function openPdsQuotePartsReview(job)" in APP
@@ -28,7 +28,7 @@ def test_quote_parts_review_does_not_send_or_save():
 
 def test_ui_assets_versioned():
     assert '/static/app.js?v=__APP_ASSET_VERSION__' in UI
-    assert '/static/moses_action_center.js?v=4' in UI
+    assert '/static/moses_action_center.js?v=5' in UI
 
 
 def test_approved_time_off_is_shown_above_jobs_without_mutations():

@@ -6060,6 +6060,34 @@ function renderAttachmentSection(titleText, items, options = {}) {
     document.head.appendChild(link);
   }
 
+  // Action Center uses the exact saved-document and supplier workflows as Job Flow.
+  // These events only open review screens; no document or email is issued here.
+  document.addEventListener('moses-open-pds-job-flow', () => {
+    if(activePlatform==='pds'&&['office_admin','office','lead'].includes(currentUser?.role))
+      openPdsJobFlowWorkQueue();
+  });
+  document.addEventListener('moses-open-pds-jobflow-action', async event => {
+    if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(currentUser?.role))return;
+    const jobId=String(event.detail?.job_id||'');
+    const choice=String(event.detail?.action||'');
+    if(!/^[a-zA-Z0-9_-]{1,80}$/.test(jobId)||!['estimate','invoice','supplier'].includes(choice))return;
+    try{
+      const job=await apiGetJob(jobId);
+      if(String(job?.id)!==jobId)throw Error('Saved job identity mismatch');
+      if(choice==='supplier'){
+        await pdsQuickSupplierQuoteRequest(job.job_number||'',
+          {description:job.parts_needed||job.recommendations||''});
+        return;
+      }
+      const docs=await apiListDocuments();
+      const saved=pdsJobFlowLinkedDocuments(job,docs,choice);
+      if(saved.length){
+        openEstimateInvoiceDrawer({...job,__docEdit:saved[0]},choice,null,{mosesJobFlow:true});
+      }else{
+        openEstimateInvoiceHelper(job,choice,null,{mosesJobFlow:true});
+      }
+    }catch(error){alert('Moses Job Flow action unavailable: '+(error.message||error))}
+  });
   // Moses draft review links to existing PDS ticket/estimator, not a duplicate editor.
   document.addEventListener('moses-open-pds-job', async event => {
     if (activePlatform !== 'pds' || !['office_admin','office','lead'].includes(currentUser?.role)) return;
@@ -8504,6 +8532,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
 
+  // Complete/Quote is genuinely two work paths; allow the estimator to choose.
+  function pdsToDoDocumentTypes(job, isInvoiceQueue) {
+    const status=String(job?.status||'').trim().toLowerCase();
+    return status==='complete/quote' ? ['estimate','invoice'] : [isInvoiceQueue?'invoice':'estimate'];
+  }
+
   // Personal work tickets; no fabricated mileage. The office can set a
   // specific visit order later; until then date and job number are authoritative.
   function renderMyAssignments() {
@@ -8551,7 +8585,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       officeTasks._refresh=async()=>{
         officeList.replaceChildren();
         try{
-          const [jobs,employees]=await Promise.all([apiListJobs({limit:5000}),apiListEmployees().catch(()=>[])]);
+          const [jobs,employees,documents]=await Promise.all([
+            apiListJobs({limit:5000}),apiListEmployees().catch(()=>[]),apiListDocuments().catch(()=>[])
+          ]);
           const me=[currentUser.name,currentUser.full_name,currentUser.username].map(v=>String(v||'').trim().toLowerCase()).filter(Boolean);
           const mine=assignedQuoteJobs(jobs).filter(j=>{
             const name=normalizeQuoteAssigneeName(j.quote_assigned_to,employees).trim().toLowerCase();
@@ -8568,11 +8604,58 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               const open=document.createElement('button');open.type='button';open.className='btn';open.textContent='View Job';
               open.onclick=async()=>{try{const full=await apiGetJob(job.id);openDrawer('Job Details',body=>{const local=document.createElement('div');body.append(local);renderJobDetails(local,full,{afterSave:refresh,afterDelete:refresh})})}catch(error){alert('Unable to open job: '+(error.message||error))}};
               const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;align-items:center;flex-wrap:wrap';
-              const assist=document.createElement('button');assist.type='button';assist.className='btn';assist.textContent='◉ Moses';assist.title='Open the saved draft or estimator for this job';
+              const note=document.createElement('small');note.className='hint';note.setAttribute('role','status');
+              buttons.append(open);
               const isInvoice=heading==='Office Invoices To Review';
-              assist.onclick=async()=>{if(isInvoice){try{const full=await apiGetJob(job.id);await openEstimateInvoiceDrawer(full,'invoice');const top=[...document.querySelectorAll('.overlay')].at(-1);if(top)top.style.zIndex='11250'}catch(e){alert('Invoice review unavailable: '+(e.message||e))}}else{await openPdsSingleQuoteReview(job)}};
+              // Supplier pricing is for estimate work, never invoice-only work.
+              if(!isInvoice){
+                const supplier=document.createElement('button');supplier.type='button';supplier.className='btn';supplier.textContent='Request Supplier Quote';
+                supplier.onclick=async()=>{
+                  supplier.disabled=true;note.textContent='';
+                  try{
+                    const saved=await pdsQuickSupplierQuoteRequest(job.job_number||'',{
+                      description:job.parts_needed||job.recommendations||''
+                    });
+                    if(saved?.id)note.textContent='Supplier request saved as Draft.';
+                  }catch(error){note.textContent='Supplier request not saved: '+(error.message||error)}
+                  finally{supplier.disabled=false}
+                };
+                buttons.append(supplier);
+              }
+              // Complete/Quote can require either document. Do not silently pick one.
+              const types=pdsToDoDocumentTypes(job,isInvoice);
+              for(const type of types){
+                const noun=type==='estimate'?'Estimate':'Invoice';
+                const savedDocs=pdsJobFlowLinkedDocuments(job,documents,type);
+                if(savedDocs.length){
+                  for(const doc of savedDocs){
+                    const documentLabel=document.createElement('span');documentLabel.className='hint';documentLabel.textContent=doc.number;
+                    const edit=document.createElement('button');edit.type='button';edit.className='btn';edit.textContent='View/Edit '+noun;
+                    edit.onclick=()=>openEstimateInvoiceDrawer({...job,__docEdit:doc},type,null,{
+                      mosesJobFlow:true,refreshDocs:officeTasks._refresh
+                    });
+                    const email=document.createElement('button');email.type='button';email.className='btn btn-orange';email.textContent='Email '+noun;
+                    email.onclick=()=>openEstimateInvoiceEmail(doc,type,{onSent:officeTasks._refresh});
+                    buttons.append(documentLabel,edit,email);
+                  }
+                }else{
+                  const draft=document.createElement('button');draft.type='button';draft.className='btn btn-orange';draft.textContent='Draft '+noun;
+                  draft.onclick=async()=>{
+                    draft.disabled=true;
+                    try{
+                      const full=await apiGetJob(job.id);
+                      if(String(full?.id)!==String(job.id))throw Error('Saved job identity mismatch');
+                      openEstimateInvoiceHelper(full,type,null,{
+                        mosesJobFlow:true,afterSave:officeTasks._refresh,refreshDocs:officeTasks._refresh
+                      });
+                    }catch(error){note.textContent=noun+' review unavailable: '+(error.message||error)}
+                    finally{draft.disabled=false}
+                  };
+                  buttons.append(draft);
+                }
+              }
               const statusChip=statusPill(String(job.status||'Dispatch'));statusChip.style.marginLeft='10px';statusChip.style.verticalAlign='middle';name.style.display='inline-block';
-              const headingRow=document.createElement('div');headingRow.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap';headingRow.append(name,statusChip);buttons.append(open,assist);card.append(headingRow,info,buttons);officeList.append(card);
+              const headingRow=document.createElement('div');headingRow.style.cssText='display:flex;gap:10px;align-items:center;flex-wrap:wrap';headingRow.append(name,statusChip);card.append(headingRow,info,buttons,note);officeList.append(card);
             }
           }
         }catch(error){const msg=document.createElement('p');msg.className='hint';msg.textContent='Unable to load office tasks: '+(error.message||error);officeList.append(msg)}

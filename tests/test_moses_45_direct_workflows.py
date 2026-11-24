@@ -15,9 +15,14 @@ def test_job_flow_button_opens_office_queue_not_failed_ai_chat():
 
 
 def test_todo_actions_use_existing_workflows_and_keep_job_id():
-    assert "window.openMosesDrafts({jobId:String(job.id)})" in APP
-    assert "await openEstimateInvoiceDrawer(full,'estimate')" in APP
-    assert "await openEstimateInvoiceDrawer(full,'invoice')" in APP
+    todo = APP[APP.index('function renderMyAssignments()'):APP.index('// PDS office dispatch board.')]
+    assert "openDrawer('Job Details'" in todo
+    assert "const types=pdsToDoDocumentTypes(job,isInvoice)" in todo
+    assert "pdsQuickSupplierQuoteRequest(job.job_number" in todo
+    assert "openEstimateInvoiceHelper(full,type,null" in todo
+    assert "pdsJobFlowLinkedDocuments(job,documents,type)" in todo
+    assert "openEstimateInvoiceEmail(doc,type" in todo
+    assert "◉ Moses" not in todo
     assert "Review this job for an estimate: " not in APP
 
 
