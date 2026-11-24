@@ -149,7 +149,8 @@ def preview(request, kind, number):
     snap = _snapshot(request, kind, number)
     return {k: v for k, v in snap.items() if k != 'pdf_sha256'} | {
         'attachment_verified': True, 'ready_for_approval': True,
-        'sent': False, 'approval_required': True}
+        'sent': False, 'approval_required': True,
+        'send_enabled': os.getenv('MOSES_PDS_DOCUMENT_SEND_ENABLED', '').strip().lower() == 'true'}
 
 
 def _fingerprint(snapshot):

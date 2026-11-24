@@ -27,6 +27,8 @@ def request(path, role='office_admin', name='PDS Employee', uid='emp-1'):
 
 def test_purchase_order_creator_is_authenticated_and_immutable(tmp_path):
     req=request(tmp_path,role='lead',name='Steven Carpenter',uid='lead-7')
+    demo_job={'id':'pds-job-15','job_number':'1126-15','customer':'Test Account','po_number':''}
+    req.app.state.calendar_store=SimpleNamespace(list_jobs=lambda:[demo_job],update_job=lambda _id,changes:{**demo_job,**changes})
     created=po.create_order(po.POInput(data={'vendor':'Parts Supplier','work_order':'1126-15',
                  'status':'Draft','created_by':'Spoofed Name'}),req)
     assert created['created_by']=='Steven Carpenter'
@@ -35,6 +37,7 @@ def test_purchase_order_creator_is_authenticated_and_immutable(tmp_path):
     assert created['created_at']
     first_time=created['created_at']
     other=request(tmp_path,role='office',name='Office Clerk',uid='office-2')
+    other.app.state.calendar_store=req.app.state.calendar_store
     updated=po.update_order(created['id'],po.POInput(data={
         'vendor':'Parts Supplier','notes':'Delivery expected tomorrow',
         'created_by':'Attempt to change creator','created_by_id':'spoof'}),other)
@@ -132,7 +135,7 @@ def test_ticket_and_saved_lists_expose_external_originals_and_creator():
     assert "pdsExternalReferences({type:'purchase_order'})" in js
     assert "'Created by '+item.created_by" in js
     assert 'External ' in js and 'Open Original' in js
-    assert "attachExisting.textContent='Attach Existing'" in js
+    assert "alternateUpload.textContent='Alternate'" in js
     assert "const canCreatePO=['office','office_admin','admin','lead']" in js
 
 

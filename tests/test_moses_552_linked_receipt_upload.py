@@ -44,7 +44,7 @@ def test_job_receipt_and_packing_slip_reuse_one_store(tmp_path):
 def test_ticket_uses_existing_receipts_route_and_same_receiving_register():
     js=(ROOT/'static/app.js').read_text()
     assert 'function openJobReceiptUpload(job, documentType, ticketContainer, ctx)' in js
-    assert "[['Receipt','Receipt'],['Packing Slip','Packing Slip']]" in js
+    assert "['Receipt','Receipt']" in js and "['Packing Slip','Packing Slip']" in js
     assert "fd.set('job_number',String(job.job_number||''))" in js
     assert "fd.set('document_type',type)" in js
     assert "fetch('/receipts',{method:'POST',credentials:'same-origin',body:fd})" in js

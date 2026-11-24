@@ -61,7 +61,8 @@ def _write(path: Path, data):
 def _clean(data: dict):
     allowed = ('vendor','supplier_id','vendor_contact','work_order','customer','date','needed_by','description',
                'item_type','quantity','unit_cost','tax','shipping','total','status','received_status',
-               'payment_status','notes','invoice_reference','vendor_address','ship_to','salesperson','sro_number','line_items')
+               'payment_status','notes','invoice_reference','vendor_address','ship_to','salesperson','sro_number','line_items',
+               'job_id','work_order_number','tracking_number','arrival_date','expected_arrival_date')
     if not isinstance(data, dict): raise HTTPException(400, 'Invalid PO')
     result = {}
     for key in allowed:
@@ -70,6 +71,65 @@ def _clean(data: dict):
         if len(str(value)) > 4000: raise HTTPException(400, 'Field too long')
         result[key] = value
     return result
+
+# Server-authoritative PO-to-job association. A number typed in a form is
+# never sufficient to associate a purchase with another customer's ticket.
+def _verified_order_job(request: Request, data: dict):
+    raw_number = str(data.get('work_order_number') or data.get('work_order') or '').strip()
+    raw_id = str(data.get('job_id') or '').strip()
+    if not raw_number and not raw_id:
+        return None  # Legitimate stock/unassigned purchase order.
+    store = getattr(request.app.state, 'calendar_store', None)
+    if store is None:
+        raise HTTPException(503, 'PDS job records are unavailable')
+    jobs = store.list_jobs()
+    if not isinstance(jobs, list):
+        raise HTTPException(503, 'PDS job lookup unavailable')
+    hits = [job for job in jobs if isinstance(job, dict) and (
+        (raw_id and str(job.get('id') or '') == raw_id) or
+        (not raw_id and raw_number and str(job.get('job_number') or '').casefold() == raw_number.casefold()))]
+    if len(hits) != 1:
+        raise HTTPException(409, 'Select one existing PDS job for the purchase order')
+    job = hits[0]
+    if raw_number and str(job.get('job_number') or '').casefold() != raw_number.casefold():
+        raise HTTPException(409, 'PO job number does not match the selected job')
+    customer = ' '.join(str(data.get('customer') or '').split()).casefold()
+    actual = ' '.join(str(job.get('customer') or '').split()).casefold()
+    if customer and customer != actual:
+        raise HTTPException(409, 'PO customer does not match the selected job')
+    return job
+
+
+def _order_data(request: Request, data: dict, *, existing=None):
+    prepared = {**(existing or {}), **data}
+    job = _verified_order_job(request, prepared)
+    cleaned = _clean(prepared)
+    if job:
+        cleaned['job_id'] = str(job.get('id') or '')
+        cleaned['work_order'] = str(job.get('job_number') or '')
+        cleaned['work_order_number'] = cleaned['work_order']
+        cleaned['customer'] = str(job.get('customer') or '')
+    else:
+        cleaned['job_id'] = ''
+        cleaned['work_order'] = ''
+        cleaned['work_order_number'] = ''
+    state = str(cleaned.get('status') or 'Draft').strip()
+    allowed = {'Draft', 'Ordered', 'Shipped', 'En Route', 'Delivered', 'Received', 'Cancelled',
+               'Submitted', 'Partially Received', 'Billed', 'Paid'}
+    if state not in allowed and not (existing and state == str(existing.get('status') or '').strip()):
+        raise HTTPException(422, 'Choose a valid purchase-order status')
+    cleaned['status'] = state
+    for field in ('arrival_date','expected_arrival_date'):
+        value = str(cleaned.get(field) or '').strip()
+        if value:
+            try:
+                from datetime import date
+                if date.fromisoformat(value).isoformat() != value:
+                    raise ValueError()
+            except ValueError as error:
+                raise HTTPException(422, 'Arrival date must be YYYY-MM-DD') from error
+    return cleaned, job
+
 
 @router.get('')
 def list_orders(request: Request):
@@ -92,6 +152,9 @@ def create_order(payload: POInput, request: Request):
         sid=str(payload.data.get("supplier_id") or "").strip()
         if sid and not any(x.get("id")==sid for x in _read(_supplier_path(request),[])):
             raise HTTPException(400,"Select a valid supplier profile")
+        cleaned, verified_job = _order_data(request, payload.data)
+        if cleaned['status'] == 'Received':
+            raise HTTPException(409, 'Use the receiving workflow to confirm receipt')
         last = int(_read(sequence, {'last':0}).get('last', 0))
         for item in items:
             match = re.fullmatch(r'PO-(\d+)', str(item.get('po_number', '')))
@@ -100,11 +163,20 @@ def create_order(payload: POInput, request: Request):
         _write(sequence, {'last':last+1})
         now = datetime.now(timezone.utc).isoformat()
         record = {'id':str(uuid.uuid4()), 'po_number':number, 'created_at':now, 'updated_at':now,
-                  **_clean(payload.data), 'created_by':actor['name'],
+                  **cleaned, 'created_by':actor['name'],
                   'created_by_id':actor['id'], 'created_by_role':actor['role'],
                   'updated_by':actor['name'], 'updated_by_id':actor['id']}
         items.append(record)
         _write(records, items)
+        # Keep the legacy primary PO # while every individual PO retains its
+        # own immutable job link. Multiple POs are shown by linked job_id.
+        if verified_job and not str(verified_job.get('po_number') or '').strip():
+            try:
+                linked = request.app.state.calendar_store.update_job(str(verified_job['id']), {'po_number': number})
+                if str(linked.get('po_number') or '') != number:
+                    record['link_warning'] = 'Job PO field not confirmed; PO remains linked by job ID'
+            except Exception:
+                record['link_warning'] = 'Job PO field could not be refreshed; PO remains linked by job ID'
         return record
 
 @router.patch('/{record_id}')
@@ -122,7 +194,17 @@ def update_order(record_id: str, payload: POInput, request: Request):
             raise HTTPException(400,"Select a valid supplier profile")
         for item in items:
             if item.get('id') == record_id:
-                item.update(_clean(payload.data))
+                cleaned, verified_job = _order_data(request, payload.data, existing=item)
+                if cleaned['status'] == 'Received':
+                    try:
+                        events = _receive_events(request, 'pds')
+                    except Exception as error:
+                        raise HTTPException(503, 'Receiving history unavailable') from error
+                    ordered = _receive_qty(item)
+                    confirmed = sum(float(event.get('quantity') or 0) for event in events if str(event.get('po_id') or '') == record_id)
+                    if confirmed < ordered - 0.000001:
+                        raise HTTPException(409, 'Use the receiving workflow to verify all ordered quantities')
+                item.update(cleaned)
                 actor = _actor(request)
                 item['updated_at'] = datetime.now(timezone.utc).isoformat()
                 item['updated_by'] = actor['name']
@@ -344,6 +426,11 @@ def receive_po(platform:str,po_id:str,payload:ReceiveInput,request:Request):
                "created_by":str(getattr(request.state,"auth_user",""))[:200]}
         events.append(event)
         _write(_receive_journal(request,platform,create=True),events)
+        if platform == 'pds' and received+payload.quantity >= ordered - 0.000001:
+            po['status'] = 'Received'
+            po['received_status'] = 'Received'
+            po['updated_at'] = datetime.now(timezone.utc).isoformat()
+            _write(orders_path, orders)
         return {"event":event,"received":round(received+payload.quantity,4),
                 "outstanding":max(0,round(ordered-received-payload.quantity,4))}
 
@@ -461,62 +548,109 @@ def _import_value(row: dict, *aliases: str) -> str:
 
 
 def _import_prepare(request: Request, payload: ImportBatch):
-    if payload.kind not in ('vendors', 'parts'):
-        raise HTTPException(422, 'Choose vendors or parts')
+    # Historical jobs, numbered financial documents, and arbitrary files intentionally
+    # remain preview-only: they need a separate reconciliation/association workflow.
+    supported = ('vendors', 'parts', 'customers', 'contacts', 'addresses', 'service_vendors')
+    if payload.kind not in supported:
+        raise HTTPException(422, 'Destination is review-only; use an existing document/job workflow')
     if not (1 <= len(payload.rows) <= 1000):
         raise HTTPException(422, 'CSV must contain 1–1,000 records')
     if any(not isinstance(row, dict) or len(row) > 80 or any(len(str(v)) > 3000 for v in row.values()) for row in payload.rows):
         raise HTTPException(422, 'Invalid or oversized CSV record')
+
     if payload.kind == 'vendors':
         existing = _read(_supplier_path(request), [])
-        if not isinstance(existing, list):
-            raise HTTPException(500, 'Supplier store unavailable')
         known = {_import_norm(item.get('name')) for item in existing if isinstance(item, dict)}
-    else:
+    elif payload.kind == 'parts':
         from app.routers.data import _parts_path
-        path = _parts_path(request)
-        obj = _read(path, {'items': []})
+        obj = _read(_parts_path(request), {'items': []})
         existing = obj.get('items', []) if isinstance(obj, dict) else []
-        if not isinstance(existing, list):
-            raise HTTPException(500, 'Part catalog unavailable')
         known = {_import_norm(item.get('part_number')) for item in existing if isinstance(item, dict)}
+    elif payload.kind == 'service_vendors':
+        known = {_import_norm(item.get('name')) for item in _read(_service_vendor_path(request), []) if isinstance(item, dict)}
+    elif payload.kind == 'customers':
+        known = {_import_norm(item.get('company_name')) for item in request.app.state.crm_store.list_customers()}
+    elif payload.kind == 'contacts':
+        known = {_import_norm(item.get('name')) + ':' + _import_norm(item.get('company_name')) for item in request.app.state.crm_store.list_contacts()}
+    else:
+        known = {_import_norm(item.get('address')) for item in request.app.state.address_store._load_items()}
+
     results, new_records = [], []
     for i, row in enumerate(payload.rows, 2):
         if payload.kind == 'vendors':
             name = _import_value(row, 'Vendor', 'Vendor Name', 'Company Name', 'Display Name', 'Name', 'Full Name')
             key = _import_norm(name)
-            candidate = {'name':name, 'contact':_import_value(row,'Contact','Contact Name','Primary Contact'),
-                'email':_import_value(row,'Email','Email Address','E-mail'),
-                'phone':_import_value(row,'Phone','Main Phone','Phone Number'),
-                'address':_import_value(row,'Address','Billing Address','Street','Street Address'),
-                'payment_terms':_import_value(row,'Terms','Payment Terms'),
-                'notes':'Imported from reviewed CSV'}
+            candidate = {'name': name, 'contact': _import_value(row, 'Contact', 'Contact Name', 'Primary Contact'),
+                'email': _import_value(row, 'Email', 'Email Address', 'E-mail'),
+                'phone': _import_value(row, 'Phone', 'Main Phone', 'Phone Number'),
+                'address': _import_value(row, 'Address', 'Billing Address', 'Street', 'Street Address'),
+                'payment_terms': _import_value(row, 'Terms', 'Payment Terms'),
+                'notes': 'Imported from reviewed file'}
             display = name
-        else:
-            sku = _import_value(row,'SKU','Item','Item Name','Product/Service','Product Service','Part Number','Name')
+        elif payload.kind == 'parts':
+            sku = _import_value(row, 'SKU', 'Item', 'Item Name', 'Product/Service', 'Product Service', 'Part Number', 'Name')
             key = _import_norm(sku)
-            rawcost = _import_value(row,'Cost','Purchase Cost','Purchase Price','Supplier Rate')
-            # Treat ambiguous vendor price as purchase cost, never as customer price.
+            rawcost = _import_value(row, 'Cost', 'Purchase Cost', 'Purchase Price', 'Supplier Rate')
             cost = ''
             if rawcost:
                 try:
-                    cost = float(rawcost.replace('$','').replace(',',''))
-                    if not (0 <= cost <= 100000000): raise ValueError()
+                    cost = float(rawcost.replace('$', '').replace(',', ''))
+                    if not 0 <= cost <= 100000000: raise ValueError()
                 except ValueError:
-                    results.append({'row':i,'sku':sku,'status':'invalid','reason':'Invalid purchase cost'});continue
-            candidate={'part_number':sku,'manufacturer':_import_value(row,'Manufacturer','Brand'),
-                'description':_import_value(row,'Description','Sales Description','Purchase Description'),
-                'supplier':_import_value(row,'Preferred Vendor','Vendor','Supplier'),
-                'supplier_rate':cost,'price':'','image_url':'','product_url':''}
-            display=sku
+                    results.append({'row': i, 'sku': sku, 'status': 'invalid', 'reason': 'Invalid purchase cost'}); continue
+            candidate = {'part_number': sku, 'manufacturer': _import_value(row, 'Manufacturer', 'Brand'),
+                'description': _import_value(row, 'Description', 'Sales Description', 'Purchase Description'),
+                'supplier': _import_value(row, 'Preferred Vendor', 'Vendor', 'Supplier'),
+                'supplier_rate': cost, 'price': '', 'image_url': '', 'product_url': ''}
+            display = sku
+        elif payload.kind == 'customers':
+            name = _import_value(row, 'Company Name', 'Customer', 'Customer Name', 'Name', 'Display Name')
+            key = _import_norm(name); display = name
+            candidate = {'company_name': name, 'address': _import_value(row, 'Address', 'Billing Address', 'Street'),
+                'city': _import_value(row, 'City'), 'state': _import_value(row, 'State'),
+                'zip_code': _import_value(row, 'ZIP', 'Zip Code', 'Postal Code'),
+                'phone_number': _import_value(row, 'Phone', 'Phone Number'),
+                'email': _import_value(row, 'Email'), 'invoice_email': _import_value(row, 'Invoice Email', 'Billing Email'),
+                'notes': 'Imported from reviewed file'}
+        elif payload.kind == 'contacts':
+            name = _import_value(row, 'Name', 'Contact', 'Contact Name', 'Full Name')
+            company = _import_value(row, 'Company Name', 'Customer', 'Customer Name', 'Company')
+            key = _import_norm(name) + ':' + _import_norm(company) if name else ''
+            display = name + (' · ' + company if company else '')
+            candidate = {'name': name, 'company_name': company,
+                'phone_number': _import_value(row, 'Phone', 'Phone Number'),
+                'cell_phone': _import_value(row, 'Cell', 'Cell Phone', 'Mobile'),
+                'email': _import_value(row, 'Email'), 'title': _import_value(row, 'Title'),
+                'notes': 'Imported from reviewed file'}
+        elif payload.kind == 'addresses':
+            address = _import_value(row, 'Address', 'Street', 'Street Address', 'Service Address')
+            city = _import_value(row, 'City'); state = _import_value(row, 'State')
+            zip_code = _import_value(row, 'ZIP', 'Zip Code', 'Postal Code')
+            full = ', '.join(x for x in (address, city, state, zip_code) if x)
+            key = _import_norm(full); display = full
+            company = _import_value(row, 'Company Name', 'Customer', 'Customer Name')
+            candidate = {'address': full, 'customer': company, 'company_name': company,
+                'label': _import_value(row, 'Label', 'Location'), 'notes': 'Imported from reviewed file'}
+        else:  # service vendors
+            name = _import_value(row, 'Name', 'Vendor', 'Vendor Name', 'Company Name')
+            key = _import_norm(name); display = name
+            candidate = {'name': name, 'vendor_type': _import_value(row, 'Vendor Type', 'Type'),
+                'trade': _import_value(row, 'Trade', 'Service'),
+                'contact': _import_value(row, 'Contact'), 'phone': _import_value(row, 'Phone'),
+                'email': _import_value(row, 'Email'), 'address': _import_value(row, 'Address'),
+                'service_area': _import_value(row, 'Service Area'),
+                'license_number': _import_value(row, 'License Number'),
+                'insurance_expiration': _import_value(row, 'Insurance Expiration'),
+                'payment_terms': _import_value(row, 'Terms', 'Payment Terms'),
+                'notes': 'Imported from reviewed file'}
         if not key:
-            status='invalid';reason='Missing name or SKU'
+            status = 'invalid'; reason = 'Missing required name, address or SKU'
         elif key in known:
-            status='duplicate';reason='Already saved or repeated in this CSV'
+            status = 'duplicate'; reason = 'Already saved or repeated in this file'
         else:
-            status='new';reason='';known.add(key);new_records.append(candidate)
-        results.append({'row':i, ('name' if payload.kind=='vendors' else 'sku'):display,
-                        'status':status,'reason':reason})
+            status = 'new'; reason = ''; known.add(key); new_records.append(candidate)
+        results.append({'row': i, ('sku' if payload.kind == 'parts' else 'name'): display,
+                        'status': status, 'reason': reason})
     return results, new_records
 
 
@@ -626,6 +760,8 @@ async def preview_import_file(request: Request, file: UploadFile = File(...)):
             'columns':list(rows[0]) if rows else [],'sample':rows[:30],
             'rows':rows if ext in ('.csv','.xlsx') else [],'text_preview':extracted,
             'can_import_supplier_parts':ext in ('.csv','.xlsx'),
+            'can_import_records':ext in ('.csv','.xlsx'),
+            'importable_kinds':['vendors','parts','customers','contacts','addresses','service_vendors'],
             'note':'Preview only. No records changed. PDFs, documents, and images require manual structured review.'}
 
 @router.post('/import/preview')
@@ -649,22 +785,49 @@ def commit_import(payload: ImportBatch, request: Request):
             raise HTTPException(422, 'Invalid records found. Correct CSV and preview again')
         now=datetime.now(timezone.utc).isoformat()
         if payload.kind == 'vendors':
-            path=_supplier_path(request)
-            existing=_read(path, [])
-            records=[{'id':uuid.uuid4().hex,'created_at':now,'updated_at':now,**_supplier_clean(row)}
-                     for row in to_create]
-            if records:_write(path,existing+records)
-        else:
+            path = _supplier_path(request)
+            existing = _read(path, [])
+            records = [{'id': uuid.uuid4().hex, 'created_at': now, 'updated_at': now, **_supplier_clean(row)}
+                       for row in to_create]
+            if records: _write(path, existing + records)
+        elif payload.kind == 'parts':
             from app.routers.data import _parts_path
-            path=_parts_path(request)
-            obj=_read(path, {'items': []})
-            existing=obj.get('items',[]) if isinstance(obj,dict) else []
-            records=[{'id':uuid.uuid4().hex,**row} for row in to_create]
+            path = _parts_path(request)
+            obj = _read(path, {'items': []})
+            existing = obj.get('items', []) if isinstance(obj, dict) else []
+            records = [{'id': uuid.uuid4().hex, **row} for row in to_create]
             if records:
-                # Keep the complete existing catalog and its metadata.
-                data=dict(obj) if isinstance(obj,dict) else {}
-                data['items']=existing+records
-                _write(path,data)
+                data = dict(obj) if isinstance(obj, dict) else {}
+                data['items'] = existing + records
+                _write(path, data)
+        elif payload.kind == 'service_vendors':
+            path = _service_vendor_path(request)
+            existing = _read(path, [])
+            records = [{'id': uuid.uuid4().hex, 'active': True, 'created_at': now, 'updated_at': now,
+                        **_service_vendor_clean(row)} for row in to_create]
+            if records: _write(path, existing + records)
+        elif payload.kind in ('customers', 'contacts'):
+            store = request.app.state.crm_store
+            path = store.customers_path if payload.kind == 'customers' else store.contacts_path
+            existing = store._load_items(path)
+            records = [{'id': uuid.uuid4().hex, **row} for row in to_create]
+            # Preserve existing customer IDs; link contacts only on exact saved company names.
+            if payload.kind == 'contacts':
+                customers = { _import_norm(c.get('company_name')): str(c.get('id') or '')
+                              for c in store._load_items(store.customers_path) }
+                for record in records:
+                    record['customer_id'] = customers.get(_import_norm(record.get('company_name')), '')
+            if records: store._save_items(path, existing + records)
+        else:  # addresses
+            store = request.app.state.address_store
+            existing = store._load_items()
+            customers = { _import_norm(c.get('company_name')): str(c.get('id') or '')
+                          for c in request.app.state.crm_store.list_customers() }
+            records = [{'id': uuid.uuid4().hex, 'source': 'saved', 'readonly': False,
+                        'created_at': now, 'updated_at': now, **row,
+                        'customer_id': customers.get(_import_norm(row.get('company_name')), '')}
+                       for row in to_create]
+            if records: store._save_items(existing + records)
         return {'created':len(records), 'skipped':sum(x['status']=='duplicate' for x in preview),
                 'kind':payload.kind,'no_existing_records_changed':True}
 

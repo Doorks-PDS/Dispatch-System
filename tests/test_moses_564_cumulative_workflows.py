@@ -10,11 +10,14 @@ def _app():
     return APP.read_text(encoding='utf-8')
 
 
-def test_no_duplicate_alternate_menu_and_job_buttons_are_direct():
+def test_original_alternate_menu_reuses_five_document_uploads():
     text = _app()
-    assert "attachExisting.textContent='Attach Existing'" in text
-    assert "alternateUpload.textContent='Alternate'" not in text
-    assert "[['Receipt','Receipt'],['Packing Slip','Packing Slip']]" in text
+    assert "alternateUpload.textContent='Alternate'" in text
+    assert "['Estimate','estimate']" in text
+    assert "['Invoice','invoice']" in text
+    assert "['Purchase Order','purchase_order']" in text
+    assert "['Receipt','Receipt']" in text
+    assert "['Packing Slip','Packing Slip']" in text
 
 
 def test_new_part_action_shared_between_ticket_and_moses():
@@ -31,7 +34,7 @@ def test_po_editor_prefills_once_and_matches_verified_job_and_supplier_cost():
     assert "part.supplier_cost??part.supplier_rate??part.supplier_price" in text
     assert "Choose a unique saved PDS job number" in text
     assert "data.work_order=data.work_order_number" in text
-    assert "apiUpdateJob(job.id,{po_number:saved.po_number})" in text
+    assert "data.job_id=data.work_order_number?form.dataset.linkedJobId||'':''" in text
 
 
 def test_receipt_ai_remains_active_and_authorization_is_prominent():

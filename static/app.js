@@ -5726,6 +5726,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
       const items = documentsOK ? (results[0].value || []) : [];
       const jobNumber = String(job.job_number || '').trim().toLowerCase();
       const pos = purchaseOrdersOK && jobsPO ? (results[1].value.items || []).filter(po =>
+        (String(po.job_id||'') && String(po.job_id)===String(job.id||'')) ||
         String(po.work_order || po.work_order_number || '').trim().toLowerCase() === jobNumber
       ) : [];
       wrap.replaceChildren(title);
@@ -5749,7 +5750,13 @@ function renderAttachmentSection(titleText, items, options = {}) {
         name.className = "jobrow-name";
         name.textContent = `${doc.type === "invoice" ? "Invoice" : "Estimate"} ${doc.number || ""}`.trim();
         top.appendChild(name);
-        if (doc.type) top.appendChild(statusPill(doc.type === "invoice" ? "Done" : "Quote Sent"));
+        if (doc.type) {
+          const marker=document.createElement('span');marker.className='badge';marker.textContent='Saved PDF';
+          top.append(marker);
+          fetchJSON('/moses-pds-email/'+encodeURIComponent(doc.type)+'/'+encodeURIComponent(doc.number)+'/history')
+            .then(data=>{if((data.items||[]).some(x=>x.state==='sent'))marker.textContent='Email Sent';})
+            .catch(()=>{});
+        }
         const sub = document.createElement("div");
         sub.className = "jobrow-addr";
         sub.textContent = [doc.customer || "", formatStamp(doc.created_at || "")].filter(Boolean).join(" - ");
@@ -5764,6 +5771,10 @@ function renderAttachmentSection(titleText, items, options = {}) {
         openLink.textContent = "Open PDF";
         styleActionButton(openLink, "blue", true);
         actions.appendChild(openLink);
+        const editSaved=document.createElement('button');editSaved.type='button';
+        editSaved.className='btn';editSaved.textContent='View/Edit';
+        editSaved.onclick=()=>openEstimateInvoiceDrawer({...job,__docEdit:doc},doc.type||'estimate',null,{skipHelper:true});
+        actions.appendChild(editSaved);
         const emailBtn = document.createElement("button");
         emailBtn.type = "button";
         emailBtn.textContent = "Email";
@@ -5776,7 +5787,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
             po_number: doc.po_number || (job && job.po_number) || "",
             invoice_number: doc.type === "invoice" ? (doc.number || doc.invoice_number || "") : (doc.invoice_number || ""),
             estimate_number: doc.type === "estimate" ? (doc.number || doc.estimate_number || "") : (doc.estimate_number || ""),
-          }, doc.type || "invoice");
+          }, doc.type || "invoice", {job});
         });
         actions.appendChild(emailBtn);
         row.appendChild(top);
@@ -6193,6 +6204,23 @@ function renderAttachmentSection(titleText, items, options = {}) {
     form.elements.po_number.value=String(job.po_number||job.po_no||'');
     if(type==='Packing Slip'){form.elements.amount.value='0';form.querySelector('[data-job-receipt-amount]').hidden=true;}
     const cancel=form.querySelector('[data-cancel]');cancel.onclick=()=>overlay.remove();
+    form.elements.file.addEventListener('change',async()=>{
+      const file=form.elements.file.files?.[0];if(!file)return;
+      const status=form.querySelector('[data-status]');status.textContent='Reading image with Moses…';
+      try{
+        const fd=new FormData();fd.append('file',file);
+        const response=await fetch('/receipts/extract',{method:'POST',body:fd,credentials:'same-origin'});
+        const data=await response.json().catch(()=>({}));
+        if(!response.ok)throw Error(data.detail||'AI receipt reading unavailable');
+        if(form.elements.file.files?.[0]!==file)return;
+        const found=data.fields||{};
+        for(const key of ['vendor','receipt_number','amount']){
+          if(found[key]&&!String(form.elements[key]?.value||'').trim())form.elements[key].value=String(found[key]);
+        }
+        if(found.date&&form.elements.date.value===today.toISOString().slice(0,10))form.elements.date.value=found.date;
+        status.textContent=Object.keys(found).length?'AI suggestions loaded. Check the original before saving.':(data.message||'No fields extracted. Enter them manually.');
+      }catch(error){status.textContent='AI reader unavailable: '+(error.message||error)+'. Enter details manually.';}
+    });
     form.onsubmit=async event=>{
       event.preventDefault();const save=form.querySelector('button[type="submit"]'),status=form.querySelector('[data-status]');
       save.disabled=true;status.textContent='Saving original document…';
@@ -6542,21 +6570,39 @@ function renderAttachmentSection(titleText, items, options = {}) {
       };
       secondaryActions.appendChild(poButton);
       }
-      // One entry for external numbered documents; native Estimate/Invoice/PO
-      // builders and receipt/packing slip attachments already have direct buttons.
-      const attachExisting=document.createElement('button');attachExisting.type='button';
-      styleActionButton(attachExisting,'blue',true);attachExisting.textContent='Attach Existing';
-      attachExisting.title='Attach a previously issued estimate, invoice or PO using its original number';
-      attachExisting.onclick=()=>{
-        window.__pdsJobAlternateUpload={job_number:String(job.job_number||''),customer:String(job.customer||'')};
-        renderDocumentVault('pds','',()=>renderAllJobsView(),'business');
+      // Restore the original Alternate entry. Reuse the existing five document
+      // upload paths and their AI readers; do not create more ticket buttons.
+      const alternateUpload=document.createElement('button');alternateUpload.type='button';
+      styleActionButton(alternateUpload,'blue',true);alternateUpload.textContent='Alternate';
+      alternateUpload.title='Attach an existing estimate, invoice, purchase order, receipt, or packing slip';
+      alternateUpload.onclick=()=>{
+        const shade=document.createElement('div');shade.className='overlay pds-alternate-overlay';shade.style.zIndex='14500';
+        const dialog=document.createElement('section');dialog.className='card';
+        dialog.style.cssText='background:white;max-width:470px;width:calc(100vw - 32px);margin:auto;padding:20px;border-radius:16px;display:grid;gap:12px';
+        dialog.setAttribute('role','dialog');dialog.setAttribute('aria-modal','true');
+        const head=document.createElement('div');head.style.cssText='display:flex;align-items:center;justify-content:space-between;gap:12px';
+        const title=document.createElement('h3');title.textContent='Alternate Document Upload';title.style.margin='0';
+        const close=document.createElement('button');close.className='btn';close.textContent='Close ×';close.onclick=()=>shade.remove();
+        head.append(title,close);dialog.append(head);
+        const hint=document.createElement('p');hint.className='hint';hint.textContent='Upload a document already received or issued. Review AI suggestions before saving.';dialog.append(hint);
+        const choices=document.createElement('div');choices.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px';
+        for(const [name,type] of [['Estimate','estimate'],['Invoice','invoice'],['Purchase Order','purchase_order'],['Receipt','Receipt'],['Packing Slip','Packing Slip']]){
+          const choice=document.createElement('button');choice.type='button';choice.className='btn';choice.textContent=name;
+          choice.onclick=()=>{
+            shade.remove();
+            if(type==='Receipt'||type==='Packing Slip'){
+              openJobReceiptUpload(job,type,container,ctx);return;
+            }
+            // Existing document vault uses its own PDF/image AI extraction.
+            window.__pdsJobAlternateUpload={document_type:type,job_number:String(job.job_number||''),customer:String(job.customer||'')};
+            renderDocumentVault('pds',type,()=>renderAllJobsView(),'business');
+          };
+          choices.append(choice);
+        }
+        dialog.append(choices);shade.append(dialog);document.body.append(shade);
+        shade.addEventListener('dblclick',event=>{if(event.target===shade)shade.remove()});
       };
-      secondaryActions.append(attachExisting);
-      for(const [label,type] of [['Receipt','Receipt'],['Packing Slip','Packing Slip']]){
-        const button=document.createElement('button');button.type='button';styleActionButton(button,'blue',true);
-        button.textContent=label;button.onclick=()=>openJobReceiptUpload(job,type,container,ctx);
-        secondaryActions.append(button);
-      }
+      secondaryActions.appendChild(alternateUpload);
     }
 
     if (["Quote", "Complete/Quote"].includes(String(job.status || ""))) {
@@ -10532,8 +10578,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         let badge=navAccounting.querySelector('[data-pds-receipt-pending]');
         const pendingCount=items.filter(r=>r.document_type==='Receipt' && r.authorization_status!=='Authorized').length;
         if(!badge){badge=document.createElement('span');badge.dataset.pdsReceiptPending='1';
-          badge.style.cssText='margin-left:auto;background:#f59e0b;color:#fff;border-radius:99px;padding:2px 7px;font-size:11px;font-weight:800';navAccounting.append(badge);}
-        badge.textContent=pendingCount?'🔔 '+pendingCount:'';badge.hidden=!pendingCount;
+          badge.className='badge';navAccounting.append(badge);}
+        badge.textContent=pendingCount?String(pendingCount):'';badge.hidden=!pendingCount;
       }
       const pdsStatements=(statementResponse.items||[]).filter(row=>row&&!row.deleted_at);
 
@@ -13697,6 +13743,10 @@ function renderEmployeesView() {
       row("CC", preview.cc);
       row("Subject", preview.subject);
       row("Attached PDF", preview.filename);
+      if(preview.send_enabled===false){
+        status.textContent='Saved document verified, but PDS estimate/invoice emailing is disabled in Render. Contact the office administrator.';
+        await showHistory();return;
+      }
       status.textContent = "Recipient and saved PDF verified. Sending requires your approval. To change the recipient, update the saved job contact first.";
       send.disabled = false;
       await showHistory();
@@ -13735,10 +13785,26 @@ function renderEmployeesView() {
         } finally { close.disabled = false; await showHistory(); }
       };
     } catch (error) {
+      const mismatch=String(error.message||error).includes('Linked job number mismatch');
       status.textContent = "Cannot send this document: " + String(error.message || error) +
-        (String(error.message||error).includes('Linked job number mismatch')
-          ? '. Open View/Edit for this saved document, correct the Job # to match its linked PDS ticket, save a new PDF, then retry.'
+        (mismatch ? '. The linked estimate/invoice PDF must be corrected and saved first.'
           : '. Verify the saved job contact, PDF linkage, and Resend enablement.');
+      if(mismatch){
+        const edit=document.createElement('button');edit.type='button';edit.className='btn';
+        edit.textContent='View/Edit Linked Document';
+        edit.onclick=async()=>{
+          try{
+            const ownerId=String(options.job?.id||doc.job_id||'');
+            if(!ownerId)throw Error('Open the saved document from its Job ticket to verify its link');
+            const verified=await apiGetJob(ownerId);
+            if(String(doc.job_id||'')!==String(verified.id||''))throw Error('Document is not linked to this job. Office review required.');
+            if(String(doc.customer||'').trim().toLowerCase()!==String(verified.customer||'').trim().toLowerCase())
+              throw Error('Document customer does not match this job');
+            overlay.remove();openEstimateInvoiceDrawer({...verified,__docEdit:doc},kind,null,{skipHelper:true});
+          }catch(e){status.textContent='Link repair unavailable: '+(e.message||e);}
+        };
+        actions.prepend(edit);
+      }
     }
   }
 
@@ -15359,8 +15425,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     if(platform==='doorks'||platform==='sdc'||platform==='pds'){const editor=container.querySelector('#upoEditor');editor.style.cssText='position:fixed;right:0;top:0;bottom:0;width:min(740px,100vw);max-width:100vw;overflow-y:auto;z-index:10002;box-shadow:-15px 0 55px #0004;background:white;border-radius:16px 0 0 16px;padding:24px';editor.setAttribute('role','dialog');editor.setAttribute('aria-label','Purchase order editor');}
     const q=id=>container.querySelector('#'+id),money=n=>'$'+Number(n||0).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
     const esc=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-    const fields=[['vendor','Supplier'],['vendor_address','Supplier Address'],['ship_to','Ship To Address'],['customer','Customer / Project'],['work_order_number','Job Number'],['sro_number','SRO #'],['salesperson','Salesperson'],['date','PO Date'],['expected_date','Needed By'],['status','Status'],['payment_status','Payment Status'],['notes','Notes']];
-    const mainKeys=new Set(['vendor','vendor_address','ship_to','customer','work_order_number','date','expected_date']);
+    const fields=[['vendor','Supplier'],['vendor_address','Supplier Address'],['ship_to','Ship To Address'],['customer','Customer / Project'],['work_order_number','Job Number'],['sro_number','SRO #'],['salesperson','Salesperson'],['date','PO Date'],['expected_date','Needed By'],['status','Order Status'],['tracking_number','Tracking Number'],['arrival_date','Expected Arrival'],['payment_status','Payment Status'],['notes','Notes']];
+    const mainKeys=new Set(['vendor','vendor_address','ship_to','customer','work_order_number','date','expected_date','status','tracking_number','arrival_date']);
     const advanced=document.createElement('details');advanced.style.cssText='margin-top:14px;border:1px solid #d9dee7;border-radius:12px;padding:12px';
     advanced.innerHTML='<summary style="cursor:pointer;font-weight:700">Additional Details — SRO, salesperson, status, payment & notes</summary>';
     const advancedGrid=document.createElement('div');advancedGrid.style.cssText='display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:12px';advanced.append(advancedGrid);
@@ -15370,8 +15436,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     grid.after(advanced);
     for(const [key,title] of fields){const label=document.createElement('label');label.style.cssText='display:grid;gap:5px;font-size:13px;font-weight:700';label.textContent=title;
       const input=['notes','vendor_address','ship_to'].includes(key)?document.createElement('textarea'):document.createElement(key==='status'?'select':'input');
-      input.name=key;input.className='input';if(key==='date'||key==='expected_date')input.type='date';if(input.tagName==='TEXTAREA')input.rows=2;
-      if(key==='status')for(const status of ['Draft','Submitted','Partially Received','Received','Billed','Paid','Cancelled']){const option=document.createElement('option');option.value=status;option.textContent=status;input.append(option);}
+      input.name=key;input.className='input';if(key==='date'||key==='expected_date'||key==='arrival_date')input.type='date';if(input.tagName==='TEXTAREA')input.rows=2;
+      if(key==='status')for(const status of (isPds?['Draft','Ordered','Shipped','En Route','Delivered','Received','Cancelled']:['Draft','Submitted','Partially Received','Received','Billed','Paid','Cancelled'])){const option=document.createElement('option');option.value=status;option.textContent=status;input.append(option);}
       if(['vendor_address','ship_to','notes'].includes(key))label.style.gridColumn='1 / -1';
       label.append(input);(mainKeys.has(key)?grid:advancedGrid).append(label);
     }
@@ -15447,7 +15513,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         }
       }catch(error){console.warn('PDS job search unavailable',error);}
       const matchJob=()=>linkedJobs.find(j=>String(j.job_number||'').trim().toLowerCase()===jobInput.value.trim().toLowerCase());
-      jobInput.onchange=()=>{const found=matchJob();if(found){form.elements.customer.value=found.customer||'';customerSearch.value=found.customer||'';}};
+      jobInput.onchange=()=>{const found=matchJob();form.dataset.linkedJobId=String(found?.id||'');if(found){form.elements.customer.value=found.customer||'';customerSearch.value=found.customer||'';}};
     }
     let customers=[];
     customerSearch.oninput=()=>{const name=customerSearch.value.trim().toLowerCase();const customer=customers.find(x=>String(x.name||x.customer||'').toLowerCase()===name);customerField.value=customer?.name||customer?.customer||customerSearch.value;if(customer)form.elements.ship_to.value=customer.ship_to||customer.shipping_address||customer.service_address||customer.address||form.elements.ship_to.value;};
@@ -15529,8 +15595,10 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
       if(!item&&platform==='doorks'&&window.__doorksJobDraft){const job=window.__doorksJobDraft;form.elements.customer.value=job.customer;form.elements.work_order_number.value=job.job_number;form.elements.notes.value=job.description;customerSearch.value=job.customer;window.__doorksJobDraft=null;}
       if(!item){form.elements.ship_to.value=platform==='doorks'?(poDefaults.default_ship_to||poDefaults.business_address||company+'\n'+address):company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');if(window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type==='purchase_order'){form.elements.notes.value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}}
+      form.dataset.linkedJobId=String(item?.job_id||'');
       if(!item&&platform==='pds'&&window.__pdsJobPODraft){
         const ref=window.__pdsJobPODraft;window.__pdsJobPODraft=null;
+        form.dataset.linkedJobId=String(ref.job_id||'');
         form.elements.customer.value=ref.customer||'';
         customerSearch.value=ref.customer||'';
         form.elements.work_order_number.value=ref.job_number||'';
@@ -15546,7 +15614,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const refs=`<div style="display:flex;justify-content:flex-end;margin:10px 0 18px"><table style="border-collapse:collapse"><tr>${['Salesperson','Job Number','SRO #'].map(x=>'<th style="border:1px solid #9ca3af;padding:7px">'+x+'</th>').join('')}</tr><tr>${[item.salesperson,item.work_order_number||item.work_order,item.sro_number].map(x=>'<td style="border:1px solid #9ca3af;padding:7px">'+esc(x)+'</td>').join('')}</tr></table></div>`;
       const rows=lines.map((x,i)=>`<tr style="background:${i%2?'#f2f2f2':'white'}"><td>${esc(x.item)}</td><td>${esc(x.description)}</td><td style="text-align:right">${esc(x.quantity)}</td><td>${esc(x.unit)}</td><td style="text-align:right">${money(x.rate)}</td><td style="text-align:right">${money(Number(x.quantity)*Number(x.rate))}</td></tr>`).join('');
       const table=`<table style="border-collapse:collapse;width:100%"><thead><tr style="background:#e5e7eb">${['Item','Description','Qty','U/M','Rate','Amount'].map(x=>'<th style="border:1px solid #aaa;padding:7px;text-align:left">'+x+'</th>').join('')}</tr></thead><tbody>${rows}</tbody></table><div style="margin:14px 0 0 auto;max-width:310px"><div style="display:flex;justify-content:space-between"><span>Subtotal</span><b>${money(sub)}</b></div><div style="display:flex;justify-content:space-between"><span>Tax</span><b>${money(tax)}</b></div><div style="display:flex;justify-content:space-between"><span>Shipping</span><b>${money(shipping)}</b></div><hr><div style="display:flex;justify-content:space-between;font-size:20px"><b>Total</b><b>${money(sum)}</b></div></div>`;
-      return `<article style="background:white;color:#111;font:13px Arial,sans-serif;padding:24px;line-height:1.5">${header}${blocks}${refs}${table}${item.notes?'<p><b>Notes:</b> '+esc(item.notes)+'</p>':''}</article>`;};
+      const tracking=isPds?`<div style="display:flex;gap:18px;flex-wrap:wrap;margin:10px 0"><b>Status:</b> ${esc(item.status||'Draft')}<b>Tracking:</b> ${esc(item.tracking_number||'—')}<b>Expected arrival:</b> ${esc(item.arrival_date||item.expected_arrival_date||'—')}</div>`:'';
+      return `<article style="background:white;color:#111;font:13px Arial,sans-serif;padding:24px;line-height:1.5">${header}${tracking}${blocks}${refs}${table}${item.notes?'<p><b>Notes:</b> '+esc(item.notes)+'</p>':''}</article>`;};
     const show=item=>{viewing=item;q('upoEditor').hidden=true;q('upoDetails').hidden=false;q('upoDetailsTitle').textContent=item.po_number||'Purchase Order';q('upoPreview').innerHTML=docHtml(item);q('upoDetails').scrollIntoView({behavior:'smooth',block:'start'});};
     const deletePO=async item=>{
       if(!item?.id)return;
@@ -15573,8 +15642,8 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         const approved=confirm(message);
         const result=await fetchJSON(base+'/email-proposal/'+encodeURIComponent(proposal.id)+'/decision',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:approved})});
         if(!approved)alert('PO email proposal rejected; no email sent.');
-        else if(result.sent)alert('SMTP accepted the purchase order email for '+result.recipient+'. The delivery attempt is recorded.');
-        else alert('Email status: '+result.state+'. Check the SMTP provider and delivery history before retrying.');
+        else if(result.sent)alert('Email provider accepted the purchase order for '+result.recipient+'. Check delivery history for final delivery.');
+        else alert('Email status: '+result.state+'. Check delivery history before retrying.');
       }catch(err){alert('PO email not confirmed: '+(err.message||err)+'. Check delivery history before retrying.');}
       finally{poEmailButton.disabled=false;}
     };
@@ -15583,7 +15652,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const draw=()=>{const qtext=q('upoSearch').value.trim().toLowerCase(),list=q('upoList');list.replaceChildren();const shown=orders.filter(x=>!qtext||[x.po_number,x.vendor,x.customer,x.work_order_number,x.work_order,x.description,x.line_items,x.status].some(v=>String(v||'').toLowerCase().includes(qtext)));
       const outside=externalPOs.filter(ref=>[ref.document_number,ref.po_number,ref.vendor,ref.job_number,ref.created_by].some(x=>String(x||'').toLowerCase().includes(qtext)));
       const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${shown.length} PDS orders and ${outside.length} external references`;list.append(count);
-      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status,item.customer,item.work_order_number||item.work_order,item.created_by?'Created by '+item.created_by:'Creator not recorded (legacy PO)'].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],['Edit',()=>edit(item)],...(['office_admin','admin'].includes(String(currentUser?.role||''))?[['Delete',()=>deletePO(item)]]:[])]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
+      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status||'Draft',item.tracking_number?'Tracking '+item.tracking_number:'',item.arrival_date?'ETA '+item.arrival_date:'',item.customer,item.work_order_number||item.work_order,item.created_by?'Created by '+item.created_by:'Creator not recorded (legacy PO)'].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],['Edit',()=>edit(item)],...(['office_admin','admin'].includes(String(currentUser?.role||''))?[['Delete',()=>deletePO(item)]]:[])]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
       if(isPds)outside.forEach(ref=>list.append(pdsExternalReferenceRow(ref)));
       if(!shown.length && !outside.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching purchase orders.';list.append(empty);}};
     const reload=async()=>{try{const [response,references]=await Promise.all([
@@ -15604,6 +15673,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         }
         if(matches.length!==1)throw Error('Choose a unique saved PDS job number or leave Job Number blank for a stock order');
         const actual=matches[0];
+        form.dataset.linkedJobId=String(actual.id||'');
         if(customerField.value.trim()&&customerField.value.trim().toLowerCase()!==String(actual.customer||'').trim().toLowerCase())
           throw Error('This job number belongs to '+String(actual.customer||'another customer')+'. Select the correct job.');
         customerField.value=actual.customer||'';customerSearch.value=customerField.value;
@@ -15612,26 +15682,19 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       const data=Object.fromEntries(fields.map(([key])=>[key,String(form.elements[key].value||'').trim()]));
       data.line_items=raw;data.tax=String(q('upoTax').value||0);data.shipping=String(q('upoShipping').value||0);data.quantity=String(lines.reduce((n,x)=>n+x.quantity,0));data.unit_cost=String(lines.length===1?lines[0].rate:0);data.description=lines.map(x=>[x.item,x.description].filter(Boolean).join(' — ')).join('; ').slice(0,3900);
       data.supplier_id=supplierSelect.value;data.vendor_id=supplierSelect.value;data.total=String(total());data.amount=data.total;
-      if(isPds){data.work_order=data.work_order_number;data.needed_by=data.expected_date;data.item_type=lines[0].item;delete data.vendor_id;delete data.work_order_number;delete data.expected_date;delete data.amount;}
+      if(isPds){
+        data.work_order=data.work_order_number;
+        data.job_id=data.work_order_number?form.dataset.linkedJobId||'':'';
+        data.needed_by=data.expected_date;data.expected_arrival_date=data.arrival_date;
+        data.item_type=lines[0].item;delete data.vendor_id;delete data.amount;
+      }
       else{delete data.supplier_id;delete data.sro_number;/* sro_number is retained as generic metadata below */data.sro_number=String(form.elements.sro_number.value||'');}
       const result=await fetchJSON(endpoint+(editing?'/'+encodeURIComponent(editing.id):''),{method:editing?'PATCH':'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({data})});
       const saved=result.item||result;msg.textContent='Purchase order saved.';
-      // PDS links PO to existing job only after record creation and customer match.
-      // If the job already has a different PO #, retain it; the PO's work_order still links the new PO.
-      if(isPds&&data.work_order){
-        try{
-          const related=(await apiListJobs({q:data.work_order,limit:100})).filter(j=>String(j.job_number||'').trim().toLowerCase()===data.work_order.trim().toLowerCase());
-          if(related.length!==1||String(related[0].customer||'').trim().toLowerCase()!==String(data.customer||'').trim().toLowerCase())
-            throw Error('linked job requires review');
-          const job=related[0];
-          if(!String(job.po_number||'').trim()){
-            const updated=await apiUpdateJob(job.id,{po_number:saved.po_number});
-            if(String(updated.po_number||'')!==String(saved.po_number||''))throw Error('PO number was not confirmed on job');
-          }
-        }catch(linkError){
-          msg.textContent='PO '+String(saved.po_number||'')+' saved, but job link needs review: '+String(linkError.message||linkError)+'. Edit this PO; do not create a duplicate.';
-        }
-      }
+      // The PDS server validates and persists the job association before
+      // returning a successful PO; do not create a second browser-side link.
+      if(isPds&&data.work_order&&(!saved.job_id||String(saved.work_order||saved.work_order_number||'')!==String(data.work_order||'')))
+        throw Error('PO saved but verified ticket linkage is missing. Do not create a duplicate; review '+(saved.po_number||'the PO')+'.');
       await reload();const found=orders.find(x=>x.id===saved.id)||saved;show(found);
     }catch(e){msg.textContent='Could not save PO: '+(e.message||e);}finally{button.disabled=false;}};
     try{const result=await fetchJSON(supplierEndpoint);suppliers=(result.items||[]).filter(x=>platform!=='doorks'||!String(x.vendor_type||x.type||x.category||'').trim()||/supplier|distributor|material|manufacturer/i.test(String(x.vendor_type||x.type||x.category||'')));for(const supplier of suppliers){const option=document.createElement('option');option.value=supplier.id;option.textContent=supplier.name||'Unnamed';supplierSelect.append(option);const suggestion=document.createElement('option');suggestion.value=supplier.name||'';supplierOptions.append(suggestion);}}catch(e){console.warn('Supplier lookup unavailable',e);}

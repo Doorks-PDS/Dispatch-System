@@ -92,7 +92,7 @@ def test_import_preview_requires_admin_and_existing_data_unmodified(tmp_path):
 
 def test_ui_uses_masked_numeric_pin_and_reviewed_import_destinations():
     text=(ROOT/'static/app.js').read_text()
-    assert "attachExisting.textContent='Attach Existing'" in text
+    assert "alternateUpload.textContent='Alternate'" in text
     assert "input.type='password';input.inputMode='numeric'" in text
     assert "requestMaskedOfficePin(\"Accounting Hub\")" in text
     assert "ensurePdsOfficeReportPin(\"Roll Up Data\")" in text
