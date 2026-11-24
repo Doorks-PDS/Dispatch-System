@@ -132,7 +132,7 @@ def test_ticket_and_saved_lists_expose_external_originals_and_creator():
     assert "pdsExternalReferences({type:'purchase_order'})" in js
     assert "'Created by '+item.created_by" in js
     assert 'External ' in js and 'Open Original' in js
-    assert "alternateUpload.textContent='Alternate'" in js
+    assert "attachExisting.textContent='Attach Existing'" in js
     assert "const canCreatePO=['office','office_admin','admin','lead']" in js
 
 

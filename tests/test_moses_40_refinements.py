@@ -34,7 +34,7 @@ def test_draft_view_job_closes_overlay_and_review_is_reversible():
 
 def test_accounting_export_reuses_approved_period_rows():
     assert "const authorized=periodReceipts.filter(r=>r.authorization_status==='Authorized')" in APP
-    assert "Export expenditures CSV" in APP
+    assert "⬇ Export CSV" in APP
     assert "columns=['date','employee','vendor','category','amount','receipt_number','notes']" in APP
     assert "escapeCsv(row[k])" in APP
     assert "section === \"overview\"" in APP

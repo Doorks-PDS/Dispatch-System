@@ -22,13 +22,13 @@ def test_document_intake_requires_field_review_before_dispatch_save():
 def test_pds_po_create_and_import_are_distinct_actions():
     js=(ROOT/'static/app.js').read_text()
     assert "poButton.textContent='Purchase Order'" in js
-    assert "alternateUpload.textContent='Alternate'" in js
-    assert "renderDocumentVault('pds',type," in js
-    assert "form.elements.document_type.value='purchase_order'" in js
+    assert "attachExisting.textContent='Attach Existing'" in js
+    assert "renderDocumentVault('pds',''," in js
+    assert "[['Receipt','Receipt'],['Packing Slip','Packing Slip']]" in js
     assert "form.elements.job_number.value=ref.job_number||''" in js
     assert "form.elements.document_number.value=ref.po_number||''" in js
     assert "if(!item&&platform==='pds'&&window.__pdsJobPODraft)" in js
-    assert "if(isPds&&window.__pdsJobPODraft)edit(null)" in js
+    assert "if((isPds&&window.__pdsJobPODraft)||openNew)edit(null)" in js
 
 
 def test_identity_review_finds_similar_saved_company_without_auto_selection():

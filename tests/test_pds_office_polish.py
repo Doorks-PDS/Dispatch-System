@@ -29,7 +29,8 @@ def test_pds_ticket_quick_date_uses_existing_api_and_receipt_label():
     assert "label.textContent='Receipt Upload'" in source
     assert "label.textContent='Records Upload'" not in source
     assert "dateInput.setAttribute('aria-label', 'Edit PDS dispatch scheduled date')" in source
-    assert "['office', 'office_admin'].includes(String(currentUser?.role || ''))" in source
-    assert 'apiUpdateJob(job.id, { date: newDate })' in source
+    assert "['dispatch', 'sales_lead'].includes(String(job.kind" in source
+    assert 'apiUpdateJob(job.id, { date: newDate, scheduled_date: newDate })' in source
     assert 'String(updated.date) !== newDate' in source
+    assert 'String(updated.scheduled_date) !== newDate' in source
     assert "dateSave.textContent = 'Save date'" in source

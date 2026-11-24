@@ -91,6 +91,10 @@ class JobUpdate(BaseModel):
     kind: Optional[str] = None
     job_number: Optional[str] = None
     date: Optional[str] = None
+    # Keep planned date synchronized when quick-moving a job on the calendar.
+    # CalendarStore.update_job already supports these two persisted fields.
+    scheduled_date: Optional[str] = None
+    scheduled_time: Optional[str] = None
     status: Optional[str] = None
 
     customer: Optional[str] = None
