@@ -26,7 +26,7 @@ def eval_helper(start, end, body):
 
 def test_work_queue_routes_to_shared_helper_and_supplier_rfq_queue():
     queue=js_section('async function openPdsJobFlowWorkQueue()', 'function renderJobFlowView(')
-    assert "const kinds=[['quotes','Quotes'],['pricing','Supplier Pricing'],['invoices','Invoices']]" in queue
+    assert "const kinds=[['quotes','Quotes'],['invoices','Invoices'],['pricing','Supplier Pricing']]" in queue
     assert "Request Supplier Quote" in queue
     assert "await reloadQuotes()" in queue
     assert "openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice'" in queue
@@ -68,7 +68,7 @@ def test_linked_quote_cost_lines_copied_without_helper_duplicates():
     assert 'helperPrefill.tripQty=0;helperPrefill.fuelQty=0;helperPrefill.hours=0' in helper
     assert "helperPrefill.parts=[];helperPrefill.partsText='';helperPrefill.autoFill=false" in helper
     assert 'invoiceSourceEstimate:linkedEstimate||null' in helper
-    assert 'pdsQuickCatalogEditor()' in helper
+    assert "pdsQuickCatalogEditor('part',{jobNumber:job?.job_number||''})" in helper
 
 
 def test_recommendation_photos_use_saved_attachment_ids_and_fullsize_viewer():

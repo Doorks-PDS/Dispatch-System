@@ -9,7 +9,7 @@ def test_job_flow_button_opens_office_queue_not_failed_ai_chat():
     assert "batchBtn.onclick=()=>openPdsJobFlowWorkQueue()" in APP
     assert "async function openPdsJobFlowWorkQueue()" in APP
     assert "Review the PDS Job Flow. Identify unassigned Quote jobs" not in APP
-    assert "const kinds=[['quotes','Quotes'],['pricing','Supplier Pricing'],['invoices','Invoices']]" in APP
+    assert "const kinds=[['quotes','Quotes'],['invoices','Invoices'],['pricing','Supplier Pricing']]" in APP
     assert "const count={quotes:jobs.filter(" in APP
     assert "if(activePlatform!=='pds'||!['office_admin','office','lead'].includes(String(currentUser?.role||'')))return" in APP
 
