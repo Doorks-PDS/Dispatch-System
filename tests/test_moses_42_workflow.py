@@ -25,7 +25,7 @@ def test_schedule_uses_five_compact_weekday_columns_and_view_job_drawer():
 def test_job_flow_unified_moses_prompt_and_approved_status_rules():
     assert "Moses — Job Flow assistant" in APP
     assert "batchBtn.onclick=()=>openPdsJobFlowWorkQueue()" in APP
-    assert "current not in {'Quote', 'Complete/Quote'}" in EMAIL
+    assert "current not in {'Quote', 'Complete/Quote', 'To Be Quoted'}" in EMAIL
     assert "row.update(state='sent'" in EMAIL
     assert "_sync_sent_document_status(request, snap)" in EMAIL
     assert "target = 'Quote Sent'" in EMAIL

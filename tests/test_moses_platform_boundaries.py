@@ -59,7 +59,7 @@ def test_pds_agent_has_search_and_proposal_only(monkeypatch):
         'get_verified_pds_draft', 'get_verified_pds_job_context', 'prepare_pds_job_quote_review', 'prepare_pds_quote_review_batch',
         'review_pds_document_delivery', 'prepare_pds_document_delivery',
         'get_pending_pds_document_emails', 'get_pds_saved_review_operations',
-        'get_pds_verified_invoice_handoff', 'get_pds_separate_estimate_scopes', 'get_pds_van_stock_overview', 'get_pds_schedule_email_history', 'prepare_pds_schedule_email', 'get_pds_sms_approvals', 'prepare_pds_customer_sms',
+        'get_pds_verified_invoice_handoff', 'get_pds_separate_estimate_scopes', 'get_pds_van_stock_overview', 'get_pds_supplier_quote_queue', 'get_pds_schedule_email_history', 'prepare_pds_schedule_email', 'get_pds_sms_approvals', 'prepare_pds_customer_sms',
         'get_pds_sms_receipt', 'prepare_customer_dispatch_update',
         'get_pds_estimate_context', 'get_pds_estimate_preview', 'propose_pds_job_status',
         'inspect_product_page', 'propose_pds_catalog_part', 'preview_dispatch_customer_email',

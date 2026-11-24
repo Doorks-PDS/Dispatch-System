@@ -204,18 +204,26 @@ def _sync_sent_document_status(request, snapshot):
         raise RuntimeError('Linked PDS job changed after document send')
     kind = snapshot['kind']
     current = str(job.get('status') or '')
+    updates = {}
     if kind == 'estimate':
-        # Do not regress a completed, invoiced or already-advanced job.
-        if current not in {'Quote', 'Complete/Quote'}:
+        # Never overwrite the original Estimate # or an earlier sent estimate.
+        if current not in {'Quote', 'Complete/Quote', 'To Be Quoted'}:
             return current
         target = 'Quote Sent'
+        if not str(job.get('sent_quote_number') or '').strip():
+            updates['sent_quote_number'] = snapshot['number']
     elif kind == 'invoice':
+        # A draft invoice is not proof of completion. Only completed work can
+        # move to Done after the document is accepted by Resend.
         if current == 'Done':
+            return current
+        if current not in {'Complete', 'Complete/Quote', 'To Be Invoiced'}:
             return current
         target = 'Done'
     else:
         return current
-    updated = store.update_job(job_id, {'status': target})
+    updates['status'] = target
+    updated = store.update_job(job_id, updates)
     if str(updated.get('status') or '') != target:
         raise RuntimeError('PDS job status update not verified')
     return target

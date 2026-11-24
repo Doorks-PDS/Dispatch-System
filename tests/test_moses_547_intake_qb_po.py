@@ -22,7 +22,7 @@ def test_document_intake_requires_field_review_before_dispatch_save():
 def test_pds_po_create_and_import_are_distinct_actions():
     js=(ROOT/'static/app.js').read_text()
     assert "poButton.textContent='Purchase Order'" in js
-    assert "alternateUpload.textContent='Alternate Upload'" in js
+    assert "alternateUpload.textContent='Alternate'" in js
     assert "renderDocumentVault('pds',type," in js
     assert "form.elements.document_type.value='purchase_order'" in js
     assert "form.elements.job_number.value=ref.job_number||''" in js

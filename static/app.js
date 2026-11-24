@@ -8976,6 +8976,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     let debounce;search.addEventListener('input',()=>{clearTimeout(debounce);debounce=setTimeout(find,250)});await find();
   }
 
+  // Resolve saved PDS documents to exactly one Job Flow ticket. Never match a
+  // similarly numbered document from another customer or another job ID.
+  function pdsJobFlowLinkedDocuments(job, documents, type) {
+    const jobId=String(job?.id||'').trim();
+    const jobNumber=String(job?.job_number||'').trim().toLowerCase();
+    const customer=String(job?.customer||'').trim().replace(/\s+/g,' ').toLowerCase();
+    if(!jobId||!customer)return [];
+    const prefix=type==='estimate'?'RE':type==='invoice'?'JS':null;
+    if(!prefix)return [];
+    return (Array.isArray(documents)?documents:[]).filter(doc=>{
+      if(!doc || doc.type!==type || doc._read_only_pdf_fallback)return false;
+      if(!new RegExp('^'+prefix+'[0-9]{5,}$','i').test(String(doc.number||'')))return false;
+      if(!doc.filename || String(doc.filename)!==String(doc.number)+'.pdf')return false;
+      if(String(doc.customer||'').trim().replace(/\s+/g,' ').toLowerCase()!==customer)return false;
+      const docId=String(doc.job_id||'').trim();
+      const docNumber=String(doc.job_number||'').trim().toLowerCase();
+      if(docId && docId!==jobId)return false;
+      if(docNumber && docNumber!==jobNumber)return false;
+      return docId===jobId || !!(jobNumber&&docNumber===jobNumber);
+    }).sort((a,b)=>String(b.created_at||'').localeCompare(String(a.created_at||'')));
+  }
+
   // Office work queue: uses saved PDS jobs and the existing review/estimator tools.
   // No LLM call, automatic email, status change or staff assignment is performed here.
   // Moses Job Flow uses the existing PDS supplier RFQ records; nothing is sent
@@ -8996,17 +9018,20 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     dialog.append(head,tabs,feedback,body);veil.append(dialog);document.body.append(veil);
     veil.addEventListener('click',e=>{if(e.target===veil)veil.remove()});
     const kinds=[['quotes','Quotes'],['invoices','Invoices'],['pricing','Supplier Pricing']];
-    let active='quotes',jobs=[],rfqs=[],suppliers=[],editing=null,filter='';
+    let active='quotes',jobs=[],documents=[],rfqs=[],suppliers=[],editing=null,filter='';
     const search=make('input',null,'input');search.type='search';search.placeholder='Search customer, job #, supplier or request';search.style.cssText='width:100%;box-sizing:border-box';
     const norm=value=>String(value||'').toLowerCase().trim();
     const pending=x=>!['closed','ready_for_estimate'].includes(x.status);
     const heldJobs=()=>new Set(rfqs.filter(pending).map(r=>String(r.job_number||'').trim()).filter(Boolean));
     const stateLabel={draft:'Draft',awaiting_supplier:'Awaiting Supplier',send_uncertain:'Send Uncertain',quote_received:'Quote Received',ready_for_estimate:'Ready for Estimate',closed:'Closed'};
     function setMessage(message){feedback.textContent=message||'';}
+    const quoteJobs=()=>jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(norm(j.status))
+      &&!j.sent_quote_number&&!heldJobs().has(String(j.job_number||'').trim()));
+    const invoiceJobs=()=>jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(norm(j.status))
+      &&j.kind!=='sales_lead'&&!heldJobs().has(String(j.job_number||'').trim()));
     function renderTabs(){
-      tabs.replaceChildren();const held=heldJobs();const count={quotes:jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(norm(j.status))&&!j.sent_quote_number&&!held.has(String(j.job_number||'').trim())).length,
-        invoices:jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(norm(j.status))&&j.kind!=='sales_lead'&&!j.invoice_number&&!held.has(String(j.job_number||'').trim())).length,
-        pricing:rfqs.filter(pending).length};
+      tabs.replaceChildren();const count={quotes:quoteJobs().length,
+        invoices:invoiceJobs().length,pricing:rfqs.filter(pending).length};
       for(const [key,title] of kinds){const tab=action(title+' ('+count[key]+')',()=>{active=key;editing=null;draw()});tab.className=key===active?'btn btn-orange':'btn';tabs.append(tab)}
     }
     const fileUrl=(row,file)=>'/pds-supplier-quotes/'+encodeURIComponent(row.id)+'/attachments/'+encodeURIComponent(file.id);
@@ -9030,10 +9055,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       if(active==='pricing'){drawPricingQueue();return;}
       // A job with pending RFQ(s) is worked from Supplier Pricing until every
       // supplier request is ready/closed. No job status or record is mutated.
-      const held=heldJobs();
-      const quotes=jobs.filter(j=>['quote','complete/quote','to be quoted'].includes(norm(j.status))&&!j.sent_quote_number&&!held.has(String(j.job_number||'').trim()));
-      const invoices=jobs.filter(j=>['complete','to be invoiced','complete/quote'].includes(norm(j.status))&&j.kind!=='sales_lead'&&!j.invoice_number&&!held.has(String(j.job_number||'').trim()));
-      const rows=(active==='quotes'?quotes:invoices).filter(j=>!filter||[j.customer,j.job_number,j.address].some(v=>norm(v).includes(filter)));
+      const rows=(active==='quotes'?quoteJobs():invoiceJobs())
+        .filter(j=>!filter||[j.customer,j.job_number,j.address].some(v=>norm(v).includes(filter)));
       for(const job of rows.slice(0,120)){
         const card=make('article');card.style.cssText='border:1px solid #dce3e9;border-radius:12px;padding:12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap';
         const meta=make('div');meta.style.cssText='flex:1;min-width:200px';meta.append(make('strong',job.customer||'Job'));
@@ -9049,11 +9072,28 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             setMessage(saved.attachment_warning?'Request saved, attachments need attention: '+saved.attachment_warning:'Supplier request saved as Draft · Review and send it from Supplier Pricing.');
           }catch(error){setMessage('Request not saved: '+(error.message||error));}
         }));
-        const draft=action(active==='quotes'?'Draft Estimate':'Draft Invoice',async()=>{
-          draft.disabled=true;try{const full=await apiGetJob(job.id);if(String(full?.id)!==String(job.id))throw Error('Saved job identity mismatch');
-            openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice',null,{mosesJobFlow:true});
-          }catch(err){setMessage('Document review unavailable: '+(err.message||err))}finally{draft.disabled=false}
-        },true);controls.append(draft);card.append(meta,controls);body.append(card);
+        const type=active==='quotes'?'estimate':'invoice';
+        const saved=pdsJobFlowLinkedDocuments(job,documents,type);
+        if(saved.length){
+          for(const doc of saved){
+            const documentRow=make('div');documentRow.style.cssText='display:flex;align-items:center;gap:7px;flex-wrap:wrap';
+            documentRow.append(make('span',(type==='estimate'?'Estimate ':'Invoice ')+doc.number,'hint'));
+            documentRow.append(action('View/Edit',()=>{
+              openEstimateInvoiceDrawer({...job,__docEdit:doc},type,null,
+                {mosesJobFlow:true,refreshDocs:reloadWorkQueue});
+            }));
+            documentRow.append(action('Email',()=>openEstimateInvoiceEmail(doc,type,
+              {onSent:reloadWorkQueue}),true));
+            controls.append(documentRow);
+          }
+        }else{
+          const draft=action(active==='quotes'?'Draft Estimate':'Draft Invoice',async()=>{
+            draft.disabled=true;try{const full=await apiGetJob(job.id);if(String(full?.id)!==String(job.id))throw Error('Saved job identity mismatch');
+              openEstimateInvoiceHelper(full,type,null,{mosesJobFlow:true,afterSave:reloadWorkQueue});
+            }catch(err){setMessage('Document review unavailable: '+(err.message||err))}finally{draft.disabled=false}
+          },true);controls.append(draft);
+        }
+        card.append(meta,controls);body.append(card);
       }
       if(rows.length>120)body.append(make('small','Showing first 120 jobs. Search to narrow the list.','hint'));
       if(!rows.length)body.append(make('p','No matching jobs.','hint'));
@@ -9110,6 +9150,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       }catch(e){setMessage('Not saved: '+(e.message||e))}
     }
     async function reloadQuotes(){rfqs=(await rfqApi('')).items||[];}
+    async function reloadWorkQueue(){
+      try{
+        const [latestJobs,latestDocuments]=await Promise.all([apiListJobs({limit:5000}),apiListDocuments()]);
+        jobs=latestJobs;documents=latestDocuments;draw();
+      }catch(err){setMessage('Document saved or email submitted. Refresh Job Flow to verify: '+(err.message||err));}
+    }
     function formField(form,label,name,type,initial,required=false){
       const wrap=make('label');wrap.style.cssText='display:grid;gap:5px;font-weight:650;font-size:13px';wrap.append(make('span',label));
       const control=make(type==='textarea'?'textarea':'input',null,'input');control.name=name;control.required=required;
@@ -9239,8 +9285,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     search.oninput=()=>{filter=norm(search.value);draw()};
     body.textContent='Loading saved jobs and supplier requests…';
     try{
-      const [loadedJobs,loadedRFQs,loadedSuppliers]=await Promise.all([apiListJobs({limit:5000}),rfqApi(''),fetchJSON('/pds-purchase-orders/suppliers')]);
-      jobs=loadedJobs;rfqs=loadedRFQs.items||[];suppliers=loadedSuppliers.items||[];draw();
+      const [loadedJobs,loadedRFQs,loadedSuppliers,loadedDocuments]=await Promise.all([
+        apiListJobs({limit:5000}),rfqApi(''),fetchJSON('/pds-purchase-orders/suppliers'),apiListDocuments()
+      ]);
+      jobs=loadedJobs;rfqs=loadedRFQs.items||[];suppliers=loadedSuppliers.items||[];documents=loadedDocuments;draw();
     }catch(e){body.textContent='Unable to load Moses Job Flow: '+(e.message||e)}
   }
 
@@ -13454,7 +13502,7 @@ function renderEmployeesView() {
   }
 
   // Send saved PDS estimates/invoices from the server, never via the device mail application.
-  async function openEstimateInvoiceEmail(doc, docType = "invoice") {
+  async function openEstimateInvoiceEmail(doc, docType = "invoice", options = {}) {
     const kind = String(docType).toLowerCase() === "estimate" ? "estimate" : "invoice";
     const number = String(doc.number || doc[kind + "_number"] || "").trim();
     if (!number) { alert("Save the document before emailing it."); return; }
@@ -13567,7 +13615,12 @@ function renderEmployeesView() {
             body: JSON.stringify({ approve: true })
           });
           if (result.state === "sent") {
-            status.textContent = "Resend accepted the email. This is not yet confirmation of inbox delivery. Message ID: " + String(result.provider_message_id || "available in delivery history");
+            status.textContent = "Resend accepted the email. This is not yet confirmation of inbox delivery. " +
+              (result.status_sync === "verified" ? "Job status updated." : "Job status needs office review.");
+            if (typeof options.onSent === 'function') {
+              try { await options.onSent(result); }
+              catch (refreshError) { status.textContent += " Refresh Job Flow to verify the update."; }
+            }
           } else if (result.state === "uncertain") {
             status.textContent = "Send outcome uncertain. Check Resend and delivery history before any retry.";
           } else {

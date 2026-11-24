@@ -5,7 +5,7 @@ DRAFTS=Path(__file__).resolve().parents[1].joinpath("static/moses_drafts.js").re
 def test_queue_uses_estimate_invoice_and_supplier_pricing():
     assert "const kinds=[['quotes','Quotes'],['invoices','Invoices'],['pricing','Supplier Pricing']]" in APP
     assert "const parts=jobs.filter(" not in APP
-    assert "const invoices=jobs.filter(" in APP
+    assert "const invoiceJobs=()=>jobs.filter(" in APP
 
 def test_parts_review_links_to_actual_saved_draft():
     assert "draft.textContent='Add to Quote Draft'" in APP

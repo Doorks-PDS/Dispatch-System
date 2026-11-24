@@ -24,7 +24,7 @@ def test_quote_parts_review_does_not_send_or_save():
     assert "do not invent a cost" in APP
     assert "Do not send emails, alter job records or issue an estimate without approval" in APP
     assert "partsBtn.textContent='Parts & Pricing'" not in APP
-    assert "openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice'" in APP
+    assert "openEstimateInvoiceHelper(full,type,null,{mosesJobFlow:true,afterSave:reloadWorkQueue})" in APP
 
 def test_ui_assets_versioned():
     assert '/static/app.js?v=__APP_ASSET_VERSION__' in UI

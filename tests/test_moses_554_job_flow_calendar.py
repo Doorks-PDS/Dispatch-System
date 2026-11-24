@@ -29,7 +29,7 @@ def test_work_queue_routes_to_shared_helper_and_supplier_rfq_queue():
     assert "const kinds=[['quotes','Quotes'],['invoices','Invoices'],['pricing','Supplier Pricing']]" in queue
     assert "Request Supplier Quote" in queue
     assert "await reloadQuotes()" in queue
-    assert "openEstimateInvoiceHelper(full,active==='quotes'?'estimate':'invoice'" in queue
+    assert "openEstimateInvoiceHelper(full,type,null,{mosesJobFlow:true,afterSave:reloadWorkQueue})" in queue
     assert "await apiGetJob(job.id)" in queue
     assert "apiUpdateJob(" not in queue
     assert "/resend" not in queue
