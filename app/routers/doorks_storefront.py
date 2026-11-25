@@ -418,18 +418,32 @@ def convert_software_inquiry_to_customer(lead_id: str, request: Request):
         return {'ok': True, 'already_exists': False, 'customer': customer}
 
 
-# Moses 5.85: SDC Atlas marketing desk. All content remains internal until
-# Meta business authorization and explicit outbound publishing are implemented.
+# Moses 5.85/5.87: Three-brand SDC Marketing Desk. All content remains internal;
+# Metricool publishing is a separate authorized account workflow.
 # Uses the existing SDC durable workspace directory and permission gate.
 from typing import Literal
 
+# The SDC workspace owns all three brands; records remain distinct in one durable ledger.
+SDC_MARKETING_BRANDS = {
+    'atlas': {'name': 'Atlas Software', 'metricool_id': '8360583', 'instagram': 'atlas.ai.software'},
+    'history': {'name': 'Beyond the History Books', 'metricool_id': '8365670', 'instagram': 'beyond_historybooks'},
+    'saddleback': {'name': 'Saddleback Design Co.', 'metricool_id': '8365706', 'instagram': 'saddleback_designs'},
+}
 ATLAS_POST_CHANNELS = ('instagram', 'facebook', 'both', 'linkedin')
 ATLAS_POST_ASSETS = (
     'atlas_real_dashboard.webp', 'atlas_real_requests.webp',
     'atlas_real_extra_1.webp', 'atlas_real_extra_2.webp', 'atlas_real_team.webp',
+    'atlas_hero_mountains.webp', 'beyond_history_profile.webp',
 )
+MARKETING_ASSETS_BY_BRAND = {
+    'atlas': tuple(x for x in ATLAS_POST_ASSETS if x != 'beyond_history_profile.webp'),
+    'history': ('beyond_history_profile.webp',),
+    'saddleback': (),  # Use real customer-authorized door photography when supplied.
+}
+
 
 class AtlasMarketingDraft(BaseModel):
+    brand: Literal['atlas', 'history', 'saddleback'] = 'atlas'  # old drafts remain Atlas
     channel: Literal['instagram', 'facebook', 'both', 'linkedin']
     title: str = Field(min_length=1, max_length=120)
     caption: str = Field(min_length=1, max_length=2200)
@@ -453,8 +467,8 @@ def _atlas_marketing_path(request):
 
 
 def _atlas_marketing_validate(payload):
-    if payload.asset and payload.asset not in ATLAS_POST_ASSETS:
-        raise HTTPException(422, 'Select an approved public Atlas screenshot')
+    if payload.asset and payload.asset not in MARKETING_ASSETS_BY_BRAND[payload.brand]:
+        raise HTTPException(422, 'Choose an approved public asset for this brand')
     if payload.planned_at:
         try:
             planned = datetime.fromisoformat(payload.planned_at.replace('Z', '+00:00'))
@@ -486,11 +500,54 @@ def atlas_marketing_posts(request: Request):
     from app.routers import workspaces as ws
     with _shared_workspace_lock():
         rows = ws.load(_atlas_marketing_path(request))
-    return {'posts': sorted(rows, key=lambda row: str(row.get('updated_at', '')), reverse=True),
-            'assets': list(ATLAS_POST_ASSETS), 'meta_connected': False,
+    # Old Atlas records predate the brand field. Do not mutate history during GET.
+    normalized = [dict(x, brand=x.get('brand') or 'atlas') for x in rows]
+    return {'posts': sorted(normalized, key=lambda row: str(row.get('updated_at', '')), reverse=True),
+            'assets': list(ATLAS_POST_ASSETS),
+            'assets_by_brand': {k:list(v) for k,v in MARKETING_ASSETS_BY_BRAND.items()},
+            'brands': SDC_MARKETING_BRANDS,
+            'metricool_links_only': True, 'meta_connected': False,
             'auto_publishing_enabled': False, 'publish_enabled': False,
-            'note': 'Approved posts and planned dates do not publish to social networks. Meta business authorization is required.'}
+            'note': 'Metricool social accounts are managed separately. Approvals here are internal; no social post is published by this portal.'}
 
+
+# Internal launch-copy templates. Import is a POST-only, idempotent staff action,
+# never a side effect of viewing marketing drafts. All start as unapproved drafts.
+MARKETING_LAUNCH_DRAFTS = (
+    ('atlas', 'atlas_custom_launch', 'Your workflow. Your software.',
+     "Your company has its own way of getting things done. Why should your software force you into someone else's process?\n\nAtlas Software is built around the work you actually do—from scheduling and field forms to customer records, estimates, invoices, inventory, and reporting. Start with one challenge or create a fully personalized workspace.\n\nSee what we've built and tell us what your business needs: https://dispatch-system-pl8q.onrender.com/software?utm_source=facebook&utm_medium=social&utm_campaign=atlas_custom_launch\n\n#AtlasSoftware #CustomSoftware #BusinessOperations",
+     'atlas_hero_mountains.webp'),
+    ('saddleback', 'sdc_custom_doors_intro', 'Made for your space, not a showroom shelf.',
+     "A door should feel like part of your home—not an afterthought.\n\nAt Saddleback Design Co., we create made-to-order wood and rattan doors with attention to proportions, texture, finish, and the details that make a space your own. From the first idea to the finished piece, we love the craftsmanship behind every project.\n\nHave an opening or design in mind? Send us a message and tell us what you're imagining.\n\n#SaddlebackDesignCo #CustomDoors #Woodworking #RattanDoors",
+     ''),
+    ('history', 'beyond_history_intro', 'History is more than dates.',
+     "What did a moment in history actually feel like for the people who lived through it?\n\nBeyond the History Books explores the past through human stories—family, discovery, everyday choices, hardship, and hope. We'll share historical lessons alongside character-driven fiction, from early Atlantic crossings to the lives changed by World War II and beyond.\n\nFollow along for the stories behind the events, the research behind the fiction, and the perspectives history books sometimes leave out.\n\n#BeyondTheHistoryBooks #HistoricalFiction #HistoryThroughStories",
+     'beyond_history_profile.webp'),
+)
+
+@router.post('/api/software/marketing/launch-drafts', status_code=200)
+def sdc_marketing_seed_launch(request: Request):
+    _atlas_marketing_guard(request)
+    from app.routers import workspaces as ws
+    now = datetime.now(timezone.utc).isoformat()
+    created = []
+    with _shared_workspace_lock():
+        path = _atlas_marketing_path(request)
+        rows = ws.load(path)
+        for brand, campaign, title, caption, asset in MARKETING_LAUNCH_DRAFTS:
+            if any((row.get('brand') or 'atlas') == brand and row.get('campaign') == campaign for row in rows):
+                continue
+            row = {'id': uuid.uuid4().hex, 'brand': brand, 'channel': 'both',
+                   'title': title, 'caption': caption, 'asset': asset, 'planned_at': '',
+                   'campaign': campaign, 'status': 'draft', 'created_at': now,
+                   'updated_at': now, 'created_by': _atlas_marketing_audit(request, None),
+                   'revision': 1, 'history': [{'action': 'launch_draft_imported', 'at': now}]}
+            rows.append(row)
+            created.append(brand)
+        if created:
+            ws.save(path, rows)
+    return {'created': created, 'already_present': [x[0] for x in MARKETING_LAUNCH_DRAFTS if x[0] not in created],
+            'published': False, 'approved': False}
 
 @router.post('/api/software/marketing/posts', status_code=201)
 def atlas_marketing_create(payload: AtlasMarketingDraft, request: Request):
@@ -498,7 +555,7 @@ def atlas_marketing_create(payload: AtlasMarketingDraft, request: Request):
     _atlas_marketing_validate(payload)
     from app.routers import workspaces as ws
     now = datetime.now(timezone.utc).isoformat()
-    record = {'id': uuid.uuid4().hex, 'channel': payload.channel,
+    record = {'id': uuid.uuid4().hex, 'brand': payload.brand, 'channel': payload.channel,
               'title': payload.title.strip(), 'caption': payload.caption.strip(),
               'asset': payload.asset, 'planned_at': payload.planned_at,
               'campaign': payload.campaign.strip(), 'status': 'draft',
@@ -527,8 +584,11 @@ def atlas_marketing_edit(post_id: str, payload: AtlasMarketingDraft, request: Re
             raise HTTPException(404, 'Post not found')
         if post['status'] == 'archived':
             raise HTTPException(409, 'Archived posts cannot be edited')
+        if (post.get('brand') or 'atlas') != payload.brand:
+            raise HTTPException(409, 'Posts cannot be moved between brands; create a new draft')
         old = post['status']
-        post.update({'channel': payload.channel, 'title': payload.title.strip(),
+        # Never silently move a previously reviewed post between brands.
+        post.update({'brand': payload.brand, 'channel': payload.channel, 'title': payload.title.strip(),
                      'caption': payload.caption.strip(), 'asset': payload.asset,
                      'planned_at': payload.planned_at, 'campaign': payload.campaign.strip(),
                      'status': 'draft', 'approved_by': None, 'approved_at': None,
