@@ -271,6 +271,36 @@ def agent_sdk_tool_check(request: Request):
     return check(platform)
 
 
+@router.get('/integration-health')
+def integration_health(request: Request):
+    """Admin-only, read-only setup facts for Moses and signed Resend events."""
+    platform = allowed(request)
+    if getattr(request.state, 'auth_role', None) != 'office_admin':
+        raise HTTPException(403, 'Workspace office-admin access required')
+    from app.services.moses_agent import readiness
+    from app.services import moses_resend_events
+    webhook = os.getenv('RESEND_WEBHOOK_SECRET', '').startswith('whsec_')
+    path = moses_resend_events._ledger(request)
+    # This never checks or changes a customer's invoice, resends mail, or
+    # calls a paid API. Existing signed events are only observations.
+    events_seen = 0
+    if path.is_file():
+        with moses_resend_events._locked(path):
+            from app.routers.workspaces import load
+            records = load(path)
+            events_seen = len(records) if isinstance(records, list) else 0
+    result = {'workspace': platform, 'moses': readiness(platform),
+              'resend_delivery_webhook_configured': webhook,
+              'resend_verified_event_count': events_seen,
+              'resend_webhook_url_path': '/doorks-assistant/public/resend/webhook',
+              'delivery_guaranteed': False, 'sent_test_email': False,
+              'notes': 'Check Resend against the email ID; provider acceptance is not inbox delivery.'}
+    if platform == 'pds':
+        from app.services.pds_quickbooks_bridge import status as qb_status
+        result['quickbooks'] = qb_status(request)
+    return result
+
+
 @router.post('/agent-web-check')
 def agent_web_check(request: Request):
     """Explicit public-information web-search probe, no customer records or writes."""

@@ -150,7 +150,8 @@ def preview(request, kind, number):
     return {k: v for k, v in snap.items() if k != 'pdf_sha256'} | {
         'attachment_verified': True, 'ready_for_approval': True,
         'sent': False, 'approval_required': True,
-        'send_enabled': os.getenv('MOSES_PDS_DOCUMENT_SEND_ENABLED', '').strip().lower() == 'true'}
+        'send_enabled': os.getenv('MOSES_PDS_DOCUMENT_SEND_ENABLED', '').strip().lower() == 'true',
+        'requires_office_review': getattr(getattr(request, 'state', None), 'auth_role', None) == 'tech'}
 
 
 def _fingerprint(snapshot):
@@ -164,10 +165,34 @@ def _public(row):
             'to': snap['to'], 'from': snap['from'], 'reply_to': snap['reply_to'],
             'subject': snap['subject'], 'filename': snap['filename'],
             'approved': row['state'] in ('sending', 'sent', 'uncertain'),
+            'requested_by': row.get('requested_by'),
+            'requested_role': row.get('requested_role'),
+            'job_id': snap.get('job_id'),
+            'ready_label': 'Quote Ready' if snap['kind'] == 'estimate' else 'Invoice Ready',
+            'requires_office_review': row.get('requested_role') == 'tech',
             'sent': row['state'] == 'sent', 'delivery_status': row.get('delivery_status'),
             'provider_message_id': row.get('provider_message_id'),
             'requested_at': row.get('requested_at'), 'completed_at': row.get('completed_at'),
             'cc': snap.get('cc'), 'attachment_filename': snap.get('filename')}
+
+
+def review_queue(request):
+    """Office-only inbox for technician estimate/invoice reviews.
+
+    Quote Ready and Invoice Ready are document-review states, not job statuses.
+    """
+    _guard(request)
+    if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin'):
+        raise HTTPException(403, 'Office access required to review technician documents')
+    path = _file(request)
+    with _locked(path):
+        rows = [r for r in _load(path) if r.get('state') == 'pending'
+                and r.get('requested_role') == 'tech'
+                and r.get('snapshot', {}).get('kind') in ('estimate', 'invoice')]
+        items = [_public(r) for r in rows]
+    items.sort(key=lambda r: str(r.get('requested_at') or ''))
+    return {'count': len(items), 'items': items, 'workspace': 'pds',
+            'approval_required': True}
 
 
 def propose(request, kind, number):
@@ -187,7 +212,8 @@ def propose(request, kind, number):
                 raise HTTPException(409, 'Already sent; review delivery history before resending')
             return {'proposal': _public(prior), 'approval_required': True, 'sent': False}
         row = {'id': uuid.uuid4().hex, 'state': 'pending', 'snapshot': snap,
-               'fingerprint': fp, 'requested_at': _now(), 'requested_by': _actor(request)}
+               'fingerprint': fp, 'requested_at': _now(), 'requested_by': _actor(request),
+               'requested_role': str(getattr(request.state, 'auth_role', '') or '')}
         rows.append(row)
         _save(path, rows)
         return {'proposal': _public(row), 'approval_required': True, 'sent': False}
@@ -249,6 +275,12 @@ def decide(request, proposal_id, approve):
             raise HTTPException(403, 'You may decide only an email you prepared')
         if row['state'] != 'pending':
             raise HTTPException(409, 'Proposal already processed')
+        role = str(getattr(request.state, 'auth_role', '') or '')
+        # Enforce in the backend: technician approval may never contact Resend.
+        if approve and role == 'tech':
+            raise HTTPException(403, 'Technician documents must be reviewed and sent by Office')
+        if approve and row.get('requested_role') == 'tech' and role not in ('office', 'office_admin'):
+            raise HTTPException(403, 'Office review is required for technician documents')
         if not approve:
             row.update(state='rejected', decided_by=_actor(request), decided_at=_now())
             _save(path, rows)

@@ -57,6 +57,7 @@
 
   const navDataCenter = el("navDataCenter");
   const navAccounting = el("navAccounting");
+  const navQuickBooks = el("navQuickBooks");
   const navPayroll = el("navPayroll");
   const navEmployees = el("navEmployees");
   const navDataUpload = el("navDataUpload");
@@ -860,7 +861,7 @@
   const pdsOfficeCol=navDataCenter?.parentElement;
   // Visible PDS Job Flow order: Job Flow, To-Do List, All Jobs, Door Records.
   if(pdsJobCol) [navJobFlow,navMyAssignments,navAllJobs,navDoorLogs].forEach(b=>{if(b)pdsJobCol.appendChild(b);});
-  if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
+  if(pdsOfficeCol) [navDataCenter,navEstimateInvoice||navEstimatePage,navAccounting,navQuickBooks,navPayroll,navDataUpload].forEach(b=>{if(b)pdsOfficeCol.appendChild(b);});
   // PDS-only PRIO trial workspace. No payroll or real-money actions.
   const navPrioCoinPreview = document.createElement('button');
   navPrioCoinPreview.type = 'button';
@@ -938,7 +939,7 @@
     [
       navFormsTimeCard, navFormsTimeOff, navTakeoffs, navFormsSignOff, navFormsReceipts,
       navJobFlow, navToDoList, navAllJobs, navPartsList, navDoorLogs, navEstimatePage, navInvoicePage, navEstimateInvoice, navCustomers, navContacts,
-      navDataCenter, navAccounting, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
+      navDataCenter, navAccounting, navQuickBooks, navPayroll, navEmployees, navPricingSettings, navDataUpload, navSaddleback,
       navNotifications, navAtlas, navMoses
     ].filter(Boolean).forEach(b => b.classList.toggle("navbtn-active", b === btn));
   }
@@ -4506,6 +4507,7 @@ async function apiListForms() {
     if (headerCalendarBtn) headerCalendarBtn.style.display = role && perms.calendar && (activePlatform === "pds" || role === "office_admin") ? "inline-flex" : "none";
     setVisible(navDataCenter, !!role && perms.dataCenter);
     setVisible(navAccounting, role === "office" || role === "office_admin");
+    setVisible(navQuickBooks, role === "office_admin" && activePlatform === "pds");
     setVisible(navPayroll, !!role && perms.payroll);
     setVisible(navEmployees, false); // Available through Accounting Hub
     setVisible(navDataUpload, role === "office_admin" && !!perms.dataUpload);
@@ -9267,7 +9269,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     dialog.append(head,tabs,feedback,body);veil.append(dialog);document.body.append(veil);
     veil.addEventListener('click',e=>{if(e.target===veil)veil.remove()});
     const kinds=[['quotes','Quotes'],['invoices','Invoices'],['pricing','Supplier Pricing']];
-    let active='quotes',jobs=[],documents=[],rfqs=[],suppliers=[],editing=null,filter='';
+    if(['office','office_admin'].includes(String(currentUser?.role||''))) kinds.push(['review','Ready for Review']);
+    let active='quotes',jobs=[],documents=[],rfqs=[],suppliers=[],reviewRows=[],editing=null,filter='';
     const search=make('input',null,'input');search.type='search';search.placeholder='Search customer, job #, supplier or request';search.style.cssText='width:100%;box-sizing:border-box';
     const norm=value=>String(value||'').toLowerCase().trim();
     const pending=x=>!['closed','ready_for_estimate'].includes(x.status);
@@ -9280,7 +9283,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       &&j.kind!=='sales_lead'&&!heldJobs().has(String(j.job_number||'').trim()));
     function renderTabs(){
       tabs.replaceChildren();const count={quotes:quoteJobs().length,
-        invoices:invoiceJobs().length,pricing:rfqs.filter(pending).length};
+        invoices:invoiceJobs().length,pricing:rfqs.filter(pending).length,review:reviewRows.length};
       for(const [key,title] of kinds){const tab=action(title+' ('+count[key]+')',()=>{active=key;editing=null;draw()});tab.className=key===active?'btn btn-orange':'btn';tabs.append(tab)}
     }
     const fileUrl=(row,file)=>'/pds-supplier-quotes/'+encodeURIComponent(row.id)+'/attachments/'+encodeURIComponent(file.id);
@@ -9302,6 +9305,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       if(editing){drawEditor(editing);return;}
       body.append(search);
       if(active==='pricing'){drawPricingQueue();return;}
+      if(active==='review'){
+        body.append(make('strong','Technician documents awaiting Office review'));
+        body.append(action('Refresh review queue',async()=>{
+          try{const r=await fetchJSON('/moses-pds-email/review-queue');reviewRows=r.items||[];draw()}
+          catch(e){setMessage(e.message||e)}
+        }));
+        for(const doc of reviewRows.filter(x=>!filter||[x.number,x.job_number,x.to,x.ready_label].some(y=>norm(y).includes(filter)))){
+          const card=make('article');card.style.cssText='border:1px solid #dce3e9;border-radius:12px;padding:12px;display:grid;gap:8px';
+          card.append(make('strong',(doc.ready_label||'Ready for Review')+' · '+doc.number));
+          card.append(make('small',[doc.job_number&&'Job #'+doc.job_number,doc.to&&'To: '+doc.to].filter(Boolean).join(' · '),'hint'));
+          card.append(action('Review Document',()=>openPdsDocumentReviewInbox(doc.number),true));body.append(card);
+        }
+        if(!reviewRows.length)body.append(make('small','No technician documents waiting.','hint'));
+        return;
+      }
       // A job with pending RFQ(s) is worked from Supplier Pricing until every
       // supplier request is ready/closed. No job status or record is mutated.
       const rows=(active==='quotes'?quoteJobs():invoiceJobs())
@@ -9537,7 +9555,12 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       const [loadedJobs,loadedRFQs,loadedSuppliers,loadedDocuments]=await Promise.all([
         apiListJobs({limit:5000}),rfqApi(''),fetchJSON('/pds-purchase-orders/suppliers'),apiListDocuments()
       ]);
-      jobs=loadedJobs;rfqs=loadedRFQs.items||[];suppliers=loadedSuppliers.items||[];documents=loadedDocuments;draw();
+      jobs=loadedJobs;rfqs=loadedRFQs.items||[];suppliers=loadedSuppliers.items||[];documents=loadedDocuments;
+      if(['office','office_admin'].includes(String(currentUser?.role||''))){
+        try{const r=await fetchJSON('/moses-pds-email/review-queue');reviewRows=r.items||[]}
+        catch(e){setMessage('Review inbox unavailable: '+(e.message||e))}
+      }
+      draw();
     }catch(e){body.textContent='Unable to load Moses Job Flow: '+(e.message||e)}
   }
 
@@ -9558,6 +9581,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       { name: "Sales Lead", status: "Sales Lead" },
       { name: "Dispatch", status: "Dispatch" },
       { name: "Quote", status: "Quote" },
+      ...(['office','office_admin'].includes(String(currentUser?.role||''))
+        ? [{ name: 'Ready for Review', status: '__REVIEW__' }] : []),
       { name: "Quote Sent", status: "Quote Sent" },
       { name: "Parts on Order", status: "Parts on Order" },
       { name: "Complete/Quote", status: "Complete/Quote" },
@@ -9646,8 +9671,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
 
       const left = document.createElement("div");
       left.innerHTML = `<span>${def.name}</span>`;
-      const pill = def.status === "__ALL__" ? statusPill("Dispatch") : statusPill(def.status);
+      const pill = def.status === "__ALL__" ? statusPill("Dispatch") :
+        def.status === '__REVIEW__' ? statusPill('Quote') : statusPill(def.status);
       if (def.status === "__ALL__") pill.textContent = "All";
+      if (def.status === '__REVIEW__') pill.textContent = 'Ready';
 
       const badge = document.createElement("span");
       badge.className = "badge";
@@ -9702,6 +9729,11 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       tabEls.forEach(x => x.btn.classList.toggle("navbtn-active", x.def.status === active));
       for (const t of tabEls) {
         if (t.def.status === "Done" || t.def.status === "Quote Sent") continue;
+        if (t.def.status === '__REVIEW__') {
+          try{const r=await fetchJSON('/moses-pds-email/review-queue');t.badge.textContent=String(r.count||0)}
+          catch(e){t.badge.textContent='—'}
+          continue;
+        }
         if (t.def.status === "__ALL__") {
           const js = await apiListAllJobs({ q: allJobsQuery, limit: 5000 }).catch(() => []);
           t.badge.textContent = String(js.length);
@@ -9720,6 +9752,21 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         return;
       }
 
+      if(active==='__REVIEW__'){
+        list.replaceChildren();
+        try{
+          const data=await fetchJSON('/moses-pds-email/review-queue');
+          if(!(data.items||[]).length)list.append(document.createTextNode('No technician documents awaiting review.'));
+          for(const doc of data.items||[]){
+            const row=document.createElement('div');row.className='jobrow';
+            const label=document.createElement('strong');label.textContent=(doc.ready_label||'Ready')+' · '+doc.number;
+            const meta=document.createElement('div');meta.className='hint';meta.textContent=[doc.job_number&&'Job #'+doc.job_number,doc.to].filter(Boolean).join(' · ');
+            const action=document.createElement('button');action.className='btn btn-orange';action.textContent='Review';action.onclick=()=>openPdsDocumentReviewInbox(doc.number);
+            row.append(label,meta,action);list.append(row);
+          }
+        }catch(e){list.textContent='Document review queue unavailable: '+(e.message||e)}
+        refreshBadges();return;
+      }
       const jobs = await apiListJobs({ status: active, limit: 5000 });
       list.innerHTML = "";
       if (!jobs.length) {
@@ -10607,6 +10654,255 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       await fetchJSON('/pds-office-reports/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({pin})});
       return true;
     } catch(err) { alert('Office report access denied: '+(err.message||err));return false; }
+  }
+
+  async function renderQuickBooksHub() {
+    if (activePlatform !== 'pds' || currentUser?.role !== 'office_admin') return;
+    setNavActive(navQuickBooks);
+    setActiveChip('Office Flow');
+    setWorkspace('QuickBooks Hub');
+    clearWorkspaceActions();
+    workspaceBody.innerHTML = `
+      <div class="qbh-shell">
+        <header class="qbh-hero">
+          <div class="qbh-hero-copy">
+            <span class="qbh-eyebrow">PDS <span class="qbh-dot">/</span> OFFICE FINANCE</span>
+            <h2>QuickBooks Hub</h2>
+            <p>One place to prepare invoices and supplier purchase orders for accounting.</p>
+            <div class="qbh-hero-summary"><span>● Secure office access</span><span>● Review-only handoff</span><span>● No automatic posting</span></div>
+          </div>
+          <div class="qbh-hero-actions"><span class="qbh-connection"><span class="qbh-status-dot"></span>Not connected</span>
+            <button type="button" class="btn qbh-refresh" id="qbhRefresh" aria-label="Refresh QuickBooks Hub">↻ Refresh</button></div>
+        </header>
+        <div class="qbh-metrics" aria-label="QuickBooks overview">
+          <div class="qbh-metric"><span>Invoices ready</span><strong id="qbhReady">—</strong><small>Issued and verified</small></div>
+          <div class="qbh-metric"><span>Supplier POs ready</span><strong id="qbhPOReady">—</strong><small>Ordered and verified</small></div>
+          <div class="qbh-metric"><span>Prepared handoffs</span><strong id="qbhPrepared">—</strong><small>Review only · not synced</small></div>
+          <div class="qbh-metric qbh-metric-alert"><span>Needs attention</span><strong id="qbhNeedsReview">—</strong><small>Requires record review</small></div>
+        </div>
+        <div class="qbh-workflow" aria-label="Accounting integration progress">
+          <div><span class="qbh-step qbh-step-current">1</span><strong>Review PDS records</strong><small>Invoice / supplier PO</small></div>
+          <div><span class="qbh-step">2</span><strong>Prepare handoff</strong><small>Approval &amp; export</small></div>
+          <div><span class="qbh-step">3</span><strong>Connect QuickBooks</strong><small>Edition and authorization</small></div>
+          <div><span class="qbh-step">4</span><strong>Verify live sync</strong><small>Future controlled test</small></div>
+        </div>
+        <nav class="qbh-tabs" aria-label="QuickBooks Hub sections">
+          <button type="button" data-qbh-tab="invoices" aria-selected="true">Invoices <span id="qbhInvoiceTabCount" class="qbh-tab-count">—</span></button>
+          <button type="button" data-qbh-tab="purchase-orders" aria-selected="false">Supplier POs <span id="qbhPOTabCount" class="qbh-tab-count">—</span></button>
+          <button type="button" data-qbh-tab="activity" aria-selected="false">Activity</button>
+          <button type="button" data-qbh-tab="numbering" aria-selected="false">Numbering <span id="qbhNumberingCount" class="qbh-tab-count">3</span></button>
+          <button type="button" data-qbh-tab="setup" aria-selected="false">Setup</button>
+        </nav>
+        <section class="qbh-section" data-qbh-panel="invoices">
+          <div class="qbh-section-head"><div><div class="qbh-kicker">CUSTOMER BILLING</div><h3>Invoice handoff</h3>
+              <p>Only invoices whose exact saved PDF was accepted by Resend can be prepared. A handoff is not a QuickBooks transaction.</p></div>
+            <button class="btn qbh-export" type="button" id="qbhExport">↓ Export review CSV</button></div>
+          <div class="qbh-toolbar"><input id="qbhSearch" class="input" type="search" placeholder="Search invoice, customer or job #" aria-label="Search QuickBooks invoices" />
+            <select id="qbhFilter" class="input" aria-label="Filter invoice review status"><option value="all">All statuses</option><option value="ready">Ready</option><option value="prepared">Prepared</option><option value="needs_review">Needs review</option></select></div>
+          <div class="qbh-invoices" id="qbhInvoiceRows" aria-live="polite">Loading invoices…</div>
+        </section>
+        <section class="qbh-section" data-qbh-panel="purchase-orders" hidden>
+          <div class="qbh-section-head"><div><div class="qbh-kicker">SUPPLIER PURCHASING</div><h3>Purchase order handoff</h3>
+              <p>Supplier POs use purchase costs, verified jobs and order status—not the customer's PO number. Manually ordered POs qualify too.</p></div>
+            <button class="btn qbh-export" type="button" id="qbhPOExport">↓ Export PO review</button></div>
+          <div class="qbh-toolbar"><input id="qbhPOSearch" class="input" type="search" placeholder="Search PO, supplier, customer or job #" aria-label="Search QuickBooks supplier POs" />
+            <select id="qbhPOFilter" class="input" aria-label="Filter supplier PO review status"><option value="all">All statuses</option><option value="ready">Ready</option><option value="prepared">Prepared</option><option value="needs_review">Needs review</option></select></div>
+          <div class="qbh-invoices" id="qbhPORows" aria-live="polite">Loading purchase orders…</div>
+          <p class="qbh-footnote">Supplier POs are purchasing commitments. Supplier bills, payments, stock receipts and customer PO numbers remain separate.</p>
+        </section>
+        <section class="qbh-section" data-qbh-panel="activity" hidden>
+          <div class="qbh-section-head"><div><div class="qbh-kicker">AUDIT TRAIL</div><h3>Handoff activity</h3>
+            <p>Prepared items are local review records. None have been posted to QuickBooks.</p></div></div>
+          <div id="qbhActivityRows" class="qbh-invoices" aria-live="polite"></div>
+        </section>
+        <section class="qbh-section" data-qbh-panel="numbering" hidden>
+          <div class="qbh-section-head"><div><div class="qbh-kicker">DOCUMENT NUMBERS</div><h3>Keep Doorks and QuickBooks matched</h3>
+            <p>Doorks numbers stay on your estimates, invoices, supplier POs, PDFs and job tickets. Choose how to request the corresponding number in QuickBooks once the account is connected.</p></div></div>
+          <div class="qbh-number-banner"><span class="qbh-number-banner-icon" aria-hidden="true">↔</span><div><strong>One document, two references when needed.</strong><p>A PDS invoice such as JS00021 may have QuickBooks invoice number 17566. Both point to the same transaction after verified sync—no renumbering of the original PDS document.</p></div></div>
+          <div class="qbh-number-table" id="qbhNumberRows" aria-live="polite">Loading number policies…</div>
+          <div class="qbh-number-actions"><button type="button" class="btn btn-orange" id="qbhSaveNumbering">Save numbering plan</button><span id="qbhNumberFeedback" class="qbh-muted" role="status">This does not connect QuickBooks or change existing document numbers.</span></div>
+          <div class="qbh-number-steps"><div><strong>1 · Pick numbering</strong><span>Request PDS numbers or let QuickBooks assign its own</span></div><div><strong>2 · Verify company settings</strong><span>Check QuickBooks custom numbering, existing document numbers and possible collisions</span></div><div><strong>3 · Confirm mappings</strong><span>Store QuickBooks transaction ID and number only after verified sync</span></div><div><strong>4 · Reconcile payments</strong><span>Match payments using the verified QuickBooks record ID, not the display number alone</span></div></div>
+          <p class="qbh-footnote">Estimates are included in the numbering plan for future compatibility, but 5.71 does not sync estimates. Customer PO numbers are separate from PDS supplier PO-000xx numbers. No posting, tax remapping or accounting adjustments occur here.</p>
+        </section>
+        <section class="qbh-section" data-qbh-panel="setup" hidden>
+          <div class="qbh-section-head"><div><div class="qbh-kicker">CONNECTION</div><h3>Connection setup</h3>
+            <p>Select the PDS edition. Saving it won't authorize access, sync records or create transactions.</p></div></div>
+          <div class="qbh-setup-status"><span class="qbh-status-dot"></span><strong id="qbhEditionSummary">Not set</strong><span id="qbhSyncSummary">Not connected · auto sync off</span></div>
+          <div class="qbh-setup-grid"><button type="button" class="qbh-edition" data-qbh-edition="online"><span class="qbh-edition-icon">☁</span><strong>QuickBooks Online</strong><small>Intuit OAuth and API sync after company authorization; requires supported plan for purchase orders.</small><span class="qbh-edition-check">Select Online</span></button>
+            <button type="button" class="qbh-edition" data-qbh-edition="desktop"><span class="qbh-edition-icon">▣</span><strong>QuickBooks Desktop</strong><small>Windows Web Connector, scheduled exchange and a supported company-file version.</small><span class="qbh-edition-check">Select Desktop</span></button></div>
+          <div class="qbh-setup-actions"><button type="button" class="btn btn-orange" id="qbhSaveEdition">Save edition</button><span class="qbh-muted" id="qbhSetupStatus" role="status">No connection or transactions will be created.</span></div>
+          <div class="qbh-connection-note"><strong>Before enabling synchronization</strong><p id="qbhNextStep">Select the edition to see the next connection step.</p>
+            <div class="qbh-muted">Match customers and suppliers, tax classifications and expense items. Confirm duplicate detection and perform a single supervised test before turning on any automatic sync.</div></div>
+        </section>
+        <p class="qbh-feedback" id="qbhFeedback" role="status" aria-live="polite"></p>
+      </div>`;
+    const $ = id => workspaceBody.querySelector('#' + id);
+    const node = (tag, className, value) => {
+      const out=document.createElement(tag); if(className)out.className=className;
+      if(value!==undefined)out.textContent=String(value); return out;
+    };
+    const money = value => {const n=Number(value);return Number.isFinite(n)?n.toLocaleString('en-US',{style:'currency',currency:'USD'}):'—';};
+    let invoices=[],purchaseOrders=[],state=null,numbering=null,numberPolicies=null,selectedEdition='not_selected';
+    function feedback(message,error=false) {const e=$('qbhFeedback');e.textContent=message||'';e.classList.toggle('qbh-error',error);}
+    function tab(value) {
+      workspaceBody.querySelectorAll('[data-qbh-tab]').forEach(btn=>btn.setAttribute('aria-selected',String(btn.dataset.qbhTab===value)));
+      workspaceBody.querySelectorAll('[data-qbh-panel]').forEach(panel=>{panel.hidden=panel.dataset.qbhPanel!==value;});
+    }
+    function badge(row) {
+      if(row.handoff_status==='changed_since_preparation')return ['Changed','review'];
+      if(row.handoff_status==='prepared_for_review')return ['Prepared','prepared'];
+      if(row.ready)return ['Ready','ready'];
+      return ['Needs review','review'];
+    }
+    function recordCard(row,kind,activity=false) {
+      const wrap=node('article','qbh-invoice');
+      const main=node('div','qbh-invoice-main'),details=node('div','qbh-invoice-details');
+      details.append(node('strong','qbh-number',row.number),node('span','qbh-customer',kind==='po'?(row.vendor||'Supplier missing'):(row.customer||'Customer missing')));
+      const meta=[kind==='po'?('Supplier PO · '+(row.order_status||'Draft')):'Issued invoice',row.job_number?'Job '+row.job_number:'No linked job',row.date].filter(Boolean).join(' · ');
+      details.append(node('small','qbh-muted',meta));
+      const [status,style]=badge(row);main.append(details,node('span','qbh-tag qbh-tag-'+style,status));
+      const end=node('div','qbh-invoice-end');
+      end.append(node('strong','qbh-amount',money(row.total)));
+      if(!activity&&row.ready&&row.handoff_status==='not_prepared'){
+        const btn=node('button','btn btn-orange qbh-prepare','Prepare handoff');btn.type='button';
+        btn.onclick=async()=>{
+          const label=kind==='po'?'supplier PO':'invoice';
+          if(!window.confirm('Prepare '+row.number+' ('+label+') for QuickBooks review? Nothing will be sent or posted.'))return;
+          btn.disabled=true;feedback('Preparing '+row.number+'…');
+          const url=kind==='po'?'/pds-quickbooks/prepare-po':'/pds-quickbooks/prepare-invoice';
+          const payload=kind==='po'?{po_number:row.number,fingerprint:row.fingerprint,confirm:true}:{invoice_number:row.number,fingerprint:row.fingerprint,confirm:true};
+          try{const result=await fetchJSON(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+            feedback(result.duplicate?'Already prepared; no duplicate created.':row.number+' prepared locally. Nothing was synced to QuickBooks.');
+            await refresh(false);
+          }catch(err){feedback('Unable to prepare '+row.number+': '+(err.message||err),true);btn.disabled=false;}
+        };
+        end.append(btn);
+      }
+      wrap.append(main,end);
+      if(activity)wrap.append(node('small','qbh-muted','Prepared '+(row.prepared_at?new Date(row.prepared_at).toLocaleString():'—')+' · Not synced'));
+      else if(row.needs_review?.length)wrap.append(node('small','qbh-reasons',row.needs_review.join(' · ')));
+      return wrap;
+    }
+    function filteredRows(rows,search,filter) {
+      return rows.filter(r=>{
+        const prepared=r.handoff_status==='prepared_for_review';
+        if(filter==='prepared'&&!prepared)return false;
+        if(filter==='ready'&&(!r.ready||prepared))return false;
+        if(filter==='needs_review'&&r.ready&&r.handoff_status!=='changed_since_preparation')return false;
+        return [r.number,r.customer,r.vendor,r.job_number,r.order_status].join(' ').toLowerCase().includes(search);
+      });
+    }
+    function paintList(host,rows,kind,activity=false){
+      host.replaceChildren();
+      if(!rows.length){host.append(node('p','qbh-empty',activity?'Nothing prepared yet.':kind==='po'?'No supplier purchase orders match these filters.':'No invoices match these filters.'));return;}
+      rows.forEach(r=>host.append(recordCard(r,kind,activity)));
+    }
+    function draw(){
+      const inv=filteredRows(invoices,String($('qbhSearch').value||'').trim().toLowerCase(),$('qbhFilter').value);
+      const pos=filteredRows(purchaseOrders,String($('qbhPOSearch').value||'').trim().toLowerCase(),$('qbhPOFilter').value);
+      paintList($('qbhInvoiceRows'),inv,'invoice');paintList($('qbhPORows'),pos,'po');
+      const activity=[];
+      invoices.filter(r=>r.handoff_status==='prepared_for_review').forEach(r=>activity.push({r,kind:'invoice'}));
+      purchaseOrders.filter(r=>r.handoff_status==='prepared_for_review').forEach(r=>activity.push({r,kind:'po'}));
+      activity.sort((a,b)=>String(b.r.prepared_at||'').localeCompare(String(a.r.prepared_at||'')));
+      const host=$('qbhActivityRows');host.replaceChildren();
+      if(!activity.length)host.append(node('p','qbh-empty','No invoice or supplier PO handoffs prepared yet.'));
+      else activity.forEach(x=>host.append(recordCard(x.r,x.kind,true)));
+      $('qbhReady').textContent=String(invoices.filter(r=>r.ready&&r.handoff_status!=='prepared_for_review').length);
+      $('qbhPOReady').textContent=String(purchaseOrders.filter(r=>r.ready&&r.handoff_status==='not_prepared').length);
+      $('qbhPrepared').textContent=String(activity.length);
+      $('qbhNeedsReview').textContent=String(invoices.filter(r=>!r.ready).length+purchaseOrders.filter(r=>!r.ready).length);
+      $('qbhInvoiceTabCount').textContent=String(invoices.length);
+      $('qbhPOTabCount').textContent=String(purchaseOrders.length);
+    }
+    const numberingLabels={estimate:'Estimates',invoice:'Invoices',supplier_po:'Supplier purchase orders'};
+    function drawNumbering(){
+      const host=$('qbhNumberRows');host.replaceChildren();
+      if(!numbering){host.append(node('p','qbh-empty','Numbering plan unavailable.'));return;}
+      const rows=Array.isArray(numbering.examples)?numbering.examples:[];
+      rows.forEach(info=>{
+        const card=node('div','qbh-number-row');
+        const heading=node('div','qbh-number-row-head');
+        const left=node('div','qbh-number-row-label');
+        left.append(node('strong','',numberingLabels[info.kind]||info.kind),
+                    node('small','qbh-muted','Example Doorks #: '+info.doorks_example+' · Always retained'));
+        heading.append(left,node('span','qbh-number-saved',info.verified_reference_count+' QB references verified'));
+        const controls=node('div','qbh-number-row-controls');
+        const select=node('select','input qbh-number-select');select.setAttribute('aria-label','QuickBooks numbering plan for '+(numberingLabels[info.kind]||info.kind));
+        for(const [value,label] of [['request_doorks_number','Request same Doorks number'],['quickbooks_assigns_number','Let QuickBooks assign number']]){
+          const option=document.createElement('option');option.value=value;option.textContent=label;select.append(option);
+        }
+        select.value=numberPolicies?.[info.kind]||'request_doorks_number';
+        const result=node('div','qbh-number-target');
+        const update=()=>{
+          numberPolicies[info.kind]=select.value;
+          result.textContent=select.value==='request_doorks_number'
+            ?'QuickBooks: request '+info.doorks_example+' if the company numbering settings allow it.'
+            :'QuickBooks: assigned during sync (example: 17566). Doorks '+info.doorks_example+' stays unchanged.';
+          $('qbhSaveNumbering').disabled=Boolean(numbering.saved)&&JSON.stringify(numberPolicies)===JSON.stringify(numbering.policies);
+        };
+        select.onchange=update;
+        controls.append(select,result);card.append(heading,controls);host.append(card);update();
+      });
+      $('qbhNumberingCount').textContent=String(rows.length);
+      $('qbhNumberFeedback').textContent=numbering.saved
+        ?'Saved locally · QuickBooks account preferences still need verification.'
+        :'Default preview · Save this plan after review. No documents will be renumbered.';
+    }
+    function drawEdition(){
+      workspaceBody.querySelectorAll('[data-qbh-edition]').forEach(button=>{
+        const selected=button.dataset.qbhEdition===selectedEdition;
+        button.classList.toggle('qbh-selected',selected);button.setAttribute('aria-pressed',String(selected));
+      });
+      const steps={online:'Online: authorize the PDS company with Intuit OAuth, verify its purchase-order plan, then test one vendor and one customer mapping.',
+        desktop:'Desktop: confirm the edition/year and supported Windows Web Connector; test supplier and invoice exchange with one company file.'};
+      $('qbhNextStep').textContent=steps[selectedEdition]||'Select the QuickBooks edition to see its connection requirements.';
+      $('qbhSaveEdition').disabled=selectedEdition==='not_selected'||selectedEdition===state?.edition;
+    }
+    async function refresh(showFeedback=true){
+      try{
+        const [s,inv,po,numbers]=await Promise.all([fetchJSON('/pds-quickbooks/status'),fetchJSON('/pds-quickbooks/invoices'),fetchJSON('/pds-quickbooks/purchase-orders'),fetchJSON('/pds-quickbooks/numbering')]);
+        if(activePlatform!=='pds'||currentUser?.role!=='office_admin'||!workspaceBody.querySelector('.qbh-shell'))return;
+        state=s;invoices=Array.isArray(inv.invoices)?inv.invoices:[];purchaseOrders=Array.isArray(po.purchase_orders)?po.purchase_orders:[];numbering=numbers;numberPolicies={...numbering.policies};
+        selectedEdition=state.edition||'not_selected';
+        $('qbhEditionSummary').textContent=state.edition==='online'?'QuickBooks Online':state.edition==='desktop'?'QuickBooks Desktop':'Edition not selected';
+        $('qbhSyncSummary').textContent='Not connected · auto sync off';
+        $('qbhSetupStatus').textContent=state.edition==='not_selected'?'Select an edition to continue.':'Edition saved. No QuickBooks connection yet.';
+        draw();drawEdition();drawNumbering();if(showFeedback)feedback('PDS invoice and supplier PO records refreshed. No transactions were posted.');
+      }catch(err){feedback('Unable to load QuickBooks Hub: '+(err.message||err),true);$('qbhInvoiceRows').textContent='Unable to load invoices.';$('qbhPORows').textContent='Unable to load supplier POs.';}
+    }
+    workspaceBody.querySelectorAll('[data-qbh-tab]').forEach(button=>button.onclick=()=>tab(button.dataset.qbhTab));
+    workspaceBody.querySelectorAll('[data-qbh-edition]').forEach(button=>button.onclick=()=>{selectedEdition=button.dataset.qbhEdition;drawEdition();});
+    $('qbhSaveNumbering').onclick=async()=>{
+      if(!numbering||!numberPolicies)return;
+      if(!window.confirm('Save QuickBooks numbering plan? Existing Doorks numbers and documents will not change.'))return;
+      const button=$('qbhSaveNumbering');button.disabled=true;
+      try{
+        const saved=await fetchJSON('/pds-quickbooks/numbering',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({policies:numberPolicies,confirm:true})});
+        numbering=saved;numberPolicies={...saved.policies};drawNumbering();
+        feedback('Numbering plan saved locally. No QuickBooks transactions were created.');
+      }catch(err){button.disabled=false;feedback('Unable to save numbering plan: '+(err.message||err),true);}
+    };
+    $('qbhRefresh').onclick=()=>refresh();
+    $('qbhSearch').oninput=draw;$('qbhFilter').onchange=draw;
+    $('qbhPOSearch').oninput=draw;$('qbhPOFilter').onchange=draw;
+    $('qbhExport').onclick=()=>{
+      if(!invoices.some(r=>r.handoff_status==='prepared_for_review')){feedback('Prepare an invoice before exporting the handoff CSV.',true);return;}
+      window.location.assign('/pds-quickbooks/review.csv');
+    };
+    $('qbhPOExport').onclick=()=>{
+      if(!purchaseOrders.some(r=>r.handoff_status==='prepared_for_review')){feedback('Prepare a supplier PO before exporting the handoff CSV.',true);return;}
+      window.location.assign('/pds-quickbooks/po-review.csv');
+    };
+    $('qbhSaveEdition').onclick=async()=>{
+      if(selectedEdition==='not_selected'||selectedEdition===state?.edition)return;
+      if(!window.confirm('Save '+selectedEdition+' for PDS? No QuickBooks authorization or sync will occur.'))return;
+      const btn=$('qbhSaveEdition');btn.disabled=true;
+      try{await fetchJSON('/pds-quickbooks/configuration',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({edition:selectedEdition,confirm:true})});
+        await refresh(false);feedback('QuickBooks edition saved. No accounting transactions were created.');
+      }catch(err){feedback(err.message||'Unable to save QuickBooks setup.',true);btn.disabled=false;}
+    };
+    await refresh(false);
   }
 
   async function renderAccountingView(section = "hub") {
@@ -13868,15 +14164,21 @@ function renderEmployeesView() {
       row("CC", preview.cc);
       row("Subject", preview.subject);
       row("Attached PDF", preview.filename);
-      if(preview.send_enabled===false){
+      if(preview.send_enabled===false && preview.requires_office_review !== true){
         status.textContent='Saved document verified, but PDS estimate/invoice emailing is disabled in Render. Contact the office administrator.';
         await showHistory();return;
       }
-      status.textContent = "Recipient and saved PDF verified. Sending requires your approval. To change the recipient, update the saved job contact first.";
+      const technicianReview = preview.requires_office_review === true;
+      status.textContent = technicianReview
+        ? "Saved PDF verified. Submit for Office review; technicians cannot send customer documents."
+        : "Recipient and saved PDF verified. Sending requires your approval. To change the recipient, update the saved job contact first.";
+      send.textContent = technicianReview ? "Submit for Office Review" : "Approve & Send via Resend";
       send.disabled = false;
       await showHistory();
       send.onclick = async () => {
-        if (!confirm("Send " + kind + " " + preview.number + " and its PDF to " + preview.to + " through Resend?")) return;
+        if (!confirm(technicianReview
+          ? "Send " + kind + " " + preview.number + " to Office for review? No customer email will be sent."
+          : "Send " + kind + " " + preview.number + " and its PDF to " + preview.to + " through Resend?")) return;
         send.disabled = true;
         close.disabled = true;
         status.textContent = "Preparing approved email…";
@@ -13886,6 +14188,11 @@ function renderEmployeesView() {
           if (!proposal?.id) throw Error("The email proposal could not be verified");
           if (proposal.to !== preview.to || proposal.number !== preview.number) {
             status.textContent = "Email details changed. Close and review the new recipient before sending.";
+            return;
+          }
+          if (technicianReview) {
+            status.textContent = kind === "estimate" ? "Quote Ready · Awaiting Office review." : "Invoice Ready · Awaiting Office review.";
+            send.textContent = "Review Requested";
             return;
           }
           status.textContent = "Submitting to Resend…";
@@ -13932,6 +14239,58 @@ function renderEmployeesView() {
       }
     }
   }
+
+  async function openPdsDocumentReviewInbox(focusNumber = '') {
+    if (activePlatform !== 'pds' || !['office', 'office_admin'].includes(String(currentUser?.role || ''))) return;
+    const shade=document.createElement('div');shade.style.cssText='position:fixed;inset:0;z-index:12950;background:#102338a6;display:flex;justify-content:center;align-items:center;padding:12px';
+    const sheet=document.createElement('section');sheet.className='card';sheet.style.cssText='width:min(850px,100%);max-height:90dvh;overflow:auto;background:#fff;border-radius:16px;padding:18px;display:grid;gap:12px';
+    const top=document.createElement('div');top.style.cssText='display:flex;justify-content:space-between;align-items:center;gap:12px';
+    const title=document.createElement('h3');title.textContent='Ready for Review';title.style.margin='0';
+    const close=document.createElement('button');close.type='button';close.className='btn';close.textContent='Close ×';close.onclick=()=>shade.remove();top.append(title,close);
+    const hint=document.createElement('small');hint.textContent='Technician estimates and invoices only · Office review required before Resend.';
+    const status=document.createElement('div');status.setAttribute('role','status');status.className='hint';
+    const cards=document.createElement('div');cards.style.cssText='display:grid;gap:10px';
+    const refresh=document.createElement('button');refresh.className='btn';refresh.type='button';refresh.textContent='Refresh';
+    sheet.append(top,hint,refresh,status,cards);shade.append(sheet);document.body.append(shade);
+    const buildButton=(label,fn,primary=false)=>{const b=document.createElement('button');b.type='button';b.className=primary?'btn btn-orange':'btn';b.textContent=label;b.onclick=fn;return b};
+    async function load(){
+      refresh.disabled=true;cards.replaceChildren();status.textContent='Checking saved review requests…';
+      try{
+        const response=await fetchJSON('/moses-pds-email/review-queue');
+        const items=Array.isArray(response.items)?response.items:[];
+        status.textContent=items.length+' document(s) awaiting review';
+        if(!items.length){cards.append(document.createTextNode('No technician documents awaiting review.'));return;}
+        for(const item of items.filter(x=>!focusNumber||String(x.number)===String(focusNumber))){
+          const card=document.createElement('article');card.style.cssText='border:1px solid #dce3e9;border-radius:12px;padding:13px;display:grid;gap:9px';
+          const name=document.createElement('strong');name.textContent=(item.ready_label||'Ready for Review')+' · '+item.number;
+          const details=document.createElement('small');details.style.cssText='color:#64748b;overflow-wrap:anywhere';
+          details.textContent=[item.job_number&&'Job #'+item.job_number,item.to&&'Recipient: '+item.to,item.requested_by&&'Prepared by: '+item.requested_by].filter(Boolean).join(' · ');
+          const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
+          actions.append(buildButton('View/Edit',async()=>{
+            try{
+              const job=await apiGetJob(item.job_id);
+              if(String(job?.id||'')!==String(item.job_id))throw Error('Job linkage not verified');
+              const docs=await apiListDocuments();
+              const doc=(docs||[]).find(d=>String(d.number||'').toUpperCase()===String(item.number||'').toUpperCase()&&String(d.type||'').toLowerCase()===item.kind);
+              if(!doc)throw Error('Saved document not found');
+              shade.remove();openEstimateInvoiceDrawer({...job,__docEdit:doc},item.kind,null,{mosesJobFlow:true});
+            }catch(e){status.textContent='Cannot open saved document: '+(e.message||e)}
+          }));
+          actions.append(buildButton('Review & Email',()=>openEstimateInvoiceEmail({number:item.number},item.kind),true));
+          actions.append(buildButton('Decline',async()=>{
+            if(!confirm('Decline technician review for '+item.number+'? The document will remain saved.'))return;
+            try{await fetchJSON('/moses-pds-email/proposals/'+encodeURIComponent(item.id)+'/decision',{
+              method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:false})});await load()
+            }catch(e){status.textContent='Decline failed: '+(e.message||e)}
+          }));
+          card.append(name,details,actions);cards.append(card);
+        }
+      }catch(e){status.textContent='Review queue unavailable: '+(e.message||e)}
+      finally{refresh.disabled=false}
+    }
+    refresh.onclick=load;await load();
+  }
+  document.addEventListener('moses-open-pds-document-review',e=>openPdsDocumentReviewInbox(String(e.detail?.number||'')));
 
 function exportEstimateInvoiceToQuickBooksCSV(payload, docType = "invoice") {
     const esc = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
@@ -18129,6 +18488,7 @@ function renderSaddlebackView() {
   if (navDataCenter) navDataCenter.addEventListener("click", renderDataCenterView);
   if (navAccounting) {const label=navAccounting.querySelector('span');if(label)label.textContent='Accounting Hub';}
   if (navAccounting) navAccounting.addEventListener("click", async () => { try { await fetchJSON("/accounting/lock", {method:"POST"}); } catch (e) { console.warn("Accounting lock",e); } await renderAccountingView(); });
+  if (navQuickBooks) navQuickBooks.addEventListener("click", renderQuickBooksHub);
   if (navPayroll) navPayroll.addEventListener("click", () => renderPayrollView());
   if (navEmployees) navEmployees.addEventListener("click", renderEmployeesView);
   if (navDataUpload) navDataUpload.addEventListener("click", renderDataUploadView);

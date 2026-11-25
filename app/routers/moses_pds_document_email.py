@@ -8,6 +8,10 @@ router = APIRouter(prefix='/moses-pds-email', tags=['moses-pds-email'])
 class Approval(BaseModel):
     approve: bool
 
+@router.get('/review-queue')
+def review_queue(request: Request):
+    return delivery.review_queue(request)
+
 @router.get('/{kind}/{number}/preview')
 def preview(kind: str, number: str, request: Request):
     return delivery.preview(request, kind, number)

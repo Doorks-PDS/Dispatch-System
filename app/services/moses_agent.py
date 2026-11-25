@@ -48,7 +48,15 @@ def readiness(platform='sdc') -> dict[str, object]:
         'model_configured': model_valid,
         'ready_for_live_check': enabled(platform) and sdk_available and key_configured and model_valid,
         'live_api_verified': False,
-        'note': 'Configuration checks only; an actual OpenAI call and browser verification are still required.',
+        'missing_setup': (
+            ([] if key_configured else ['OPENAI_API_KEY'])
+            + ([] if enabled(platform) else [{'pds': 'DOORKS_MOSES_PDS_AGENT_ENABLED', 'doorks': 'DOORKS_MOSES_DOORKS_AGENT_ENABLED', 'sdc': 'DOORKS_SDC_AGENT_ENABLED'}[platform]])
+            + ([] if web_research_enabled else ['DOORKS_MOSES_WEB_SEARCH_ENABLED'])
+            + ([] if sdk_available else ['openai-agents SDK installation'])
+            + ([] if model_valid else ['DOORKS_MOSES_MODEL'])
+        ),
+        'live_web_test_path': '/doorks-assistant/agent-web-check',
+        'note': 'This is configuration only. A confirmed hosted web_search_call is required before calling live web connected.',
     }
 
 def answer(request, message: str, history: list[dict[str, str]]) -> str:

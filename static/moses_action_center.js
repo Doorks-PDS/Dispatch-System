@@ -326,15 +326,39 @@
             contents.append(section);
           }
         }
+        if (workspace === 'pds') {
+          // Read-only office inbox; no technician can fetch this route or send from it.
+          try {
+            const review = await request('/moses-pds-email/review-queue');
+            const section=document.createElement('section');section.className='moses-center-group';
+            section.dataset.mosesTab='review';
+            section.append(text('strong','Ready for Review ('+(review.count||0)+')'));
+            const inside=document.createElement('div');inside.style.cssText='display:grid;gap:10px';
+            for(const doc of (review.items||[]).slice(0,30)){
+              const card=document.createElement('article');card.className='moses-center-card';
+              card.dataset.mosesSearch=[doc.ready_label,doc.number,doc.job_number,doc.to].join(' ').toLowerCase();
+              card.append(text('strong',(doc.ready_label||'Ready for Review')+' · '+doc.number));
+              card.append(text('small',[doc.job_number&&'Job #'+doc.job_number,doc.to&&'To: '+doc.to].filter(Boolean).join(' · ')));
+              const open=text('button','Review Document','btn btn-orange');open.type='button';
+              open.onclick=()=>document.dispatchEvent(new CustomEvent('moses-open-pds-document-review',{detail:{number:doc.number}}));
+              card.append(open);inside.append(card);
+            }
+            if(!review.count)inside.append(text('small','No technician documents awaiting review.','moses-center-empty'));
+            section.append(inside);contents.append(section);
+          }catch(error){
+            // A technician or lead does not have office access. Do not show the tab.
+          }
+        }
         if (workspace === 'pds') renderCards(data.drafts, 'Saved drafts', 'draft');
         renderCards(data.approvals, 'Approvals', 'approval');
         if (workspace === 'pds') renderCards(data.work, 'PDS jobs needing attention', 'work');
         renderCards(data.delivery, 'Delivery issues', 'delivery');
-        const labels={work:'Jobs',draft:'Drafts',approval:'Approvals',delivery:'Delivery',sms:'Texts'};
-        const counts={work:data.work?.count,draft:data.drafts?.count,
+        const labels={work:'Jobs',review:'Ready for Review',draft:'Drafts',approval:'Approvals',delivery:'Delivery',sms:'Texts'};
+        const counts={work:data.work?.count,review:contents.querySelector('[data-moses-tab="review"]')?.querySelectorAll('.moses-center-card').length,draft:data.drafts?.count,
           approval:data.approvals?.count,delivery:data.delivery?.count,
           sms:contents.querySelector('[data-moses-tab="sms"]')?.querySelectorAll('.moses-center-card').length||0};
         const kinds=workspace==='pds'?['work','draft','approval','delivery','sms']:['approval','delivery'];
+        if(counts.review!==undefined)kinds.splice(1,0,'review');
         tabs.replaceChildren();
         for(const kind of kinds){
           const total=counts[kind];const tab=text('button',labels[kind]+' ('+(total==null?'—':total)+')','btn');

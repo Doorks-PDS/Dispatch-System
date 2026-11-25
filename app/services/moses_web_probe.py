@@ -55,6 +55,17 @@ def check(workspace: str) -> dict:
         verified = called and answered
         return {**result, 'web_search_verified': verified,
                 'result': 'hosted_web_search_verified' if verified else 'no_confirmed_web_call'}
-    except Exception:
-        # No exception details, provider response bodies or credentials to UI.
-        return {**result, 'result': 'web_provider_or_sdk_check_failed'}
+    except Exception as exc:
+        # Only safe diagnostic categories: never reveal provider response bodies,
+        # credentials, private data, or arbitrary exception messages to the UI.
+        error_kind = type(exc).__name__
+        reasons = {
+            'AuthenticationError': 'api_key_rejected',
+            'PermissionDeniedError': 'api_project_permission_denied',
+            'RateLimitError': 'api_quota_or_rate_limit',
+            'BadRequestError': 'model_or_hosted_web_tool_rejected',
+            'APITimeoutError': 'provider_timeout',
+            'APIConnectionError': 'provider_network_unavailable',
+            'MaxTurnsExceeded': 'web_search_did_not_finish',
+        }
+        return {**result, 'result': reasons.get(error_kind, 'web_provider_or_sdk_check_failed')}

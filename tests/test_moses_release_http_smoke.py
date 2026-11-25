@@ -48,7 +48,9 @@ def test_agent_readiness_http_is_scoped_and_no_secrets(client_factory, platform)
     assert body['agent_enabled'] is False
     assert body['api_key_configured'] is False
     assert body['live_api_verified'] is False
-    assert 'key' not in str(body).lower().replace('api_key_configured', '')
+    # Exposing the setting NAME is safe and helps setup; credential values are not.
+    assert 'OPENAI_API_KEY' in body.get('missing_setup', [])
+    assert 'OPENAI_API_KEY=' not in str(body)
 
 
 def test_agent_readiness_blocks_non_office_user(client_factory):

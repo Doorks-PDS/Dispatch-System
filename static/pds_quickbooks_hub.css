@@ -1,0 +1,129 @@
+/* PDS QuickBooks Hub 5.68: isolated styling; no changes to Accounting Hub. */
+.qbh-shell{max-width:1320px;margin:0 auto;display:grid;gap:20px;color:#24342b;padding-bottom:48px}
+.qbh-shell [hidden]{display:none!important}
+.qbh-hero{background:linear-gradient(115deg,#213a2d 0%,#315442 68%,#40654e 100%);color:#fff;padding:29px 34px;border-radius:20px;display:flex;justify-content:space-between;align-items:center;gap:22px;box-shadow:0 12px 30px #19372519;flex-wrap:wrap}
+.qbh-eyebrow{font-size:10px;letter-spacing:1.7px;font-weight:800;color:#d5e9d9}
+.qbh-dot{margin:0 6px;color:#a8bcab}
+.qbh-hero h2{font-size:30px;line-height:1.15;letter-spacing:-.7px;margin:11px 0 9px;color:white}
+.qbh-hero p{font-size:13px;line-height:1.55;max-width:610px;margin:0;color:#e3ece5}
+.qbh-hero-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.qbh-connection{display:inline-flex;gap:9px;align-items:center;padding:9px 12px;border:1px solid #ffffff58;background:#fff2;border-radius:999px;font-size:12px;font-weight:700}
+.qbh-status-dot{background:#c2cbd0;width:8px;height:8px;border-radius:50%;display:inline-block}
+.qbh-hero .qbh-refresh{background:white;border-color:white;color:#2c4836;font-weight:700}
+.qbh-metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:13px}
+.qbh-metric{background:#fff;border:1px solid #e0e7e0;border-radius:16px;padding:19px 21px;display:grid;gap:9px;box-shadow:0 4px 18px #17331a08;min-height:126px;box-sizing:border-box}
+.qbh-metric>span{font-size:12px;color:#647366;font-weight:700}
+.qbh-metric strong{color:#214b34;font-size:32px;letter-spacing:-1.5px;line-height:1.2}
+.qbh-metric small{color:#7c8980;font-size:11px}
+.qbh-metric-neutral strong{font-size:25px;letter-spacing:-.6px}
+.qbh-tabs{border-bottom:1px solid #dce7df;display:flex;gap:5px;padding:0 2px}
+.qbh-tabs button{border:0;border-bottom:3px solid transparent;border-radius:0;background:none;color:#617367;font:700 13px inherit;padding:13px 21px;cursor:pointer;font-size:13px;font-weight:700}
+.qbh-tabs button[aria-selected=true]{border-bottom-color:#376a49;color:#245737}
+.qbh-tabs button:hover{color:#27563c}
+.qbh-tabs button:focus-visible,.qbh-edition:focus-visible{outline:3px solid #f09a56;outline-offset:2px}
+.qbh-section{background:#fff;border:1px solid #e1e7e1;border-radius:18px;padding:25px 28px;box-shadow:0 5px 22px #152a1807;min-height:250px}
+.qbh-section-head{display:flex;justify-content:space-between;gap:15px;align-items:center;flex-wrap:wrap;margin-bottom:21px}
+.qbh-section-head h3{color:#284632;font-size:19px;font-weight:800;letter-spacing:-.3px;margin:0 0 6px}
+.qbh-section-head p{font-size:12px;color:#778378;margin:0;line-height:1.6;max-width:650px}
+.qbh-toolbar{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:13px}
+.qbh-toolbar input{flex:1;min-width:210px}
+.qbh-toolbar select{min-width:175px;width:175px}
+.qbh-invoices{display:grid;gap:10px}
+.qbh-invoice{border:1px solid #e0e7e2;border-radius:12px;padding:15px 18px;display:grid;gap:8px}
+.qbh-invoice-main{display:flex;flex:1;align-items:center;gap:16px;min-width:0;flex-wrap:wrap}
+.qbh-invoice-details{display:grid;gap:5px;flex:1;min-width:190px}
+.qbh-number{font-size:14px;color:#204a30;font-weight:800}
+.qbh-customer{font-size:13px;color:#374e40;font-weight:600}
+.qbh-muted{font-size:11px;color:#829086;line-height:1.5}
+.qbh-invoice-end{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:flex-end}
+.qbh-amount{font-size:17px;color:#203b2b;white-space:nowrap}
+.qbh-prepare{font-size:12px!important;padding:8px 12px!important}
+.qbh-tag{font-size:11px;line-height:1.3;font-weight:800;border-radius:999px;padding:5px 9px;white-space:nowrap}
+.qbh-tag-ready{background:#e7f4e9;color:#347244}
+.qbh-tag-prepared{background:#edf1fb;color:#4d6286}
+.qbh-tag-review{background:#fff3df;color:#8e6125}
+.qbh-reasons{color:#92612c;font-size:11px;line-height:1.5}
+.qbh-empty{margin:10px 0;background:#f7faf7;border:1px dashed #d9e4da;padding:34px 20px;text-align:center;color:#7e8a80;border-radius:12px;font-size:13px}
+.qbh-setup-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}
+.qbh-edition{text-align:left;background:#fff;border:1px solid #e0e8df;border-radius:15px;display:grid;justify-items:start;gap:12px;padding:22px;cursor:pointer;font-family:inherit;color:#2b4434}
+.qbh-edition-icon{font-size:27px;width:45px;height:45px;border-radius:12px;background:#edf4ed;display:grid;place-items:center}
+.qbh-edition strong{font-size:15px}
+.qbh-edition small{color:#6b7b71;line-height:1.6;font-size:12px;min-height:38px}
+.qbh-edition-check{font-size:11px;font-weight:800;color:#4b7757}
+.qbh-edition.qbh-selected{border:2px solid #3f8055;background:#f7fbf7;padding:21px}
+.qbh-edition.qbh-selected .qbh-edition-check:before{content:'✓ ';}
+.qbh-setup-actions{display:flex;align-items:center;gap:13px;flex-wrap:wrap;margin-top:20px}
+.qbh-connection-note{border-radius:13px;background:#f5f8f5;padding:19px 22px;margin-top:20px;display:grid;gap:7px;border:1px solid #e4ebe5}
+.qbh-connection-note strong{font-size:13px;color:#3c5f44}
+.qbh-connection-note p{font-size:12px;line-height:1.6;margin:0;color:#546d5c}
+.qbh-feedback{color:#46684d;margin:0;min-height:20px;font-size:12px}
+.qbh-feedback.qbh-error{color:#a44232}
+@media(max-width:950px){.qbh-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:610px){.qbh-shell{gap:14px}.qbh-hero{padding:22px;border-radius:15px}.qbh-hero h2{font-size:26px}.qbh-section{padding:17px;border-radius:14px}.qbh-metrics{gap:8px}.qbh-metric{padding:14px;min-height:112px}.qbh-metric strong{font-size:27px}.qbh-setup-grid{grid-template-columns:1fr}.qbh-invoice{padding:13px}.qbh-invoice-end{justify-content:space-between}.qbh-tabs button{padding:12px 16px}}
+/* 5.70: denser, clearer office dashboard. This stylesheet is scoped to QuickBooks Hub. */
+.qbh-shell{gap:17px;color:#263d2c;max-width:1280px}
+.qbh-hero{position:relative;overflow:hidden;min-height:164px;background:linear-gradient(120deg,#183429 0%,#224b38 58%,#315d44 100%);padding:30px 35px;border-radius:22px;box-shadow:0 16px 40px #102c251c}
+.qbh-hero:after{content:"";position:absolute;right:-75px;bottom:-125px;width:370px;height:370px;border:1px solid #ffffff1c;border-radius:50%;box-shadow:0 0 0 58px #ffffff08,0 0 0 118px #ffffff05;pointer-events:none}
+.qbh-hero-copy,.qbh-hero-actions{position:relative;z-index:1}
+.qbh-hero h2{font-size:33px;letter-spacing:-1px;margin-top:15px}
+.qbh-hero p{max-width:580px;color:#deeadf}
+.qbh-hero-summary{display:flex;gap:13px;flex-wrap:wrap;margin-top:20px}
+.qbh-hero-summary span{font-size:11px;font-weight:650;letter-spacing:.1px;color:#d7e7d9;padding:5px 0}
+.qbh-hero-summary span:first-child{color:#bdedbf}
+.qbh-connection{background:#ffffff16;border-color:#ffffff48;backdrop-filter:blur(4px)}
+.qbh-metrics{gap:12px}
+.qbh-metric{border-color:#dee8df;border-radius:18px;padding:20px 22px;min-height:127px;box-shadow:0 6px 18px #17331a09}
+.qbh-metric>span{font-size:12px;letter-spacing:.1px;color:#63766a}
+.qbh-metric strong{font-size:35px;font-variant-numeric:tabular-nums;color:#255239}
+.qbh-metric small{font-size:11px}
+.qbh-metric-alert strong{color:#a46d27}
+.qbh-workflow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:7px;border:1px solid #e1e9e2;border-radius:16px;background:#f8faf8;padding:13px}
+.qbh-workflow>div{display:grid;grid-template-columns:30px 1fr;column-gap:10px;align-items:center;row-gap:4px;padding:8px 9px}
+.qbh-workflow strong{font-size:12px;color:#344c3d;font-weight:750}
+.qbh-workflow small{grid-column:2;color:#88938a;font-size:10px}
+.qbh-step{grid-row:span 2;display:grid;place-items:center;width:28px;height:28px;border-radius:9px;border:1px solid #d6e5d8;background:white;color:#718675;font-weight:800;font-size:12px}
+.qbh-step-current{color:#fff;background:#35734a;border-color:#35734a}
+.qbh-tabs{overflow-x:auto;scrollbar-width:thin;white-space:nowrap;padding-top:4px}
+.qbh-tabs button{display:inline-flex;align-items:center;gap:9px;white-space:nowrap;padding:13px 19px}
+.qbh-tab-count{font-size:10px;font-weight:800;border-radius:7px;background:#edf2ee;color:#5c7564;min-width:17px;text-align:center;padding:3px 6px}
+.qbh-tabs button[aria-selected=true] .qbh-tab-count{background:#e1f0e2;color:#2c6641}
+.qbh-section{border-radius:20px;padding:26px 29px;box-shadow:0 9px 26px #132f1b08}
+.qbh-kicker{font-size:10px;color:#43805a;font-weight:800;letter-spacing:1.2px;margin-bottom:8px}
+.qbh-section-head h3{font-size:20px;color:#253d2d}
+.qbh-section-head p{max-width:680px}
+.qbh-invoice{padding:17px 20px;border-radius:14px;grid-template-columns:minmax(0,1fr);background:linear-gradient(115deg,#fff 0%,#fcfdfc 100%);transition:border-color .15s ease,box-shadow .15s ease}
+.qbh-invoice:hover{border-color:#bed1c1;box-shadow:0 5px 13px #193c2610}
+.qbh-number{font-size:14px;letter-spacing:.1px}
+.qbh-customer{font-size:13px}
+.qbh-amount{font-size:18px;font-variant-numeric:tabular-nums}
+.qbh-prepare{white-space:nowrap}
+.qbh-invoice-main{justify-content:space-between}
+.qbh-reasons{padding-top:8px;border-top:1px solid #f0e8d9}
+.qbh-footnote{background:#f7faf7;border:1px solid #e0e9e1;padding:12px 15px;border-radius:12px;color:#64786a;font-size:11px;line-height:1.65;margin:15px 0 0}
+.qbh-setup-status{display:flex;gap:10px;align-items:center;flex-wrap:wrap;background:#f6f8f6;border:1px solid #e2eae2;padding:13px 18px;border-radius:12px;margin-bottom:16px;font-size:12px}
+.qbh-setup-status .qbh-status-dot{background:#9aaa9e}
+.qbh-setup-status strong{color:#284a35}
+.qbh-setup-status span:last-child{color:#7d8d81;margin-left:auto}
+.qbh-edition{transition:border-color .15s ease,background .15s ease,box-shadow .15s ease;min-height:174px}
+.qbh-edition:hover{border-color:#90bba0;box-shadow:0 8px 16px #1b3a2412}
+.qbh-edition.qbh-selected{box-shadow:0 0 0 2px #b8ddc0 inset}
+@media(max-width:1050px){.qbh-workflow{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:610px){.qbh-hero{padding:24px;min-height:unset}.qbh-hero h2{font-size:28px}.qbh-hero-summary{gap:7px 13px;margin-top:13px}.qbh-hero-summary span{font-size:10px}.qbh-workflow{gap:0;padding:8px;grid-template-columns:repeat(2,minmax(0,1fr))}.qbh-workflow>div{padding:8px 4px}.qbh-workflow strong{font-size:10px}.qbh-workflow small{font-size:9px}.qbh-metric strong{font-size:28px}.qbh-metric{min-height:108px;padding:14px}.qbh-tabs button{padding:12px}.qbh-setup-status span:last-child{margin-left:0}.qbh-section{padding:16px}.qbh-section-head h3{font-size:18px}}
+@media(prefers-reduced-motion:reduce){.qbh-invoice,.qbh-edition{transition:none}}
+/* 5.71 — document-number strategy, deliberately scoped to QuickBooks Hub. */
+.qbh-number-banner{display:flex;gap:15px;align-items:flex-start;padding:18px 20px;border:1px solid #d8e6db;border-radius:16px;background:#f4faf5;margin-bottom:18px}
+.qbh-number-banner-icon{display:grid;place-items:center;width:38px;height:38px;flex:0 0 38px;border-radius:12px;background:#dfebdf;color:#2d5b3b;font-weight:800;font-size:21px}
+.qbh-number-banner strong{font-size:14px;color:#295037}.qbh-number-banner p{font-size:12px;line-height:1.6;color:#597160;margin:6px 0 0}
+.qbh-number-table{display:grid;gap:10px}
+.qbh-number-row{border:1px solid #e0e9e1;background:#fff;border-radius:14px;padding:17px 20px;display:grid;gap:12px}
+.qbh-number-row-head{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.qbh-number-row-label{display:grid;gap:4px}.qbh-number-row-label strong{font-size:14px;color:#2f4735}
+.qbh-number-saved{font-size:11px;font-weight:650;color:#69816e;background:#f2f6f2;border-radius:8px;padding:6px 9px}
+.qbh-number-row-controls{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.qbh-number-select{width:265px;max-width:100%;font-size:12px}
+.qbh-number-target{font-size:12px;color:#496951;line-height:1.5;flex:1;min-width:185px}
+.qbh-number-actions{display:flex;align-items:center;gap:15px;flex-wrap:wrap;margin-top:17px}
+.qbh-number-steps{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:21px}
+.qbh-number-steps>div{border-radius:12px;background:#f8faf8;border:1px solid #e3e9e3;padding:14px;display:grid;gap:6px}
+.qbh-number-steps strong{font-size:12px;color:#315541}.qbh-number-steps span{font-size:11px;color:#7b8b7e;line-height:1.5}
+@media(max-width:700px){.qbh-number-steps{grid-template-columns:1fr}.qbh-number-row{padding:14px}.qbh-number-banner{padding:14px}.qbh-number-select{width:100%}}

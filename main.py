@@ -220,6 +220,8 @@ from app.routers.pds_supplier_quotes import router as pds_supplier_quotes_router
 app.include_router(pds_supplier_quotes_router)
 from app.routers.pds_office_reports import router as pds_office_reports_router
 app.include_router(pds_office_reports_router)
+from app.routers.pds_quickbooks_bridge import router as pds_quickbooks_bridge_router
+app.include_router(pds_quickbooks_bridge_router)
 from app.routers.document_vault import router as document_vault_router
 from app.routers.accounting_ledger import router as accounting_ledger_router
 app.include_router(document_vault_router)
