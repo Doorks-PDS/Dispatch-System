@@ -270,6 +270,8 @@ from app.routers.doorks_operations import router as doorks_operations_router
 app.include_router(doorks_operations_router)
 from app.routers.doorks_storefront import router as doorks_storefront_router
 app.include_router(doorks_storefront_router)
+from app.routers.sdc_door_quotes import router as sdc_door_quotes_router
+app.include_router(sdc_door_quotes_router)
 from app.routers.doorks_portals import router as doorks_portals_router
 app.include_router(doorks_portals_router)
 from app.routers.doorks_assistant import router as doorks_assistant_router
