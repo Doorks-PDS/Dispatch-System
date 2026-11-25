@@ -116,12 +116,22 @@ async def twilio_inbound(request: Request):
     incoming_to = params.get('To', '')
     if incoming_to.replace(' ', '') != NUMBER.replace(' ', ''):
         raise HTTPException(403, 'SMS destination mismatch')
+    # Advanced Opt-Out matches and replies to START/STOP/HELP before forwarding
+    # the signed inbound webhook. Persist the state but DO NOT send a duplicate
+    # TwiML reply (Twilio explicitly recommends an empty response here).
+    # Its START means carrier opt-in; PDS still requires the separate YES step.
+    opt_out_type = str(params.get('OptOutType') or '').strip().upper()
+    if opt_out_type and opt_out_type not in ('START', 'STOP', 'HELP'):
+        raise HTTPException(400, 'Invalid Twilio OptOutType')
+    keyword_body = opt_out_type if opt_out_type else params.get('Body', '')
     try:
         reply, _state = handle_keyword(request.app.state.data_dir, params.get('From', ''),
-                            params.get('MessageSid', ''), params.get('Body', ''),
+                            params.get('MessageSid', ''), keyword_body,
                             privacy_url=privacy_url, terms_url=terms_url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    if opt_out_type:
+        return Response('<Response/>', media_type='application/xml')
     return Response('<Response><Message>' + escape(reply) + '</Message></Response>',
                     media_type='application/xml')
 

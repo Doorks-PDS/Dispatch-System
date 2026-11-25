@@ -85,3 +85,43 @@ def test_signed_webhook_rejects_changed_message_and_wrong_destination(monkeypatc
                              headers={'X-Twilio-Signature':sig_wrong})
         assert rejected.status_code==403
         assert current_state(tmp_path,sender)=='unknown'
+
+
+def test_advanced_opt_out_records_consent_without_duplicate_reply(monkeypatch, tmp_path):
+    base = 'https://pds.example.test'
+    token = 'test-token-advanced'
+    sender = '+17605550137'
+    app = _app(tmp_path)
+    monkeypatch.setenv('PDS_SMS_PUBLIC_BASE_URL', base)
+    monkeypatch.setenv('TWILIO_AUTH_TOKEN', token)
+    with TestClient(app) as client:
+        def send(body, kind, sid):
+            params = {'From': sender, 'To': NUMBER, 'Body': body,
+                      'MessageSid': 'SM' + sid * 32, 'OptOutType': kind}
+            return client.post('/pds/sms/twilio/inbound', data=params,
+                               headers={'X-Twilio-Signature': _signature(
+                                   token, base + '/pds/sms/twilio/inbound', params)})
+
+        start = send('UNSTOP', 'START', 'a')
+        assert start.status_code == 200
+        assert start.text == '<Response/>'
+        assert current_state(tmp_path, sender) == 'pending'
+
+        yes = _post(client, base, token, sender, 'SM' + 'b' * 32, 'YES')
+        assert yes.status_code == 200
+        assert current_state(tmp_path, sender) == 'subscribed'
+
+        help_response = send('HELP', 'HELP', 'c')
+        assert help_response.text == '<Response/>'
+        assert current_state(tmp_path, sender) == 'subscribed'
+
+        stop = send('STOP', 'STOP', 'd')
+        assert stop.text == '<Response/>'
+        assert current_state(tmp_path, sender) == 'unsubscribed'
+        repeat = send('STOP', 'STOP', 'd')
+        assert repeat.text == '<Response/>'
+        assert current_state(tmp_path, sender) == 'unsubscribed'
+
+        invalid = send('START', 'INVALID', 'e')
+        assert invalid.status_code == 400
+        assert current_state(tmp_path, sender) == 'unsubscribed'
