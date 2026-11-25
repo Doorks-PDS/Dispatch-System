@@ -72,8 +72,8 @@ def test_marketing_approval_requires_confirm_and_does_not_publish(tmp_path):
 
 
 def test_sdc_navigation_and_marketing_page_present():
-    assert "'Atlas Marketing'" in (ROOT/'static'/'app.js').read_text()
+    assert "'SDC Marketing'" in (ROOT/'static'/'app.js').read_text()
     html=(ROOT/'static'/'sdc_atlas_marketing.html').read_text()
-    assert 'auto-published' in html
+    assert 'no automatic posts' in html
     assert '/api/software/marketing/posts' in html
     assert 'Atlas Marketing Desk' in html

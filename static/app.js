@@ -3153,9 +3153,9 @@
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
       addSdc('sdcDevelopmentNav','Atlas Software Sales',()=>renderAtlasSales('overview'));
-      addSdc('sdcDevelopmentNav','Atlas Marketing',()=>{
-        clearWorkspaceActions();setWorkspace('SDC — Atlas Marketing');workspaceBody.replaceChildren();
-        const frame=document.createElement('iframe');frame.title='Atlas marketing drafts and approval desk';
+      addSdc('sdcDevelopmentNav','SDC Marketing',()=>{
+        clearWorkspaceActions();setWorkspace('SDC — Marketing');workspaceBody.replaceChildren();
+        const frame=document.createElement('iframe');frame.title='SDC marketing review desk';
         frame.src='/sdc/atlas-marketing';frame.style.cssText='width:100%;height:1200px;min-height:75vh;border:1px solid #dce5dd;border-radius:18px;background:#f7faf7;display:block';
         workspaceBody.append(frame);frame.addEventListener('load',()=>{try{const doc=frame.contentDocument;if(!doc)return;const resize=()=>{frame.style.height=Math.min(Math.max(950,doc.documentElement.scrollHeight+40),14000)+'px'};resize();if(typeof ResizeObserver!=='undefined'){new ResizeObserver(resize).observe(doc.body)}}catch(e){}});
       });

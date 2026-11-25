@@ -434,10 +434,11 @@ ATLAS_POST_ASSETS = (
     'atlas_real_dashboard.webp', 'atlas_real_requests.webp',
     'atlas_real_extra_1.webp', 'atlas_real_extra_2.webp', 'atlas_real_team.webp',
     'atlas_hero_mountains.webp', 'beyond_history_profile.webp',
+    'atlas_launch_workflow.webp', 'history_launch_diary.webp',
 )
 MARKETING_ASSETS_BY_BRAND = {
-    'atlas': tuple(x for x in ATLAS_POST_ASSETS if x != 'beyond_history_profile.webp'),
-    'history': ('beyond_history_profile.webp',),
+    'atlas': tuple(x for x in ATLAS_POST_ASSETS if x not in ('beyond_history_profile.webp','history_launch_diary.webp')),
+    'history': ('beyond_history_profile.webp', 'history_launch_diary.webp'),
     'saddleback': (),  # Use real customer-authorized door photography when supplied.
 }
 

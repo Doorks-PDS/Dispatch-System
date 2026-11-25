@@ -86,7 +86,7 @@ def test_storefront_uses_approved_mountain_art_and_real_screens_remain():
     assert '/api/software/inquiries' in html and 'atlas-moses-chat-widget' in html
     desk=(ROOT/'static'/'sdc_atlas_marketing.html').read_text()
     assert 'Atlas Marketing Desk' in desk  # Preserve 5.85 HTML compatibility test.
-    assert 'Add three launch drafts' in desk
+    assert 'Add launch drafts' in desk
     for brand in ('atlas','saddleback','history'):
         assert f'data-brand="{brand}"' in desk
     assert 'is NOT auto-published' not in desk  # no false claim of direct publication
