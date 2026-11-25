@@ -146,12 +146,45 @@ def send_resend_attachment(message, attachment, filename, mime, *, idempotency_k
         if not isinstance(value,str) or not value.strip() or '\r' in value or '\n' in value:
             raise HTTPException(422,'Invalid email header field')
         return value.strip()
-    recipient=header('to');reply_to=header('reply_to')
-    if not _email(recipient) or not _email(reply_to):
-        raise HTTPException(422,'Invalid recipient/Reply-To')
-    body={'from':header('from'),'to':[recipient],
+    def addresses(value, field, *, required=False):
+        # The PDS composer splits semicolons/commas before this transport. This
+        # layer only accepts exact mailbox values, never display names or
+        # potentially injected email headers.
+        if isinstance(value, str):
+            values = [value] if value.strip() else []
+        elif isinstance(value, list):
+            values = value
+        else:
+            raise HTTPException(422, 'Invalid '+field+' recipients')
+        if len(values) > 10:
+            raise HTTPException(422, 'Too many '+field+' recipients')
+        clean = []
+        for value in values:
+            if not isinstance(value, str):
+                raise HTTPException(422, 'Invalid '+field+' email')
+            address = value.strip()
+            if (not address or len(address) > 254 or _email(address) != address
+                    or any(ord(ch) < 33 or ord(ch) > 126 for ch in address)
+                    or any(ch in address for ch in ',;<>')):
+                raise HTTPException(422, 'Invalid '+field+' email')
+            if address.casefold() not in {x.casefold() for x in clean}:
+                clean.append(address)
+        if required and not clean:
+            raise HTTPException(422, 'Missing '+field+' recipient')
+        return clean
+    recipients = addresses(message.get('to'), 'To', required=True)
+    cc_recipients = addresses(message.get('cc', []), 'CC')
+    if len(recipients) + len(cc_recipients) > 12:
+        raise HTTPException(422, 'Too many email recipients')
+    cc_recipients = [x for x in cc_recipients if x.casefold() not in {r.casefold() for r in recipients}]
+    reply_to = header('reply_to')
+    if not _email(reply_to) or _email(reply_to) != reply_to:
+        raise HTTPException(422, 'Invalid Reply-To')
+    body={'from':header('from'),'to':recipients,
           'subject':header('subject'),'text':header('text'),'reply_to':reply_to,
           'attachments':[{'filename':filename,'content':base64.b64encode(attachment).decode('ascii')}]}
+    if cc_recipients:
+        body['cc'] = cc_recipients
     req=Request('https://api.resend.com/emails',data=json.dumps(body).encode('utf-8'),method='POST',headers={
         'Authorization':'Bearer '+os.environ['RESEND_API_KEY'],
         'Content-Type':'application/json','User-Agent':'Doorks-Moses/2.0',

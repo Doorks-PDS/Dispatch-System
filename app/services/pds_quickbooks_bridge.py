@@ -216,6 +216,10 @@ def _row(request, doc, jobs, issued):
                'terms': str(doc.get('terms') or ''), 'pdf_verified': valid_pdf,
                'resend_accepted': issued_exact, 'ready': not reasons, 'needs_review': reasons,
                'invoice_created_at': str(doc.get('created_at') or '')}
+    # Description, line item, customer or payment-term changes must invalidate
+    # a prepared handoff even if the numeric total happens to be unchanged.
+    payload['source_sha256'] = hashlib.sha256(
+        json.dumps(doc, sort_keys=True, default=str).encode('utf-8')).hexdigest()
     fingerprint = hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
     payload['fingerprint'] = fingerprint
     return payload
@@ -228,6 +232,9 @@ def _rows(request):
         raise HTTPException(503, 'PDS document or job store unavailable')
     issued = _invoice_snapshots_sent(request)
     rows = [_row(request, d, jobs, issued) for d in docs if isinstance(d, dict)]
+    numbers = [r['number'] for r in rows if r is not None]
+    if len(numbers) != len(set(numbers)):
+        raise HTTPException(409, 'Duplicate PDS invoice numbers require office reconciliation')
     return {r['number']: r for r in rows if r is not None}
 
 

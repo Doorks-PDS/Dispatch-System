@@ -16,6 +16,7 @@ import uuid
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 from fastapi import HTTPException
 
 from app.services.moses_delivery import _email
@@ -83,7 +84,81 @@ def _save(path, rows):
             tmp.unlink()
 
 
-def _snapshot(request, kind, number):
+def _mailboxes(raw, *, field, maximum=10):
+    """Normalize To/CC as exact addresses, with separators from office UI."""
+    if raw is None or raw == '':
+        return []
+    if isinstance(raw, str):
+        items = re.split(r'[;,\n]+', raw)
+    elif isinstance(raw, list):
+        items = raw
+    else:
+        raise HTTPException(422, f'{field} must be a list of email addresses')
+    if len(items) > maximum + 4:
+        raise HTTPException(422, f'Too many {field} recipients')
+    result = []
+    for item in items:
+        if not isinstance(item, str):
+            raise HTTPException(422, f'Invalid {field} address')
+        address = item.strip()
+        if not address:
+            continue
+        if (len(address) > 254 or _email(address) != address
+                or any(ord(c) < 33 or ord(c) > 126 for c in address)
+                or any(c in address for c in '<>;,\r\n')):
+            raise HTTPException(422, f'Invalid {field} email address')
+        if address.casefold() not in {x.casefold() for x in result}:
+            result.append(address)
+    if len(result) > maximum:
+        raise HTTPException(422, f'Too many {field} recipients')
+    return result
+
+
+def _customer_contact_choices(request, company, job):
+    """Exact-company CRM contacts only; never offer another customer's emails."""
+    choices = []
+    seen = set()
+    def add(raw, label):
+        if not isinstance(raw, str) or not raw.strip():
+            return
+        try:
+            for address in _mailboxes(raw, field='Contact', maximum=3):
+                if address.casefold() not in seen:
+                    seen.add(address.casefold())
+                    choices.append({'email': address, 'label': str(label)[:90]})
+        except HTTPException:
+            return
+    for key in ('contact_email', 'email', 'customer_email'):
+        add(job.get(key), 'Job contact')
+    store = getattr(request.app.state, 'crm_store', None)
+    if not store:
+        return choices
+    want = ' '.join(str(company or '').split()).casefold()
+    try:
+        customers = [x for x in store.list_customers() if isinstance(x, dict)
+                     and ' '.join(str(x.get('company_name') or '').split()).casefold() == want]
+        customer_ids = {str(x.get('id')) for x in customers if x.get('id')}
+        for customer in customers:
+            add(customer.get('invoice_email'), 'Customer invoice / accounts payable')
+            add(customer.get('email'), 'Customer office')
+        # Do not use CRM's fuzzy matching: only the exact company or explicit ID.
+        contacts = store.list_contacts()
+        for contact in contacts:
+            if not isinstance(contact, dict):
+                continue
+            name = ' '.join(str(contact.get('company_name') or '').split()).casefold()
+            cid = str(contact.get('customer_id') or '')
+            if name == want or (cid and cid in customer_ids):
+                add(contact.get('email'), contact.get('name') or 'Saved contact')
+                if len(choices) >= 50:
+                    break
+    except (OSError, ValueError, TypeError):
+        # CRM is optional; the verified job contact remains the primary recipient.
+        return choices
+    return choices
+
+
+def _snapshot(request, kind, number, recipients=None):
     _guard(request, kind)
     prefix = KINDS.get(kind)
     if not prefix or not re.fullmatch(prefix + r'[0-9]{5,}', number or '', re.I):
@@ -133,21 +208,47 @@ def _snapshot(request, kind, number):
         raise HTTPException(409, 'Document customer and job customer require review')
     recipient = _email(job.get('contact_email') or job.get('email') or job.get('customer_email'))
     if not recipient:
-        raise HTTPException(409, 'Linked job has no verified contact email')
+        choices = _customer_contact_choices(request, doc.get('customer'), job)
+        recipient = choices[0]['email'] if choices else ''
+    if not recipient:
+        raise HTTPException(409, 'No verified customer contact email is saved')
     mail = identity('pds', kind)
     if mail['issues']:
         raise HTTPException(503, '; '.join(mail['issues']))
+    options = _customer_contact_choices(request, doc['customer'], job)
+    known = {x['email'].casefold() for x in options}
+    if recipients is not None and not isinstance(recipients, dict):
+        raise HTTPException(422, 'Invalid recipient selection')
+    recipients = recipients or {}
+    to_list = _mailboxes(recipients.get('to', recipient), field='To')
+    cc_list = _mailboxes(recipients.get('cc', mail['cc']), field='CC')
+    if not to_list:
+        raise HTTPException(422, 'At least one To recipient is required')
+    if len(to_list) + len(cc_list) > 12:
+        raise HTTPException(422, 'Too many To/CC recipients')
+    cc_list = [x for x in cc_list if x.casefold() not in {t.casefold() for t in to_list}]
+    if getattr(request.state, 'auth_role', None) == 'tech':
+        if any(x.casefold() not in known for x in to_list + cc_list):
+            raise HTTPException(403, 'Technicians can select only saved contacts for this customer')
     return {'workspace': 'pds', 'kind': kind, 'number': str(doc['number']),
             'filename': filename, 'job_id': str(job.get('id') or ''),
             'job_number': str(job.get('job_number') or ''), 'customer': str(doc['customer']),
-            'to': recipient, 'from': mail['from'], 'reply_to': mail['reply_to'],
-            'cc': mail['cc'], 'subject': kind.title() + ' ' + str(doc['number']),
+            'to': to_list[0], 'to_recipients': to_list, 'cc_recipients': cc_list,
+            'from': mail['from'], 'reply_to': mail['reply_to'],
+            'cc': '; '.join(cc_list), 'subject': kind.title() + ' ' + str(doc['number']),
             'pdf_sha256': hashlib.sha256(raw).hexdigest(), 'pdf_size': len(raw)}
 
 
 def preview(request, kind, number):
     snap = _snapshot(request, kind, number)
+    choices = []
+    if snap.get('customer') and snap.get('job_id') and getattr(request, 'app', None):
+        job = next((j for j in request.app.state.calendar_store.list_jobs()
+                    if str(j.get('id') or '') == snap['job_id']), None)
+        if job:
+            choices = _customer_contact_choices(request, snap['customer'], job)
     return {k: v for k, v in snap.items() if k != 'pdf_sha256'} | {
+        'available_recipients': choices,
         'attachment_verified': True, 'ready_for_approval': True,
         'sent': False, 'approval_required': True,
         'send_enabled': os.getenv('MOSES_PDS_DOCUMENT_SEND_ENABLED', '').strip().lower() == 'true',
@@ -162,7 +263,9 @@ def _public(row):
     snap = row['snapshot']
     return {'id': row['id'], 'state': row['state'], 'kind': snap['kind'],
             'number': snap['number'], 'job_number': snap['job_number'],
-            'to': snap['to'], 'from': snap['from'], 'reply_to': snap['reply_to'],
+            'to': snap['to'], 'to_recipients': snap.get('to_recipients') or [snap['to']],
+            'cc_recipients': snap.get('cc_recipients') or [],
+            'from': snap['from'], 'reply_to': snap['reply_to'],
             'subject': snap['subject'], 'filename': snap['filename'],
             'approved': row['state'] in ('sending', 'sent', 'uncertain'),
             'requested_by': row.get('requested_by'),
@@ -195,14 +298,17 @@ def review_queue(request):
             'approval_required': True}
 
 
-def propose(request, kind, number):
-    snap = _snapshot(request, kind, number)
+def propose(request, kind, number, recipients=None):
+    snap = _snapshot(request, kind, number, recipients)
     path = _file(request)
     with _locked(path):
         rows = _load(path)
         if any(r.get('snapshot', {}).get('kind') == kind and r.get('snapshot', {}).get('number') == number
                and r.get('state') in ('sending', 'uncertain') for r in rows):
             raise HTTPException(409, 'Prior send outcome requires manual provider review')
+        if any(r.get('snapshot', {}).get('kind') == kind and r.get('snapshot', {}).get('number') == number
+               and r.get('state') == 'sent' for r in rows):
+            raise HTTPException(409, 'This saved document was already accepted by Resend; review delivery history before any new send')
         fp = _fingerprint(snap)
         prior = next((r for r in rows if r.get('fingerprint') == fp and r.get('state') in ('pending', 'sent')), None)
         if prior:
@@ -286,7 +392,10 @@ def decide(request, proposal_id, approve):
             _save(path, rows)
             return {'state': 'rejected', 'sent': False}
         snap = row['snapshot']
-        fresh = _snapshot(request, snap['kind'], snap['number'])
+        fresh = _snapshot(request, snap['kind'], snap['number'], {
+            'to': snap.get('to_recipients') or [snap['to']],
+            'cc': snap.get('cc_recipients') or [],
+        })
         if _fingerprint(fresh) != row['fingerprint']:
             row.update(state='stale', decided_at=_now())
             _save(path, rows)
@@ -299,7 +408,11 @@ def decide(request, proposal_id, approve):
         # always remains an uncertain hold instead of an automatic retry.
         row.update(state='sending', decided_by=_actor(request), decided_at=_now())
         _save(path, rows)
-        message = {'from': snap['from'], 'to': snap['to'], 'reply_to': snap['reply_to'],
+        message = {'from': snap['from'],
+                   'to': (snap['to_recipients'][0] if len(snap.get('to_recipients') or []) == 1
+                          else snap.get('to_recipients') or snap['to']),
+                   'cc': (snap['cc_recipients'][0] if len(snap.get('cc_recipients') or []) == 1
+                          else snap.get('cc_recipients') or []), 'reply_to': snap['reply_to'],
                    'subject': snap['subject'],
                    'text': ('Please review the attached ' + snap['kind'] + ' ' + snap['number'] +
                             ' for ' + snap['customer'] + '.\n\nReply to this message with questions.')}

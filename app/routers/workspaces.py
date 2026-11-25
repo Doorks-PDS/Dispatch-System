@@ -14,12 +14,16 @@ KINDS={"doorks":("customers","vendors","addresses","work_orders","estimates_invo
 class Record(BaseModel):
     data:dict
 
-def guard(request:Request,platform:str,kind:str):
+def guard(request:Request,platform:str,kind:str, *, read_only:bool=False):
     if platform not in KINDS or kind not in KINDS[platform]:raise HTTPException(404,"Unknown workspace collection")
     user=getattr(request.state,"auth_user",None)
     if not user:raise HTTPException(401,"Login required")
-    # Phase 2A is admin-only until employee assignments and role enforcement are deployed.
-    if getattr(request.state,"auth_role",None)!="office_admin":raise HTTPException(403,"Office Admin only during setup")
+    role=getattr(request.state,"auth_role",None)
+    if kind == 'purchase_orders':
+        roles = ('office_admin', 'office', 'lead', 'tech') if read_only else ('office_admin', 'office')
+        if role not in roles:raise HTTPException(403,"Purchase order permission denied")
+    elif role != 'office_admin':
+        raise HTTPException(403,"Office Admin only during setup")
     if request.session.get("active_platform")!=platform:raise HTTPException(403,"Switch to this workspace first")
 
 def location(request:Request,platform:str,kind:str):
@@ -52,7 +56,7 @@ def clean(data):
 
 @router.get("/{platform}/{kind}")
 def listing(platform:str,kind:str,request:Request):
-    guard(request,platform,kind)
+    guard(request,platform,kind, read_only=(kind == 'purchase_orders'))
     with _lock:return {"items":load(location(request,platform,kind))}
 
 @router.post("/{platform}/{kind}")

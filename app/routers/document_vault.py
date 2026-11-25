@@ -29,10 +29,12 @@ def guard(request,platform):
     return role
 
 
-def allowed_reference(request,platform,scope,kind):
+def allowed_reference(request,platform,scope,kind, *, write=False):
     role=guard(request,platform)
     if role in ('office','office_admin'):return
-    if scope!='business' or kind not in ({'estimate','invoice'} if role=='tech' else {'estimate','invoice','purchase_order'}):
+    if write and kind=='purchase_order':
+        raise HTTPException(403,'Only Office or Office Admin may add purchase-order references')
+    if scope!='business' or kind not in {'estimate','invoice','purchase_order'}:
         raise HTTPException(403,'This role may access only approved business document types')
 
 def paths(request,platform):
@@ -71,7 +73,7 @@ def listing(platform:str,request:Request,document_type:Optional[str]=None,librar
               and (not library_scope or x.get('library_scope','accounting')==library_scope)
               and (not job_number or str(x.get('job_number') or '').strip().casefold()==job_number.strip().casefold())]
     if role in ('tech','lead'):
-        allowed={'estimate','invoice'} if role=='tech' else {'estimate','invoice','purchase_order'}
+        allowed={'estimate','invoice','purchase_order'}
         filtered=[x for x in filtered if x.get('library_scope')=='business' and x.get('document_type') in allowed]
     return {'items':filtered}
 
@@ -79,7 +81,7 @@ def listing(platform:str,request:Request,document_type:Optional[str]=None,librar
 async def create(platform:str,request:Request,document_type:str=Form(...),vendor:str=Form(''),document_number:str=Form(''),document_date:str=Form(''),po_number:str=Form(''),job_number:str=Form(''),notes:str=Form(''),extracted_json:str=Form(''),library_scope:str=Form('accounting'),file:Optional[UploadFile]=File(None)):
     guard(request,platform);validate_type(document_type)
     if library_scope not in ('business','accounting'):raise HTTPException(400,'Invalid library scope')
-    allowed_reference(request,platform,library_scope,document_type)
+    allowed_reference(request,platform,library_scope,document_type,write=True)
     if len(notes)>4000 or len(extracted_json)>12000:raise HTTPException(400,'Text too long')
     try:parsed=json.loads(extracted_json) if extracted_json else {}
     except ValueError:raise HTTPException(400,'Invalid extracted data')

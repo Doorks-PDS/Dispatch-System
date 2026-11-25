@@ -49,3 +49,5 @@ openai>=2.0,<3
 pydantic>=2.10,<3
 
 twilio>=9.0,<10
+
+cryptography>=43,<48

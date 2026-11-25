@@ -28,7 +28,7 @@ def test_pds_po_create_and_import_are_distinct_actions():
     assert "form.elements.job_number.value=ref.job_number||''" in js
     assert "form.elements.document_number.value=ref.po_number||''" in js
     assert "if(!item&&platform==='pds'&&window.__pdsJobPODraft)" in js
-    assert "if((isPds&&window.__pdsJobPODraft)||openNew)edit(null)" in js
+    assert "if(canManagePO && ((isPds&&window.__pdsJobPODraft)||openNew))edit(null)" in js
 
 
 def test_identity_review_finds_similar_saved_company_without_auto_selection():

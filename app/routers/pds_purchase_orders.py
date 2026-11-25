@@ -16,8 +16,8 @@ class POInput(BaseModel):
 def _guard(request: Request):
     if not getattr(request.state, 'auth_user', None):
         raise HTTPException(401, 'Login required')
-    if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin', 'lead'):
-        raise HTTPException(403, 'Office or lead access required')
+    if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin', 'lead', 'tech'):
+        raise HTTPException(403, 'Purchase order visibility requires staff access')
     if request.session.get('active_platform', 'pds') not in ('pds', None):
         raise HTTPException(403, 'Switch to PDS workspace')
 
@@ -37,7 +37,7 @@ def _actor(request: Request):
 def _office_guard(request: Request):
     _guard(request)
     if getattr(request.state, 'auth_role', None) not in ('office', 'office_admin'):
-        raise HTTPException(403, 'Office access required for supplier, receiving and inventory changes')
+        raise HTTPException(403, 'Only Office and Office Admin can manage purchase orders')
 
 
 def _paths(request: Request, *, create=True):
@@ -135,16 +135,13 @@ def _order_data(request: Request, data: dict, *, existing=None):
 def list_orders(request: Request):
     _guard(request)
     with _lock:
-        records, _ = _paths(request)
+        records, _ = _paths(request, create=False)
         return {'items': _read(records, [])}
 
 @router.post('')
 def create_order(payload: POInput, request: Request):
-    _guard(request)
+    _office_guard(request)
     actor = _actor(request)  # fail before allocating a PO number or writing files
-    if getattr(request.state, 'auth_role', None) == 'lead':
-        if any(str(payload.data.get(k) or '').strip() for k in ('received_status','payment_status')):
-            raise HTTPException(403, 'Receiving and supplier payment status require office approval')
     from app.services.doorks_po_lock import po_write_lock
     with po_write_lock(request, 'pds'), _lock:
         records, sequence = _paths(request)
@@ -175,10 +172,7 @@ def create_order(payload: POInput, request: Request):
 
 @router.patch('/{record_id}')
 def update_order(record_id: str, payload: POInput, request: Request):
-    _guard(request)
-    if getattr(request.state, 'auth_role', None) == 'lead':
-        if any(str(payload.data.get(k) or '').strip() for k in ('received_status','payment_status')):
-            raise HTTPException(403, 'Receiving and supplier payment status require office approval')
+    _office_guard(request)
     from app.services.doorks_po_lock import po_write_lock
     with po_write_lock(request, 'pds'), _lock:
         records, _ = _paths(request)
@@ -236,6 +230,8 @@ def create_supplier(payload:POInput,request:Request):
     # Leads can create supplier contacts needed for their POs; only office may
     # modify, deactivate, delete or perform inventory/receiving operations.
     _guard(request)
+    if getattr(request.state, 'auth_role', None) not in ('lead', 'office', 'office_admin'):
+        raise HTTPException(403, 'Supplier creation requires Lead or Office')
     with _lock:
         path=_supplier_path(request);items=_read(path,[])
         data=_supplier_clean(payload.data)
@@ -314,8 +310,8 @@ def _receive_context(request, platform):
         raise HTTPException(404, "Unknown workspace")
     if not getattr(request.state, "auth_user", None):
         raise HTTPException(401, "Login required")
-    if getattr(request.state, "auth_role", None) != "office_admin":
-        raise HTTPException(403, "Office Admin only")
+    if getattr(request.state, "auth_role", None) not in ("office", "office_admin"):
+        raise HTTPException(403, "Office staff required")
     if request.session.get("active_platform") != platform:
         raise HTTPException(403, "Switch workspace first")
     return Path(request.app.state.data_dir)/"business_workspaces"/platform/"purchase_orders.json"
@@ -438,10 +434,10 @@ from typing import Optional
 @router.post('/ai-po/{platform}')
 async def ai_po_draft(platform:str,request:Request,file:Optional[UploadFile]=File(default=None),email_text:str=Form(default='')):
     if platform=='pds':
-        _guard(request)
+        _office_guard(request)
     elif platform in ('doorks','sdc'):
         if not getattr(request.state,'auth_user',None):raise HTTPException(401,'Login required')
-        if getattr(request.state,'auth_role',None)!='office_admin':raise HTTPException(403,'Office Admin only')
+        if getattr(request.state,'auth_role',None) not in ('office', 'office_admin'):raise HTTPException(403,'Office only')
         if request.session.get('active_platform')!=platform:raise HTTPException(403,'Switch workspace first')
     else:raise HTTPException(404,'Unknown platform')
     if len(email_text)>30000:raise HTTPException(400,'Text too long')

@@ -101,8 +101,8 @@ def preview(request, platform: str, kind: str, record_id: str):
         raise HTTPException(401, 'Sign in required')
     if request.session.get('active_platform') != platform:
         raise HTTPException(403, 'Switch to the matching workspace')
-    if getattr(request.state, 'auth_role', None) != 'office_admin':
-        raise HTTPException(403, 'Office Admin access required for document delivery')
+    if getattr(request.state, 'auth_role', None) not in (('office_admin', 'office') if kind == 'purchase_order' else ('office_admin',)):
+        raise HTTPException(403, 'Office authorization required for document delivery')
     item = _find_record(request, platform, kind, record_id)
     number = str(item.get('document_number') or item.get('po_number') or '').strip()
     label = {'estimate': 'Estimate', 'invoice': 'Invoice', 'purchase_order': 'Purchase Order'}[kind]

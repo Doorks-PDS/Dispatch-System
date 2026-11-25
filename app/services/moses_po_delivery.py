@@ -33,8 +33,8 @@ def _now():
 def _guard(request, platform, *, require_send_enabled=True):
     if platform not in ('doorks', 'sdc', 'pds'):
         raise HTTPException(400, 'Unknown business platform')
-    if not getattr(request.state, 'auth_user', None) or getattr(request.state, 'auth_role', None) != 'office_admin' or request.session.get('active_platform') != platform:
-        raise HTTPException(403, 'Active workspace office administrator required')
+    if not getattr(request.state, 'auth_user', None) or getattr(request.state, 'auth_role', None) not in ('office_admin', 'office') or request.session.get('active_platform') != platform:
+        raise HTTPException(403, 'Active workspace Office or Office Admin required')
     if require_send_enabled and os.getenv('MOSES_PO_SEND_ENABLED', '').lower().strip() != 'true':
         raise HTTPException(503, 'Purchase-order email sending is disabled')
 
@@ -72,7 +72,7 @@ def _supplier_email(request, platform, item):
         candidates = read(_supplier_path(request), [])
     else:
         from app.routers.workspaces import guard, location, load
-        guard(request, platform, 'vendors')
+        guard(request, platform, 'purchase_orders')
         candidates = load(location(request, platform, 'vendors'))
     matches = [v for v in candidates if str(v.get('id')) == sid]
     if len(matches) != 1:

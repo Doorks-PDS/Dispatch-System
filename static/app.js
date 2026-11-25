@@ -2241,7 +2241,7 @@
               }catch(err){output.textContent='Unable to preview: '+(err.message||err);}finally{previewBtn.disabled=false;}};
               actions.after(host);etaShortcut.disabled=true;
             };actions.append(etaShortcut);
-            const poShortcut=document.createElement('button');poShortcut.type='button';poShortcut.className='btn';poShortcut.textContent='Purchase Order';poShortcut.onclick=()=>{if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderUnifiedPurchaseOrders('doorks',true));};actions.append(poShortcut,editPanel);
+            const poShortcut=document.createElement('button');poShortcut.type='button';poShortcut.className='btn';poShortcut.textContent='Purchase Order';poShortcut.onclick=()=>{if(!completionForm.hidden&&completionDirty()&&!confirm('Discard unsaved completion changes?'))return;overlay.remove();(window.__doorksJobDraft={id:item.id,customer:item.customer||'',address:item.address||'',job_number:item.job_number||item.work_order_number||'',description:item.description||''},renderUnifiedPurchaseOrders('doorks',true));};if(['office','office_admin'].includes(String(currentUser?.role||'')))actions.append(poShortcut);actions.append(editPanel);
             for(const button of [estimateShortcut,invoiceShortcut,poShortcut]){
               button.style.cssText='border:2px solid #4d7041;background:#fff;color:#315d35;font-weight:800;border-radius:10px;padding:10px 16px';
             }
@@ -6636,7 +6636,7 @@ function renderAttachmentSection(titleText, items, options = {}) {
 
 
     if (job.kind === "dispatch" && job.id && ['office','office_admin','admin','lead','tech'].includes(String(currentUser?.role||''))) {
-      const canCreatePO=['office','office_admin','admin','lead'].includes(String(currentUser?.role||''));
+      const canCreatePO=['office','office_admin'].includes(String(currentUser?.role||''));
       if(canCreatePO){
       const poButton=document.createElement('button');poButton.type='button';styleActionButton(poButton,'blue',true);poButton.textContent='Purchase Order';
       poButton.onclick=()=>{
@@ -7736,19 +7736,35 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       btnSave.className = "btn btn-orange";
       btnSave.textContent = "Save Form";
 
+      const btnSaveAndEstimate = document.createElement("button");
+      btnSaveAndEstimate.className = "btn";
+      btnSaveAndEstimate.type = "button";
+      btnSaveAndEstimate.title = "Save this form first, then open a draft estimate based on this form";
+      btnSaveAndEstimate.textContent = "✦ Save & Estimate";
       const btnClose = document.createElement("button");
       btnClose.className = "btn";
       btnClose.textContent = "Close";
 
       actions.appendChild(btnSave);
+      actions.appendChild(btnSaveAndEstimate);
       actions.appendChild(btnClose);
       card.appendChild(actions);
 
       drawerBody.appendChild(card);
 
       btnClose.addEventListener("click", () => overlay.remove());
+      let saveAndEstimateRequested = false;
+      let savingForm = false;
+      btnSaveAndEstimate.addEventListener("click", () => {
+        if(savingForm)return;
+        saveAndEstimateRequested = true;
+        btnSave.click();
+      });
 
-      btnSave.addEventListener("click", async () => {
+      btnSave.addEventListener("click", async event => {
+        // A normal Save click cancels any earlier, unsuccessful Save & Estimate attempt.
+        if(event.isTrusted) saveAndEstimateRequested = false;
+        if(savingForm)return;
         try {
           const selectedDate = (card.querySelector("#cf_form_date")?.value || "").trim();
           if (!selectedDate) { alert("Date is required."); card.querySelector("#cf_form_date")?.focus(); return; }
@@ -7803,6 +7819,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             payload.parts_used=[payload.parts_used,`Van stock used: ${vanDetail}`].filter(Boolean).join('\n');
           }
           const selectedFiles = Array.from(card.querySelector("#cf_files")?.files || []);
+          savingForm = true;
+          btnSave.disabled = true;
+          btnSaveAndEstimate.disabled = true;
           pdsSaveNoticePending++;
           pdsSaveNotice('Saving…','saving');
           let savedForm;
@@ -7918,8 +7937,25 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           if (ctx && ctx.afterSave) await ctx.afterSave();
           renderJobDetails(container, updatedJob, ctx);
           refreshBadges();
+          if(saveAndEstimateRequested && !completionWarnings){
+            const forms = Array.isArray(updatedJob.completion_forms) ? updatedJob.completion_forms : [];
+            const sourceIndex = forms.findIndex(form => String(form?.id || '') === String(savedForm?.id || ''));
+            if(sourceIndex < 0 || !savedForm?.id){
+              alert('Form saved, but its exact ID could not be verified for the estimate. Open the saved form from the job to continue.');
+            }else{
+              await openEstimateInvoiceDrawer(updatedJob,'estimate',null,{
+                skipHelper:true,
+                helperPrefill:{autoFill:true,sourceIndex,tripQty:1,fuelQty:1}
+              });
+            }
+          }
         } catch (e) {
           alert(e.message || String(e));
+        } finally {
+          savingForm = false;
+          saveAndEstimateRequested = false;
+          btnSave.disabled = false;
+          btnSaveAndEstimate.disabled = false;
         }
       });
     });
@@ -10691,6 +10727,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <button type="button" data-qbh-tab="purchase-orders" aria-selected="false">Supplier POs <span id="qbhPOTabCount" class="qbh-tab-count">—</span></button>
           <button type="button" data-qbh-tab="activity" aria-selected="false">Activity</button>
           <button type="button" data-qbh-tab="numbering" aria-selected="false">Numbering <span id="qbhNumberingCount" class="qbh-tab-count">3</span></button>
+          <button type="button" data-qbh-tab="payments" aria-selected="false">Payments &amp; fees</button>
           <button type="button" data-qbh-tab="setup" aria-selected="false">Setup</button>
         </nav>
         <section class="qbh-section" data-qbh-panel="invoices">
@@ -10724,6 +10761,19 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="qbh-number-steps"><div><strong>1 · Pick numbering</strong><span>Request PDS numbers or let QuickBooks assign its own</span></div><div><strong>2 · Verify company settings</strong><span>Check QuickBooks custom numbering, existing document numbers and possible collisions</span></div><div><strong>3 · Confirm mappings</strong><span>Store QuickBooks transaction ID and number only after verified sync</span></div><div><strong>4 · Reconcile payments</strong><span>Match payments using the verified QuickBooks record ID, not the display number alone</span></div></div>
           <p class="qbh-footnote">Estimates are included in the numbering plan for future compatibility, but 5.71 does not sync estimates. Customer PO numbers are separate from PDS supplier PO-000xx numbers. No posting, tax remapping or accounting adjustments occur here.</p>
         </section>
+        <section class="qbh-section" data-qbh-panel="payments" hidden>
+          <div class="qbh-section-head"><div><div class="qbh-kicker">PAYMENTS PLANNING</div><h3>Invoice payment options &amp; service fee</h3>
+            <p>Draft 0.5% service fee shown separately for all payment types. Not yet charged, posted or added to saved invoices.</p></div></div>
+          <div class="qbh-connection-note"><strong>Proposed customer-facing payment total</strong>
+            <p>Show the service-fee line on the agreed estimate and issued invoice, with one complete total before the customer pays. Don't add a surprise checkout-only fee.</p>
+            <div class="qbh-muted" id="qbhFeeStatus">Loading payment plan…</div></div>
+          <div style="display:grid;grid-template-columns:1fr auto;align-items:end;gap:10px;margin:14px 0">
+            <label style="display:grid;gap:5px">Preview saved invoice fee (no changes)<input class="input" id="qbhFeeInvoice" placeholder="JS00021" maxlength="20" /></label>
+            <button type="button" class="btn" id="qbhFeePreview">Preview</button>
+          </div>
+          <div class="qbh-connection-note" id="qbhFeeResult" role="status">Choose an issued invoice to preview the proposed fee. Nothing is charged.</div>
+          <p class="qbh-footnote">Before activation: confirm tax treatment, customer price disclosures, your processor, and SDC's revenue accounting. PDS and SDC are separate businesses; showing a line doesn't transfer funds to SDC.</p>
+        </section>
         <section class="qbh-section" data-qbh-panel="setup" hidden>
           <div class="qbh-section-head"><div><div class="qbh-kicker">CONNECTION</div><h3>Connection setup</h3>
             <p>Select the PDS edition. Saving it won't authorize access, sync records or create transactions.</p></div></div>
@@ -10731,7 +10781,77 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div class="qbh-setup-grid"><button type="button" class="qbh-edition" data-qbh-edition="online"><span class="qbh-edition-icon">☁</span><strong>QuickBooks Online</strong><small>Intuit OAuth and API sync after company authorization; requires supported plan for purchase orders.</small><span class="qbh-edition-check">Select Online</span></button>
             <button type="button" class="qbh-edition" data-qbh-edition="desktop"><span class="qbh-edition-icon">▣</span><strong>QuickBooks Desktop</strong><small>Windows Web Connector, scheduled exchange and a supported company-file version.</small><span class="qbh-edition-check">Select Desktop</span></button></div>
           <div class="qbh-setup-actions"><button type="button" class="btn btn-orange" id="qbhSaveEdition">Save edition</button><span class="qbh-muted" id="qbhSetupStatus" role="status">No connection or transactions will be created.</span></div>
+          <div class="qbh-connection-note"><strong>QuickBooks Online connection checks</strong>
+            <p>Prepare the Intuit app credentials in Render when ready. Credentials never go in browser forms. Connect first, then verify the exact PDS company without posting transactions.</p>
+            <div class="qbh-muted" id="qbhConnectionChecks" role="status">Loading connection requirements…</div>
+            <div class="qbh-muted" id="qbhVerifiedCompany">No QuickBooks company verified.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">
+              <button type="button" class="btn btn-orange" id="qbhConnectQBO" disabled>Connect QuickBooks Online</button>
+              <button type="button" class="btn" id="qbhVerifyQBO" disabled>Verify company (read only)</button>
+              <button type="button" class="btn" id="qbhDisconnectQBO" disabled>Disconnect local account</button>
+            </div>
+          </div>
+          <div class="qbh-connection-note"><strong>QuickBooks mapping lookup (read only)</strong>
+            <p>After verifying your company, inspect provider records before matching customers, vendors and accounting items. Does not create or change anything.</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <select class="input" id="qbhCatalogKind" aria-label="QuickBooks records to inspect">
+                <option value="customers">Customers</option><option value="vendors">Vendors</option>
+                <option value="items">Items</option><option value="accounts">Accounts</option>
+                <option value="tax_codes">Tax codes</option><option value="terms">Terms</option>
+              </select>
+              <button type="button" class="btn" id="qbhCatalogLoad" disabled>View records</button>
+              <button type="button" class="btn" id="qbhCatalogMore" disabled>Next 50</button>
+            </div>
+            <div class="qbh-muted" id="qbhCatalogStatus" role="status">Connect and verify QuickBooks Online to inspect mapping records.</div>
+            <div id="qbhCatalogRows" style="max-height:240px;overflow:auto;display:grid;gap:4px"></div>
+          </div>
+          <div class="qbh-connection-note"><strong>Link existing PDS master records to QuickBooks</strong>
+            <p>Match customers, service vendors, purchasing suppliers or parts once and reuse its QuickBooks ID after later sync approval. Existing Doorks and QuickBooks records remain unchanged.</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <select id="qbhMasterKind" class="input" aria-label="PDS master record type"><option value="customers">PDS customers</option><option value="vendors">PDS service vendors</option><option value="suppliers">PDS purchasing suppliers</option><option value="items">PDS parts / services</option></select>
+              <button id="qbhMasterLoad" class="btn" type="button" disabled>Review links</button>
+              <button id="qbhMasterNext" class="btn" type="button" disabled>Next 50</button>
+            </div>
+            <div id="qbhMasterRows" style="max-height:310px;overflow:auto;display:grid;gap:6px"></div>
+            <div class="qbh-muted" id="qbhMasterStatus" role="status">Verify the QuickBooks company to review existing PDS master records.</div>
+          </div>
+          <div class="qbh-connection-note"><strong>Match invoice / PO line items</strong>
+            <p>Review each saved line and approve its existing QuickBooks product/service ID. Labor, trip, fuel and parts can each use the appropriate item. Item approvals are local only; tax and posting remain blocked.</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <select class="input" id="qbhLineKind" aria-label="Line review document type"><option value="invoice">Invoice</option><option value="supplier_po">Supplier PO</option></select>
+              <input class="input" id="qbhLineNumber" maxlength="30" placeholder="Prepared document #" aria-label="Prepared invoice or PO number" />
+              <button type="button" class="btn" id="qbhLineLoad" disabled>Review lines</button>
+            </div>
+            <div id="qbhLineStatus" class="qbh-muted" role="status">Connect and verify QuickBooks before reviewing item mappings.</div>
+            <div id="qbhLineRows" style="max-height:350px;overflow:auto;display:grid;gap:7px;margin-top:8px"></div>
+          </div>
+          <div class="qbh-connection-note"><strong>Check for duplicate QuickBooks documents (read only)</strong>
+            <p>For a locally prepared invoice or supplier PO, check the verified company for an exact document-number match before any sync. No transactions are posted, even if no match is found.</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <select class="input" id="qbhDuplicateKind" aria-label="Document type"><option value="invoice">Invoice</option><option value="supplier_po">Supplier PO</option></select>
+              <input class="input" id="qbhDuplicateNumber" placeholder="Existing document #" maxlength="30" aria-label="Doorks document number" />
+              <button class="btn" type="button" id="qbhDuplicateCheck" disabled>Check duplicates</button>
+            </div>
+            <div id="qbhDuplicateStatus" class="qbh-muted" role="status">Requires a prepared document and a verified QuickBooks Online company.</div>
+          </div>
+          <div class="qbh-connection-note"><strong>Review customer / vendor match (read only)</strong>
+            <p>Compare the name on a prepared Doorks invoice or supplier PO with the verified QuickBooks company. Matching names are suggestions, never approved mappings.</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <select class="input" id="qbhMatchKind" aria-label="Match review document type"><option value="invoice">Invoice customer</option><option value="supplier_po">PO vendor</option></select>
+              <input class="input" id="qbhMatchNumber" maxlength="30" placeholder="Saved document #" aria-label="Prepared Doorks document number" />
+              <button type="button" class="btn" id="qbhMatchCheck" disabled>Review names</button>
+              <button type="button" class="btn" id="qbhMatchNext" disabled>Next page</button>
+            </div>
+            <div class="qbh-muted" id="qbhMatchStatus" role="status">Requires a prepared document and verified QuickBooks Online company. No mapping is saved.</div>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <input class="input" id="qbhApprovedPartyId" placeholder="Verified QuickBooks ID" maxlength="32" aria-label="QuickBooks customer or vendor ID" />
+              <button type="button" class="btn" id="qbhPartyStatus" disabled>Check saved approval</button>
+              <button type="button" class="btn btn-orange" id="qbhPartyApprove" disabled>Approve party ID</button>
+            </div>
+            <div id="qbhPartyApprovalNote" class="qbh-muted" role="status">Approval stores a local, auditable ID mapping only. No accounting posting.</div>
+          </div>
           <div class="qbh-connection-note"><strong>Before enabling synchronization</strong><p id="qbhNextStep">Select the edition to see the next connection step.</p>
+            <div class="qbh-muted" id="qbhSyncReadiness">Checking invoice and PO readiness…</div>
             <div class="qbh-muted">Match customers and suppliers, tax classifications and expense items. Confirm duplicate detection and perform a single supervised test before turning on any automatic sync.</div></div>
         </section>
         <p class="qbh-feedback" id="qbhFeedback" role="status" aria-live="polite"></p>
@@ -10742,7 +10862,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       if(value!==undefined)out.textContent=String(value); return out;
     };
     const money = value => {const n=Number(value);return Number.isFinite(n)?n.toLocaleString('en-US',{style:'currency',currency:'USD'}):'—';};
-    let invoices=[],purchaseOrders=[],state=null,numbering=null,numberPolicies=null,selectedEdition='not_selected';
+    let invoices=[],purchaseOrders=[],state=null,numbering=null,numberPolicies=null,feePlan=null,connection=null,readiness=null,selectedEdition='not_selected';
     function feedback(message,error=false) {const e=$('qbhFeedback');e.textContent=message||'';e.classList.toggle('qbh-error',error);}
     function tab(value) {
       workspaceBody.querySelectorAll('[data-qbh-tab]').forEach(btn=>btn.setAttribute('aria-selected',String(btn.dataset.qbhTab===value)));
@@ -10849,6 +10969,60 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         ?'Saved locally · QuickBooks account preferences still need verification.'
         :'Default preview · Save this plan after review. No documents will be renumbered.';
     }
+    function drawFeePlan(){
+      const target=$('qbhFeeStatus');if(!target)return;
+      if(!feePlan){target.textContent='Payment plan not available';return;}
+      target.textContent='Proposed service fee: '+feePlan.rate_percent+'% of pre-tax subtotal · Applies to all payment forms · '+
+        'Current state: not enabled · No QuickBooks payment sync · No SDC payout configured.';
+    }
+    function drawConnection(){
+      if(!connection)return;
+      const flags=connection.checks||{};
+      const labels={online_edition_selected:'QuickBooks Online selected',client_id_present:'Intuit Client ID',
+        client_secret_present:'Intuit Client Secret',redirect_uri_valid:'Registered HTTPS callback',
+        token_encryption_ready:'Encrypted token storage key',session_security_ready:'Secure application session',
+        durable_storage_ready:'Durable data storage'};
+      $('qbhConnectionChecks').replaceChildren(...Object.entries(labels).map(([key,label])=>{
+        const line=node('div','qbh-muted',(flags[key]?'✓ ':'○ ')+label);return line;
+      }));
+      $('qbhVerifiedCompany').textContent=connection.last_read_only_verification
+        ?'Read-only verified: '+(connection.company_name||'Company')+' · QuickBooks company ID '+connection.company_id+
+          ' · '+connection.environment+' · No invoices or POs posted.'
+        :connection.authorized?'Authorized to '+(connection.company_id||'company')+' · Run read-only verification before any mapping.'
+        :'No QuickBooks company connected. Setup can be completed when credentials are available.';
+      $('qbhConnectQBO').disabled=!connection.configured||connection.authorized;
+      $('qbhVerifyQBO').disabled=!connection.authorized||connection.edition!=='online';
+      $('qbhDisconnectQBO').disabled=!connection.authorized;
+      $('qbhCatalogLoad').disabled=!connection.authorized||!connection.last_read_only_verification||connection.edition!=='online';
+      $('qbhMasterLoad').disabled=!connection.authorized||!connection.last_read_only_verification||connection.edition!=='online';
+      $('qbhLineLoad').disabled=!connection.authorized||!connection.last_read_only_verification||connection.edition!=='online';
+      $('qbhDuplicateCheck').disabled=!connection.authorized||!connection.last_read_only_verification||connection.edition!=='online';
+      $('qbhMatchCheck').disabled=!connection.authorized||!connection.last_read_only_verification||connection.edition!=='online';
+      $('qbhPartyStatus').disabled=$('qbhMatchCheck').disabled;
+      $('qbhPartyApprove').disabled=$('qbhMatchCheck').disabled;
+      $('qbhMatchNext').disabled=true;
+      const isVerified=Boolean(connection.last_read_only_verification);
+      const status=workspaceBody.querySelector('.qbh-connection');
+      if(status)status.textContent=isVerified?'Company verified (read only)':connection.authorized?'Authorized · verify company':'Not connected';
+      $('qbhSyncSummary').textContent=isVerified?'Company verified · sync off':connection.authorized?'Authorized · sync off':'Not connected · auto sync off';
+      if(readiness){const iv=readiness.invoices||{},po=readiness.supplier_purchase_orders||{};
+        $('qbhSyncReadiness').textContent='Review queue: '+(iv.prepared||0)+' prepared invoices · '+(po.prepared||0)+
+          ' prepared supplier POs · '+((iv.needs_review||0)+(po.needs_review||0))+
+          ' records needing attention. Customer/vendor, item, tax and numbering mappings are required before posting.';}
+    }
+    $('qbhFeePreview').onclick=async()=>{
+      const number=String($('qbhFeeInvoice').value||'').trim().toUpperCase();
+      if(!/^JS[0-9]{5,}$/.test(number)){$('qbhFeeResult').textContent='Enter a saved PDS invoice number, for example JS00021.';return;}
+      const button=$('qbhFeePreview');button.disabled=true;
+      try{
+        const value=await fetchJSON('/pds-quickbooks/payment-fee-plan/invoices/'+encodeURIComponent(number));
+        $('qbhFeeResult').textContent=value.ready
+          ?number+': Existing issued total '+money(value.existing_invoice_total)+' · Proposed service fee '+money(value.proposed_service_fee)+
+            ' · Illustration '+money(value.illustrative_total_before_any_fee_tax)+' before any fee-related tax review. No fee has been charged.'
+          :number+' requires review: '+(value.needs_review||[]).join(' · ');
+      }catch(error){$('qbhFeeResult').textContent='Cannot preview: '+(error.message||error);}
+      finally{button.disabled=false;}
+    };
     function drawEdition(){
       workspaceBody.querySelectorAll('[data-qbh-edition]').forEach(button=>{
         const selected=button.dataset.qbhEdition===selectedEdition;
@@ -10861,14 +11035,14 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     }
     async function refresh(showFeedback=true){
       try{
-        const [s,inv,po,numbers]=await Promise.all([fetchJSON('/pds-quickbooks/status'),fetchJSON('/pds-quickbooks/invoices'),fetchJSON('/pds-quickbooks/purchase-orders'),fetchJSON('/pds-quickbooks/numbering')]);
+        const [s,inv,po,numbers,fees,qbo,ready]=await Promise.all([fetchJSON('/pds-quickbooks/status'),fetchJSON('/pds-quickbooks/invoices'),fetchJSON('/pds-quickbooks/purchase-orders'),fetchJSON('/pds-quickbooks/numbering'),fetchJSON('/pds-quickbooks/payment-fee-plan'),fetchJSON('/pds-quickbooks/connection-status'),fetchJSON('/pds-quickbooks/sync-readiness')]);
         if(activePlatform!=='pds'||currentUser?.role!=='office_admin'||!workspaceBody.querySelector('.qbh-shell'))return;
-        state=s;invoices=Array.isArray(inv.invoices)?inv.invoices:[];purchaseOrders=Array.isArray(po.purchase_orders)?po.purchase_orders:[];numbering=numbers;numberPolicies={...numbering.policies};
+        state=s;invoices=Array.isArray(inv.invoices)?inv.invoices:[];purchaseOrders=Array.isArray(po.purchase_orders)?po.purchase_orders:[];numbering=numbers;numberPolicies={...numbering.policies};feePlan=fees;connection=qbo;readiness=ready;
         selectedEdition=state.edition||'not_selected';
         $('qbhEditionSummary').textContent=state.edition==='online'?'QuickBooks Online':state.edition==='desktop'?'QuickBooks Desktop':'Edition not selected';
         $('qbhSyncSummary').textContent='Not connected · auto sync off';
         $('qbhSetupStatus').textContent=state.edition==='not_selected'?'Select an edition to continue.':'Edition saved. No QuickBooks connection yet.';
-        draw();drawEdition();drawNumbering();if(showFeedback)feedback('PDS invoice and supplier PO records refreshed. No transactions were posted.');
+        draw();drawEdition();drawNumbering();drawFeePlan();drawConnection();if(showFeedback)feedback('PDS invoice and supplier PO records refreshed. No transactions were posted.');
       }catch(err){feedback('Unable to load QuickBooks Hub: '+(err.message||err),true);$('qbhInvoiceRows').textContent='Unable to load invoices.';$('qbhPORows').textContent='Unable to load supplier POs.';}
     }
     workspaceBody.querySelectorAll('[data-qbh-tab]').forEach(button=>button.onclick=()=>tab(button.dataset.qbhTab));
@@ -10893,6 +11067,214 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     $('qbhPOExport').onclick=()=>{
       if(!purchaseOrders.some(r=>r.handoff_status==='prepared_for_review')){feedback('Prepare a supplier PO before exporting the handoff CSV.',true);return;}
       window.location.assign('/pds-quickbooks/po-review.csv');
+    };
+    $('qbhConnectQBO').onclick=async()=>{
+      if(!connection?.configured||connection.authorized)return;
+      if(!window.confirm('Authorize access to your QuickBooks Online company through Intuit? No invoices, purchase orders or payments will be posted.'))return;
+      const btn=$('qbhConnectQBO');btn.disabled=true;
+      try{
+        const result=await fetchJSON('/pds-quickbooks/oauth/start',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});
+        // The URL is generated by the backend from Intuit's fixed authorization host.
+        const url=new URL(result.authorization_url);
+        if(url.origin!=='https://appcenter.intuit.com')throw new Error('Unexpected QuickBooks authorization address');
+        window.location.assign(url.href);
+      }catch(err){feedback('Unable to start QuickBooks authorization: '+(err.message||err),true);btn.disabled=false;}
+    };
+    $('qbhVerifyQBO').onclick=async()=>{
+      if(!connection?.authorized)return;
+      const btn=$('qbhVerifyQBO');btn.disabled=true;
+      try{
+        const result=await fetchJSON('/pds-quickbooks/verify-company',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});
+        feedback('Verified '+result.company_name+' (company '+result.company_id+') by read-only API. No records posted.');
+        await refresh(false);
+      }catch(err){feedback('QuickBooks verification failed: '+(err.message||err),true);btn.disabled=false;}
+    };
+    let catalogNext=null;
+    $('qbhCatalogKind').onchange=()=>{catalogNext=null;$('qbhCatalogMore').disabled=true;
+      $('qbhCatalogRows').replaceChildren();$('qbhCatalogStatus').textContent='Select View records to load this catalog.';};
+    async function loadCatalog(next=false){
+      if(!connection?.last_read_only_verification)return;
+      const button=next?$('qbhCatalogMore'):$('qbhCatalogLoad');
+      const start=next?catalogNext:1;
+      if(!start)return;
+      button.disabled=true;
+      try{
+        const kind=$('qbhCatalogKind').value;
+        const data=await fetchJSON('/pds-quickbooks/provider-catalog/'+encodeURIComponent(kind)+'?start='+start+'&limit=50');
+        if(!next)$('qbhCatalogRows').replaceChildren();
+        (data.records||[]).forEach(entry=>{
+          const main=entry.DisplayName||entry.Name||entry.Id||'Record';
+          const detail=Object.entries(entry).filter(([key])=>!['DisplayName','Name'].includes(key))
+            .map(([key,value])=>key+': '+value).join(' · ');
+          $('qbhCatalogRows').appendChild(node('div','qbh-muted',String(main)+' — '+detail));
+        });
+        catalogNext=data.next_start;
+        $('qbhCatalogMore').disabled=!catalogNext;
+        $('qbhCatalogStatus').textContent='Showing '+(data.records||[]).length+' '+kind+' from position '+start+
+          ' · Read-only · No records mapped or synced';
+      }catch(error){$('qbhCatalogStatus').textContent='Catalog lookup failed: '+(error.message||error);
+        $('qbhCatalogMore').disabled=true;
+      }finally{if(!next)button.disabled=false;}
+    }
+    let masterNext=null;
+    $('qbhMasterKind').onchange=()=>{masterNext=null;$('qbhMasterNext').disabled=true;$('qbhMasterRows').replaceChildren();};
+    async function loadMaster(next=false){
+      const kind=$('qbhMasterKind').value,start=next?masterNext:0;if(start===null)return;
+      const target=$('qbhMasterRows'),status=$('qbhMasterStatus');
+      const button=next?$('qbhMasterNext'):$('qbhMasterLoad');button.disabled=true;
+      try{
+        const d=await fetchJSON('/pds-quickbooks/master-links/'+encodeURIComponent(kind)+'?start='+start+'&limit=50');
+        if(!next)target.replaceChildren();
+        (d.records||[]).forEach(item=>{
+          const wrap=node('div','qbh-muted');wrap.style.cssText='padding:8px;border:1px solid #e1e4e8;border-radius:8px';
+          const title=node('strong','',item.name+' · '+item.link_status+(item.provider_id?' · QB '+item.provider_id:''));wrap.append(title);
+          if(item.link_status!=='linked'){
+            const detail=node('div','qbh-muted','No provider mapping approved');wrap.append(detail);
+            const id=node('input','input');id.placeholder='Verified QB ID';id.maxLength=32;id.style.maxWidth='155px';
+            const review=node('button','btn','Review exact-name candidates');review.type='button';
+            review.onclick=async()=>{review.disabled=true;try{
+              const matches=await fetchJSON('/pds-quickbooks/master-links/'+encodeURIComponent(kind)+'/'+encodeURIComponent(item.pds_id)+'/candidates');
+              detail.textContent=(matches.candidates||[]).length
+                ?'Same-name candidates on first page: '+matches.candidates.map(x=>x.name+' (ID '+x.id+')').join('; ')
+                :'No exact-name candidate on first page. Use the provider catalog to search other pages; never infer an ID.';
+            }catch(err){detail.textContent='Review failed: '+(err.message||err);}finally{review.disabled=false;}};
+            const approve=node('button','btn btn-orange','Approve link');approve.type='button';
+            approve.onclick=async()=>{const provider=String(id.value||'').trim();if(!/^[0-9]{1,32}$/.test(provider)){detail.textContent='Enter a numeric QuickBooks ID.';return;}
+              if(!window.confirm('Link '+item.name+' to QuickBooks ID '+provider+'? No source records or accounting transactions will change.'))return;
+              approve.disabled=true;try{await fetchJSON('/pds-quickbooks/master-links/'+encodeURIComponent(kind)+'/'+encodeURIComponent(item.pds_id)+'/approve',
+                {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:provider,confirm:true})});
+                detail.textContent='Approved identity link. No transaction posting enabled.';await loadMaster(false);
+              }catch(err){detail.textContent='Unable to approve: '+(err.message||err);approve.disabled=false;}};
+            const controls=node('div');controls.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:5px';
+            controls.append(review,id,approve);wrap.append(controls);
+          }
+          target.append(wrap);
+        });
+        masterNext=d.next_start;$('qbhMasterNext').disabled=masterNext===null;
+        status.textContent='PDS records '+(start+1)+'–'+(start+(d.records||[]).length)+' of '+d.total+' · Source records preserved · Sync off';
+      }catch(err){status.textContent='Master link lookup failed: '+(err.message||err);}
+      finally{if(!next)button.disabled=!connection?.last_read_only_verification;}
+    }
+    $('qbhMasterLoad').onclick=()=>loadMaster(false);
+    $('qbhMasterNext').onclick=()=>loadMaster(true);
+    // 5.81: item-level review is deliberately independent of sync and payments.
+    function clearLineReview(){
+      $('qbhLineRows').replaceChildren();
+      $('qbhLineStatus').textContent='Choose Review lines for the current prepared document. No QuickBooks changes.';
+    }
+    $('qbhLineKind').onchange=clearLineReview;
+    $('qbhLineNumber').oninput=clearLineReview;
+    async function loadLineReview(){
+      const kind=$('qbhLineKind').value;
+      const number=String($('qbhLineNumber').value||'').trim().toUpperCase();
+      const status=$('qbhLineStatus'),target=$('qbhLineRows');
+      if(!(kind==='invoice'?/^JS[0-9]{5,}$/:/^PO-[0-9]{5,}$/).test(number)){
+        status.textContent='Enter an existing prepared Doorks invoice or supplier PO number.';return;
+      }
+      const button=$('qbhLineLoad');button.disabled=true;status.textContent='Reviewing prepared document lines…';
+      target.replaceChildren();
+      try{
+        const d=await fetchJSON('/pds-quickbooks/line-mappings/'+encodeURIComponent(kind)+'/'+encodeURIComponent(number));
+        status.textContent=d.mapped_lines+' of '+d.total_lines+' item references reviewed · Company '+d.company_id+
+          ' · Provider transaction posting OFF · Tax/terms/duplicate checks still required.';
+        (d.lines||[]).forEach(line=>{
+          const wrap=node('div','qbh-muted');wrap.style.cssText='padding:9px;border:1px solid #e1e4e8;border-radius:8px';
+          wrap.append(node('strong','',line.position+'. '+(line.description||'Unnamed line')));
+          const details=node('div','qbh-muted','Qty '+String(line.quantity||'0')+' · Line '+money(line.amount)+
+            ' · '+(line.status==='approved'?'Reviewed QB item '+line.provider_name+' (ID '+line.provider_id+')':
+              line.status==='stale'?'Earlier approvals stale; reconcile document/company before proceeding':'Item mapping required'));
+          wrap.append(details);
+          if(line.status!=='approved'){
+            const controls=node('div');controls.style.cssText='display:flex;flex-wrap:wrap;gap:6px;margin-top:6px';
+            const id=node('input','input');id.maxLength=32;id.placeholder='QB product/service ID';
+            id.setAttribute('aria-label','QuickBooks item ID for line '+line.position);id.style.maxWidth='195px';
+            const btn=node('button','btn btn-orange','Approve item');btn.type='button';
+            btn.onclick=async()=>{
+              const provider=String(id.value||'').trim();
+              if(!/^[0-9]{1,32}$/.test(provider)){details.textContent='Enter an existing numeric QuickBooks item ID.';return;}
+              if(!window.confirm('Approve QB item '+provider+' for '+number+' line '+line.position+'? No invoice or PO will be posted.'))return;
+              btn.disabled=true;
+              try{
+                const response=await fetchJSON('/pds-quickbooks/line-mappings/'+encodeURIComponent(kind)+'/'+encodeURIComponent(number)+
+                  '/lines/'+line.position+'/approve',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:provider,confirm:true})});
+                details.textContent='Reviewed '+response.mapped_item.provider_name+' (QB item '+provider+') · No posting.';
+                await loadLineReview();
+              }catch(err){details.textContent='Item approval failed: '+(err.message||err);btn.disabled=false;}
+            };
+            controls.append(id,btn);wrap.append(controls);
+          }
+          target.append(wrap);
+        });
+      }catch(err){status.textContent='Line review unavailable: '+(err.message||err)+' · No approvals or transactions changed.';}
+      finally{button.disabled=!connection?.last_read_only_verification;}
+    }
+    $('qbhLineLoad').onclick=loadLineReview;
+    $('qbhDuplicateCheck').onclick=async()=>{
+      const kind=$('qbhDuplicateKind').value,number=String($('qbhDuplicateNumber').value||'').trim().toUpperCase();
+      const status=$('qbhDuplicateStatus');
+      if(!/^[A-Z0-9-]{6,30}$/.test(number)){status.textContent='Enter a valid saved invoice or supplier PO number.';return;}
+      const btn=$('qbhDuplicateCheck');btn.disabled=true;status.textContent='Checking QuickBooks records without making changes…';
+      try{
+        const result=await fetchJSON('/pds-quickbooks/provider-duplicate-check/'+encodeURIComponent(kind)+'/'+encodeURIComponent(number));
+        status.textContent=result.collision_found
+          ?'Potential duplicate: '+result.match_count+' QuickBooks match(es), IDs '+(result.matches||[]).map(r=>r.id).join(', ')+'. Reconcile before syncing.'
+          :'No exact QuickBooks document-number match found. Manual reconciliation still required before syncing.';
+      }catch(error){status.textContent='Check unavailable: '+(error.message||error)+'. Do not sync until reviewed.';}
+      finally{btn.disabled=!connection?.last_read_only_verification;}
+    };
+    let matchNext=null;
+    $('qbhMatchKind').onchange=$('qbhMatchNumber').oninput=()=>{matchNext=null;$('qbhMatchNext').disabled=true;};
+    async function loadPartyReview(next=false){
+      const kind=$('qbhMatchKind').value;
+      const number=String($('qbhMatchNumber').value||'').trim().toUpperCase();
+      const target=$('qbhMatchStatus');
+      if(!/^[A-Z0-9-]{6,30}$/.test(number)){target.textContent='Enter a valid prepared Doorks document number.';return;}
+      const start=next?matchNext:1;if(!start)return;
+      const button=next?$('qbhMatchNext'):$('qbhMatchCheck');button.disabled=true;
+      target.textContent='Reviewing names in QuickBooks (no changes)…';
+      try{
+        const d=await fetchJSON('/pds-quickbooks/provider-party-review/'+encodeURIComponent(kind)+'/'+encodeURIComponent(number)+'?start='+start+'&limit=100');
+        matchNext=d.next_start;
+        const names=(d.exact_name_candidates||[]).map(x=>String(x.name)+' (QBO ID '+String(x.id)+', '+(x.active===false?'inactive':'status unconfirmed/active')+')');
+        target.textContent='Doorks: '+d.source_name+' · '+(names.length?'Same-name record(s) this page: '+names.join('; '):'No exact names found on this page')+
+          '. Manual identity verification required. '+(matchNext?'More pages available.':'End of current page range. No mapping saved.');
+      }catch(error){matchNext=null;target.textContent='Review unavailable: '+(error.message||error)+'. Do not sync.';}
+      finally{button.disabled=next?!matchNext:!connection?.last_read_only_verification;
+        $('qbhMatchNext').disabled=!matchNext;}
+    }
+    async function reviewPartyApproval(save=false){
+      const kind=$('qbhMatchKind').value;
+      const number=String($('qbhMatchNumber').value||'').trim().toUpperCase();
+      const target=$('qbhPartyApprovalNote');
+      if(!/^[A-Z0-9-]{6,30}$/.test(number)){target.textContent='Enter a valid prepared document number.';return;}
+      const id=String($('qbhApprovedPartyId').value||'').trim();
+      if(save && !/^[0-9]{1,32}$/.test(id)){target.textContent='Enter the numeric QBO ID from the review results.';return;}
+      if(save && !window.confirm('Approve QuickBooks party ID '+id+' for '+number+'? This is local identity approval only; no transaction will post.'))return;
+      const button=save?$('qbhPartyApprove'):$('qbhPartyStatus');button.disabled=true;
+      target.textContent=save?'Checking party ID against QuickBooks…':'Checking saved identity approval…';
+      try{
+        const d=await fetchJSON('/pds-quickbooks/party-mapping/'+encodeURIComponent(kind)+'/'+encodeURIComponent(number),
+          save?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({provider_id:id,confirm:true})}:undefined);
+        target.textContent=(d.status||'Reviewed')+(d.mapping?' · QBO party '+d.mapping.provider_name+' (ID '+d.mapping.provider_id+')':'')+
+          ' · Identity review only; sync and payments remain off.';
+      }catch(error){target.textContent='Identity approval unavailable: '+(error.message||error)+'; do not sync.';}
+      finally{button.disabled=!connection?.last_read_only_verification;}
+    }
+    $('qbhPartyStatus').onclick=()=>reviewPartyApproval(false);
+    $('qbhPartyApprove').onclick=()=>reviewPartyApproval(true);
+    $('qbhMatchCheck').onclick=()=>loadPartyReview(false);
+    $('qbhMatchNext').onclick=()=>loadPartyReview(true);
+    $('qbhCatalogLoad').onclick=()=>loadCatalog(false);
+    $('qbhCatalogMore').onclick=()=>loadCatalog(true);
+    $('qbhDisconnectQBO').onclick=async()=>{
+      if(!connection?.authorized)return;
+      if(!window.confirm('Remove locally saved QuickBooks credentials? This will NOT revoke access in Intuit. No accounting records will be changed.'))return;
+      const btn=$('qbhDisconnectQBO');btn.disabled=true;
+      try{
+        await fetchJSON('/pds-quickbooks/disconnect-local',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({confirm:true})});
+        feedback('Local QuickBooks connection removed. Review authorization in your Intuit account separately.');
+        await refresh(false);
+      }catch(err){feedback('Unable to disconnect: '+(err.message||err),true);btn.disabled=false;}
     };
     $('qbhSaveEdition').onclick=async()=>{
       if(selectedEdition==='not_selected'||selectedEdition===state?.edition)return;
@@ -14137,7 +14519,7 @@ function renderEmployeesView() {
           const line = document.createElement("div");
           line.style.cssText = "border:1px solid #e2e8f0;border-radius:8px;padding:9px;overflow-wrap:anywhere";
           const time = item.delivery_event_at || item.completed_at || item.requested_at || '';
-          line.textContent = pdsEmailDeliveryLabel(item)+' · To: '+(item.to||'—')+(time?' · '+time:'');
+          line.textContent = pdsEmailDeliveryLabel(item)+' · To: '+((item.to_recipients||[item.to||'—']).join('; '))+(item.cc_recipients?.length?' · CC: '+item.cc_recipients.join('; '):'')+(time?' · '+time:'');
           deliveryHistory.append(line);
         }
       } catch (error) {
@@ -14158,10 +14540,39 @@ function renderEmployeesView() {
       row("Document", preview.number);
       row("Customer", preview.customer);
       row("Job", preview.job_number);
-      row("To", preview.to);
       row("From", preview.from);
       row("Reply-To", preview.reply_to);
-      row("CC", preview.cc);
+      // To and CC share the same reviewed proposal snapshot; edits after
+      // proposal approval invalidate the send instead of changing its audience.
+      const toLabel=document.createElement('label');toLabel.style.cssText='display:grid;gap:5px;font-weight:700';
+      toLabel.textContent='To (separate multiple emails with semicolons)';
+      const toInput=document.createElement('textarea');toInput.className='input';toInput.rows=2;
+      toInput.value=(preview.to_recipients||[preview.to]).join('; ');
+      toInput.placeholder='ap@customer.com; manager@customer.com';
+      toLabel.append(toInput);details.append(toLabel);
+      const ccLabel=document.createElement('label');ccLabel.style.cssText='display:grid;gap:5px;font-weight:700';
+      ccLabel.textContent='CC (optional; semicolon separated)';
+      const ccInput=document.createElement('textarea');ccInput.className='input';ccInput.rows=2;
+      ccInput.value=(preview.cc_recipients||[]).join('; ');
+      ccInput.placeholder='Additional recipients';ccLabel.append(ccInput);details.append(ccLabel);
+      if(Array.isArray(preview.available_recipients) && preview.available_recipients.length){
+        const contacts=document.createElement('div');contacts.style.cssText='display:flex;flex-wrap:wrap;align-items:center;gap:7px';
+        const select=document.createElement('select');select.className='input';select.style.cssText='flex:1;min-width:170px';
+        select.setAttribute('aria-label','Saved customer contacts');
+        select.add(new Option('Saved customer contacts',''));
+        preview.available_recipients.forEach(contact=>select.add(new Option((contact.label||'Contact')+' · '+contact.email,contact.email)));
+        const addRecipient=(target)=>{
+          if(!select.value)return;
+          const items=target.value.split(/[;,\n]/).map(x=>x.trim()).filter(Boolean);
+          if(!items.some(item=>item.toLowerCase()===select.value.toLowerCase()))items.push(select.value);
+          target.value=items.join('; ');
+        };
+        const addTo=document.createElement('button');addTo.type='button';addTo.className='btn';addTo.textContent='Add to To';
+        addTo.onclick=()=>addRecipient(toInput);
+        const addCc=document.createElement('button');addCc.type='button';addCc.className='btn';addCc.textContent='Add to CC';
+        addCc.onclick=()=>addRecipient(ccInput);
+        contacts.append(select,addTo,addCc);details.append(contacts);
+      }
       row("Subject", preview.subject);
       row("Attached PDF", preview.filename);
       if(preview.send_enabled===false && preview.requires_office_review !== true){
@@ -14177,17 +14588,25 @@ function renderEmployeesView() {
       await showHistory();
       send.onclick = async () => {
         if (!confirm(technicianReview
-          ? "Send " + kind + " " + preview.number + " to Office for review? No customer email will be sent."
-          : "Send " + kind + " " + preview.number + " and its PDF to " + preview.to + " through Resend?")) return;
+          ? "Submit " + kind + " " + preview.number + " with the entered To/CC recipients to Office? No customer email will be sent."
+          : "Send " + kind + " " + preview.number + " and its PDF to " + toInput.value +
+            (ccInput.value.trim()?"\nCC: "+ccInput.value:"") + " through Resend?")) return;
         send.disabled = true;
         close.disabled = true;
         status.textContent = "Preparing approved email…";
         try {
-          const proposed = await request(base + "/proposal", { method: "POST" });
+          const submittedRecipients={to:toInput.value,cc:ccInput.value};
+          const proposed = await request(base + "/proposal", { method: "POST",
+            headers: { "Content-Type": "application/json" }, body: JSON.stringify(submittedRecipients) });
           const proposal = proposed.proposal;
           if (!proposal?.id) throw Error("The email proposal could not be verified");
-          if (proposal.to !== preview.to || proposal.number !== preview.number) {
-            status.textContent = "Email details changed. Close and review the new recipient before sending.";
+          const normalize=value=>String(value||'').split(/[;,\n]/).map(v=>v.trim().toLowerCase()).filter(Boolean).filter((v,i,a)=>a.indexOf(v)===i).sort();
+          const actualTo=normalize((proposal.to_recipients||[proposal.to]).join(';'));
+          const actualCc=normalize((proposal.cc_recipients||[]).join(';'));
+          if (proposal.number !== preview.number ||
+              actualTo.join(';') !== normalize(submittedRecipients.to).join(';') ||
+              actualCc.join(';') !== normalize(submittedRecipients.cc).filter(x=>!actualTo.includes(x)).join(';')) {
+            status.textContent = "Email recipients changed. Close and review the proposal before sending.";
             return;
           }
           if (technicianReview) {
@@ -14264,7 +14683,7 @@ function renderEmployeesView() {
           const card=document.createElement('article');card.style.cssText='border:1px solid #dce3e9;border-radius:12px;padding:13px;display:grid;gap:9px';
           const name=document.createElement('strong');name.textContent=(item.ready_label||'Ready for Review')+' · '+item.number;
           const details=document.createElement('small');details.style.cssText='color:#64748b;overflow-wrap:anywhere';
-          details.textContent=[item.job_number&&'Job #'+item.job_number,item.to&&'Recipient: '+item.to,item.requested_by&&'Prepared by: '+item.requested_by].filter(Boolean).join(' · ');
+          details.textContent=[item.job_number&&'Job #'+item.job_number,'To: '+(item.to_recipients||[item.to||'—']).join('; '),item.cc_recipients?.length&&'CC: '+item.cc_recipients.join('; '),item.requested_by&&'Prepared by: '+item.requested_by].filter(Boolean).join(' · ');
           const actions=document.createElement('div');actions.style.cssText='display:flex;gap:8px;flex-wrap:wrap';
           actions.append(buildButton('View/Edit',async()=>{
             try{
@@ -14276,7 +14695,20 @@ function renderEmployeesView() {
               shade.remove();openEstimateInvoiceDrawer({...job,__docEdit:doc},item.kind,null,{mosesJobFlow:true});
             }catch(e){status.textContent='Cannot open saved document: '+(e.message||e)}
           }));
-          actions.append(buildButton('Review & Email',()=>openEstimateInvoiceEmail({number:item.number},item.kind),true));
+          actions.append(buildButton('Approve & Send',async()=>{
+            const recipients=(item.to_recipients||[item.to]).join('; ');
+            const cc=(item.cc_recipients||[]).join('; ');
+            if(!confirm('Send the saved PDF '+item.number+' via Resend to '+recipients+(cc?'\nCC: '+cc:'')+'?'))return;
+            status.textContent='Submitting approved technician document to Resend…';
+            try{
+              const result=await fetchJSON('/moses-pds-email/proposals/'+encodeURIComponent(item.id)+'/decision',{
+                method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({approve:true})});
+              status.textContent=result.state==='sent'
+                ?'Resend accepted the email; inbox delivery is not yet confirmed.'
+                :'Send outcome '+String(result.state||'unknown')+'. Review Resend before retrying.';
+              if(result.state==='sent')await load();
+            }catch(e){status.textContent='Send not confirmed: '+(e.message||e)+' · Review Resend history before retrying.';}
+          },true));
           actions.append(buildButton('Decline',async()=>{
             if(!confirm('Decline technician review for '+item.number+'? The document will remain saved.'))return;
             try{await fetchJSON('/moses-pds-email/proposals/'+encodeURIComponent(item.id)+'/decision',{
@@ -14358,7 +14790,7 @@ function serializeDocItems(items, laborOnly) {
       const editDoc = job && job.__docEdit ? job.__docEdit : null;
       const [customers, employees, pricing, knownAddresses] = await Promise.all([apiListCustomers().catch(() => []), apiListEmployees().catch(() => []), apiGetPricing().catch(() => ({ trip:190, fuel:20, labor:190, crew_labor:250, tax:7.75 })), apiListAddresses({ limit: 1500 }).catch(() => [])]);
       let docType = editDoc ? (editDoc.type || initialType) : initialType;
-      const canCreatePdsPO = ['lead','office','office_admin','admin'].includes(String(currentUser?.role||''));
+      const canCreatePdsPO = ['office','office_admin'].includes(String(currentUser?.role||''));
       let items = Array.isArray(editDoc?.items) && editDoc.items.length ? editDoc.items.map(createDocLineItem) : defaultDocItems(pricing).map(it => ({ ...it, kind: it.code === "TRIP" ? "trip" : (it.code === "FUEL" ? "fuel" : (it.kind || "other")) }));
       let currentPartResults = [];
       drawerBody.innerHTML = "";
@@ -15653,7 +16085,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     }
 
     function renderGeneratorTab() {
-      const canPO=['lead','office','office_admin','admin'].includes(String(currentUser?.role||''));
+      const canPO=['office','office_admin'].includes(String(currentUser?.role||''));
       body.innerHTML = `<div class="card"><h3>Document Generator</h3><p class="hint">Choose a customer document or a supplier purchase order. All records stay in their respective saved lists.</p><div style="display:flex;gap:9px;flex-wrap:wrap;align-items:end"><label style="display:grid;gap:5px;min-width:200px;flex:1"><span class="label">Create</span><select class="input" id="newDocumentKind"><option value="estimate">📝 Estimate</option><option value="invoice">🧾 Invoice</option>${canPO?'<option value="purchase_order">📦 Purchase Order</option>':''}</select></label><button class="btn btn-orange" id="openDocBuilder">Open Editor</button><button class="btn" id="openPricingSettings">Billing Settings</button></div></div>`;
       const btn = document.getElementById('openDocBuilder');
       if(btn)btn.addEventListener('click',()=>{const type=document.getElementById('newDocumentKind').value;if(type==='purchase_order'){if(!canPO)return;renderUnifiedPurchaseOrders('pds',true,()=>renderEstimatePage());return;}openEstimateInvoiceDrawer(null,type,null,{refreshDocs:renderActiveTab});});
@@ -15905,6 +16337,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
 
   async function renderUnifiedPurchaseOrders(platform,openNew=false,backAction=null,container=null){
     if(platform!=='pds'&&activePlatform!==platform)return;
+    const canManagePO=['office','office_admin'].includes(String(currentUser?.role||''));
     const isPds=platform==='pds',company=platform==='pds'?'Priority Door Systems':platform==='sdc'?'Saddleback Design Co.':'Doorks';
     let address=isPds?'836 W. Washington Ave.\nEscondido, CA 92025':'41080 Saddleback Dr\nAguanga, CA 92536';let poDefaults={};if(platform==='doorks'){try{poDefaults=(await fetchJSON('/doorks-operations/settings/business')).settings||{};if(poDefaults.business_address)address=poDefaults.business_address;}catch(e){console.warn('PO business defaults unavailable',e);}}
     const endpoint=isPds?'/pds-purchase-orders':'/workspaces/'+platform+'/purchase_orders';
@@ -16086,7 +16519,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const close=()=>{q('upoEditor').hidden=true;q('upoDetails').hidden=true;};q('upoClose').onclick=close;q('upoCancel').onclick=close;q('upoDetailsClose').onclick=close;
     q('upoBack').onclick=()=>backAction?backAction():isPds?renderEstimatePage():renderBusinessHub(platform);
     el('upoReceiving').onclick=()=>renderPoReceiving(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));
-    const edit=item=>{editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
+    const edit=item=>{if(!canManagePO)return;editing=item;viewing=null;q('upoDetails').hidden=true;q('upoEditor').hidden=false;q('upoEditorTitle').textContent=item?'Edit '+item.po_number:'New Purchase Order';form.reset();q('upoLines').replaceChildren();
       for(const [key] of fields){let value=item?.[key]??'';if(key==='work_order_number')value=item?.work_order_number||item?.work_order||'';if(key==='expected_date')value=item?.expected_date||item?.needed_by||'';form.elements[key].value=value;}
       if(!item&&platform==='doorks'&&window.__doorksJobDraft){const job=window.__doorksJobDraft;form.elements.customer.value=job.customer;form.elements.work_order_number.value=job.job_number;form.elements.notes.value=job.description;customerSearch.value=job.customer;window.__doorksJobDraft=null;}
       if(!item){form.elements.ship_to.value=platform==='doorks'?(poDefaults.default_ship_to||poDefaults.business_address||company+'\n'+address):company+'\n'+address;form.elements.date.value=new Date().toLocaleDateString('en-CA');if(window.__doorksAiIntakeDraft?.platform===platform&&window.__doorksAiIntakeDraft?.type==='purchase_order'){form.elements.notes.value=window.__doorksAiIntakeDraft.text;window.__doorksAiIntakeDraft=null;}}
@@ -16101,7 +16534,11 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       }
       supplierSelect.value=item?.supplier_id||item?.vendor_id||'';supplierSearch.value=item?.vendor||'';customerSearch.value=item?.customer||form.elements.customer.value||'';q('upoTax').value=item?.tax||0;q('upoShipping').value=item?.shipping||0;
       (item?parseLines(item):[{}]).forEach(addLine);total();q('upoMessage').textContent='';if(platform!=='pds')q('upoEditor').scrollIntoView({behavior:'smooth',block:'start'});};
-    q('upoNew').onclick=()=>edit(null);if((isPds&&window.__pdsJobPODraft)||openNew)edit(null);if(!isPds){const ai=document.createElement('button');ai.className='btn';ai.textContent='✨ AI Intake';ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));q('upoNew').before(ai);}
+    q('upoNew').hidden=!canManagePO;
+    q('upoReceiving').hidden=!canManagePO;
+    q('upoNew').onclick=()=>{if(canManagePO)edit(null);};
+    if(canManagePO && ((isPds&&window.__pdsJobPODraft)||openNew))edit(null);
+    if(!isPds && canManagePO){const ai=document.createElement('button');ai.className='btn';ai.textContent='✨ AI Intake';ai.onclick=()=>renderBusinessAiIntake(platform,()=>renderUnifiedPurchaseOrders(platform,false,backAction,container));q('upoNew').before(ai);}
     const docHtml=item=>{const lines=parseLines(item),sub=lines.reduce((a,x)=>a+Number(x.quantity||0)*Number(x.rate||0),0),tax=Number(item.tax||0),shipping=Number(item.shipping||0),sum=sub+tax+shipping;
       const vendorAddress=item.vendor_address||suppliers.find(x=>x.id===(item.supplier_id||item.vendor_id))?.address||'';
       const header=`<div style="display:flex;justify-content:space-between;gap:30px;align-items:flex-start"><div><h2 style="margin:0 0 8px">${esc(platform==='doorks'?(poDefaults.business_name||company):company)}</h2><div style="white-space:pre-line">${esc(address)}</div>${platform==='doorks'?`<div>${esc([poDefaults.business_phone,poDefaults.business_email,poDefaults.website].filter(Boolean).join(' · '))}</div>`:''}${isPds?'<div>760-233-5037 · www.prioritydoors.com</div>':''}</div><div style="text-align:right"><h1 style="margin:0 0 12px">Purchase Order</h1><b>Date:</b> ${esc(item.date||'')}<br><b>P.O. No.:</b> ${esc(item.po_number||'Draft')}<br><b>Created by:</b> ${esc(item.created_by||'Legacy / not recorded')}<br><b>Created:</b> ${esc(item.created_at||'—')}</div></div>`;
@@ -16120,10 +16557,10 @@ function openEstimateDrawer(job, container = null, ctx = null) {
       viewing=item;q('upoEditor').hidden=true;q('upoDetails').hidden=false;
       q('upoDetailsTitle').textContent=item.po_number||'Purchase Order';
       q('upoPreview').innerHTML=docHtml(item);
-      poQuickStatus.replaceChildren();poQuickStatus.hidden=!isPds;
+      poQuickStatus.replaceChildren();poQuickStatus.hidden=!isPds||!canManagePO;
       poEmailHistoryHost.replaceChildren();
       if(item.id)poEmailHistoryHost.append(pdsEmailHistoryDisclosure('/doorks-assistant/'+encodeURIComponent(platform)+'/purchase-orders/'+encodeURIComponent(item.id)+'/email-history'));
-      if(isPds){
+      if(isPds&&canManagePO){
         const field=(title,control)=>{const label=document.createElement('label');label.style.cssText='display:grid;gap:4px;font-size:12px;font-weight:700';label.textContent=title;label.append(control);return label;};
         const status=document.createElement('select');status.className='input';status.setAttribute('aria-label','Purchase order status');
         const statuses=['Draft','Ordered','Shipped','En Route','Delivered','Received','Cancelled'];
@@ -16153,10 +16590,13 @@ function openEstimateDrawer(job, container = null, ctx = null) {
         const receiving=document.createElement('small');receiving.className='hint';receiving.textContent='Received is confirmed in Receiving & Inventory.';
         poQuickStatus.append(field('Order Status',status),field('Tracking #',tracking),field('Expected Arrival',arrival),saveTracking,note,receiving);
       }
+      q('upoEdit').hidden=!canManagePO;
+      q('upoDelete').hidden=String(currentUser?.role||'')!=='office_admin';
+      poEmailButton.hidden=!canManagePO;
       q('upoDetails').scrollIntoView({behavior:'smooth',block:'start'});
     };
     const deletePO=async item=>{
-      if(!item?.id)return;
+      if(!canManagePO || String(currentUser?.role||'')!=='office_admin'||!item?.id)return;
       if(!confirm('Permanently delete '+(item.po_number||'this purchase order')+'? This cannot be undone. Purchase orders with receiving history cannot be deleted.'))return;
       try{
         await fetchJSON('/pds-purchase-orders/manage/'+platform+'/'+encodeURIComponent(item.id),{method:'DELETE'});
@@ -16168,8 +16608,9 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     // Rev74: a separate reviewed PO email action; never auto-send from PO save.
     const poEmailButton=document.createElement('button');poEmailButton.type='button';poEmailButton.className='btn';poEmailButton.textContent='Email PO to Vendor';
     q('upoPrint').before(poEmailButton);
+    poEmailButton.hidden=!canManagePO;
     poEmailButton.onclick=async()=>{
-      if(!viewing?.id)return;
+      if(!canManagePO||!viewing?.id)return;
       poEmailButton.disabled=true;
       const base='/doorks-assistant/'+encodeURIComponent(platform)+'/purchase-orders';
       try{
@@ -16190,7 +16631,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     const draw=()=>{const qtext=q('upoSearch').value.trim().toLowerCase(),list=q('upoList');list.replaceChildren();const shown=orders.filter(x=>!qtext||[x.po_number,x.vendor,x.customer,x.work_order_number,x.work_order,x.description,x.line_items,x.status].some(v=>String(v||'').toLowerCase().includes(qtext)));
       const outside=externalPOs.filter(ref=>[ref.document_number,ref.po_number,ref.vendor,ref.job_number,ref.created_by].some(x=>String(x||'').toLowerCase().includes(qtext)));
       const count=document.createElement('p');count.className='hint';count.textContent=`Showing ${shown.length} PDS orders and ${outside.length} external references`;list.append(count);
-      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status||'Draft',item.tracking_number?'Tracking '+item.tracking_number:'',item.arrival_date?'ETA '+item.arrival_date:'',item.customer,item.work_order_number||item.work_order,item.created_by?'Created by '+item.created_by:'Creator not recorded (legacy PO)'].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],['Edit',()=>edit(item)],...(['office_admin','admin'].includes(String(currentUser?.role||''))?[['Delete',()=>deletePO(item)]]:[])]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
+      for(const item of shown.slice().reverse()){const card=document.createElement('div');card.style.cssText='border:1px solid #d9dee7;border-radius:12px;padding:16px;margin:10px 0';const heading=document.createElement('h3');heading.style.margin='0';heading.textContent=(item.po_number||'PO')+' · '+(item.vendor||'Supplier not specified');const info=document.createElement('p');info.className='hint';info.textContent=[item.date,item.status||'Draft',item.tracking_number?'Tracking '+item.tracking_number:'',item.arrival_date?'ETA '+item.arrival_date:'',item.customer,item.work_order_number||item.work_order,item.created_by?'Created by '+item.created_by:'Creator not recorded (legacy PO)'].filter(Boolean).join(' · ');const buttons=document.createElement('div');buttons.style.cssText='display:flex;gap:8px;flex-wrap:wrap';for(const [label,fn] of [['View PO',()=>show(item)],...(canManagePO?[['Edit',()=>edit(item)]]:[]),...(String(currentUser?.role||'')==='office_admin'?[['Delete',()=>deletePO(item)]]:[])]){const btn=document.createElement('button');btn.className='btn';btn.textContent=label;btn.onclick=fn;buttons.append(btn);}card.append(heading,info,buttons);list.append(card);}
       if(isPds)outside.forEach(ref=>list.append(pdsExternalReferenceRow(ref)));
       if(!shown.length && !outside.length){const empty=document.createElement('p');empty.className='hint';empty.textContent='No matching purchase orders.';list.append(empty);}};
     const reload=async()=>{try{const [response,references]=await Promise.all([
@@ -16198,7 +16639,7 @@ function openEstimateDrawer(job, container = null, ctx = null) {
     ]);orders=response.items||[];externalPOs=references;draw();}catch(e){q('upoList').textContent='Unable to load POs: '+(e.message||e);}};
     q('upoSearch').oninput=draw;
     if(isPds&&window.__pdsPOFocusJob){q('upoSearch').value=String(window.__pdsPOFocusJob);window.__pdsPOFocusJob=null;}
-    form.onsubmit=async event=>{event.preventDefault();const button=q('upoSave');button.disabled=true;const msg=q('upoMessage');msg.textContent='Saving…';try{
+    form.onsubmit=async event=>{event.preventDefault();if(!canManagePO)return;const button=q('upoSave');button.disabled=true;const msg=q('upoMessage');msg.textContent='Saving…';try{
       const lines=getLines().filter(x=>x.item||x.description);if(!lines.length)throw Error('Add at least one line item');if(![q('upoTax').value,q('upoShipping').value].every(x=>Number.isFinite(Number(x))&&Number(x)>=0))throw Error('Tax and shipping must be valid nonnegative amounts');if(lines.some(x=>!Number.isFinite(x.quantity)||x.quantity<=0||!Number.isFinite(x.rate)||x.rate<0))throw Error('Each line needs a positive quantity and valid rate');
       const raw=JSON.stringify(lines);if(raw.length>3900)throw Error('Too many line-item details for this PO record. Shorten descriptions or split the PO.');
       if(customerSearch.value.trim())customerField.value=customerSearch.value.trim();

@@ -26,14 +26,14 @@ def request(path, role='office_admin', name='PDS Employee', uid='emp-1'):
 
 
 def test_purchase_order_creator_is_authenticated_and_immutable(tmp_path):
-    req=request(tmp_path,role='lead',name='Steven Carpenter',uid='lead-7')
+    req=request(tmp_path,role='office',name='Steven Carpenter',uid='office-7')
     demo_job={'id':'pds-job-15','job_number':'1126-15','customer':'Test Account','po_number':''}
     req.app.state.calendar_store=SimpleNamespace(list_jobs=lambda:[demo_job],update_job=lambda _id,changes:{**demo_job,**changes})
     created=po.create_order(po.POInput(data={'vendor':'Parts Supplier','work_order':'1126-15',
                  'status':'Draft','created_by':'Spoofed Name'}),req)
     assert created['created_by']=='Steven Carpenter'
-    assert created['created_by_id']=='lead-7'
-    assert created['created_by_role']=='lead'
+    assert created['created_by_id']=='office-7'
+    assert created['created_by_role']=='office'
     assert created['created_at']
     first_time=created['created_at']
     other=request(tmp_path,role='office',name='Office Clerk',uid='office-2')
@@ -42,14 +42,14 @@ def test_purchase_order_creator_is_authenticated_and_immutable(tmp_path):
         'vendor':'Parts Supplier','notes':'Delivery expected tomorrow',
         'created_by':'Attempt to change creator','created_by_id':'spoof'}),other)
     assert updated['created_by']=='Steven Carpenter'
-    assert updated['created_by_id']=='lead-7'
+    assert updated['created_by_id']=='office-7'
     assert updated['created_at']==first_time
     assert updated['updated_by']=='Office Clerk'
     assert json.loads((tmp_path/'pds_purchase_orders'/'records.json').read_text())[0]['created_by']=='Steven Carpenter'
 
 
 def test_purchase_order_requires_employee_identity_and_limits_lead_writes(tmp_path):
-    bad=request(tmp_path,role='lead')
+    bad=request(tmp_path,role='office')
     bad.state.auth_user={'name':'Unknown Employee'}
     with pytest.raises(HTTPException) as exc:
         po.create_order(po.POInput(data={'vendor':'Supplier'}),bad)
@@ -119,7 +119,7 @@ def test_external_reference_fields_are_role_limited(tmp_path):
     assert len(vault.listing('pds',lead,library_scope='business')['items'])==3
     tech=request(tmp_path,'tech')
     rows=vault.listing('pds',tech,library_scope='business')['items']
-    assert [row['document_type'] for row in rows]==['estimate','invoice']
+    assert [row['document_type'] for row in rows]==['estimate','invoice','purchase_order']
     with pytest.raises(HTTPException) as exc:
         vault.listing('pds',tech,library_scope='accounting')
     assert exc.value.status_code==403
@@ -136,7 +136,7 @@ def test_ticket_and_saved_lists_expose_external_originals_and_creator():
     assert "'Created by '+item.created_by" in js
     assert 'External ' in js and 'Open Original' in js
     assert "alternateUpload.textContent='Alternate'" in js
-    assert "const canCreatePO=['office','office_admin','admin','lead']" in js
+    assert "const canCreatePO=['office','office_admin']" in js
 
 
 def test_original_uploaded_po_is_retained_and_has_no_issued_po(tmp_path):

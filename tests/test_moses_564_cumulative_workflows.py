@@ -28,7 +28,7 @@ def test_new_part_action_shared_between_ticket_and_moses():
 
 def test_po_editor_prefills_once_and_matches_verified_job_and_supplier_cost():
     text = _app()
-    assert "if((isPds&&window.__pdsJobPODraft)||openNew)edit(null)" in text
+    assert "if(canManagePO && ((isPds&&window.__pdsJobPODraft)||openNew))edit(null)" in text
     assert "await reload(); // editor opened once above" in text
     assert "customerSearch.value=item?.customer||form.elements.customer.value||''" in text
     assert "part.supplier_cost??part.supplier_rate??part.supplier_price" in text
