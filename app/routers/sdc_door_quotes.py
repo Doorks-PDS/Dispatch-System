@@ -25,7 +25,7 @@ router = APIRouter(tags=["sdc-door-quotes"])
 MAX_PHOTOS = 5
 MAX_FILE_BYTES = 8 * 1024 * 1024
 MAX_REQUEST_BYTES = 43 * 1024 * 1024
-STYLES = {"Single", "Double", "Bi-fold", "Sliding", "Barn", "Other"}
+STYLES = {"Single", "Double", "Bi-fold", "Sliding", "Barn", "Other", "Not sure"}
 FULFILLMENT = {"Shipping", "Local pickup", "Not sure"}
 STATUSES = {"New", "Reviewing", "Quoted", "Closed"}
 
@@ -131,15 +131,15 @@ async def submit_door_quote(
     full_name: str = Form(..., min_length=1, max_length=120),
     email: str = Form(..., min_length=3, max_length=254),
     phone: str = Form("", max_length=45),
-    door_style: str = Form(..., max_length=30),
-    door_count: int = Form(..., ge=1, le=20),
-    opening_width: str = Form(..., max_length=30),
-    opening_height: str = Form(..., max_length=30),
+    door_style: str = Form("Not sure", max_length=30),
+    door_count: int = Form(1, ge=1, le=20),
+    opening_width: str = Form("", max_length=30),
+    opening_height: str = Form("", max_length=30),
     measurement_unit: str = Form("in", max_length=10),
     wood_finish: str = Form("", max_length=180),
     material: str = Form("", max_length=80),
     notes: str = Form("", max_length=2500),
-    fulfillment: str = Form(..., max_length=30),
+    fulfillment: str = Form("Not sure", max_length=30),
     postal_code: str = Form("", max_length=30),
     timeline: str = Form("", max_length=120),
     website: str = Form("", max_length=160),  # honeypot
@@ -164,7 +164,11 @@ async def submit_door_quote(
         raise HTTPException(422, "Enter your name")
     if door_style not in STYLES or fulfillment not in FULFILLMENT or measurement_unit not in {"in", "cm"}:
         raise HTTPException(422, "Select valid door and delivery options")
-    if not all(re.fullmatch(r"\d{1,4}(?:\.\d{1,2})?", s) and 0 < float(s) <= 1000 for s in (width, height)):
+    # Measurements are optional for first-contact requests. Validate only if provided,
+    # while keeping the full-detail form compatible with existing customers/tests.
+    if bool(width) != bool(height):
+        raise HTTPException(422, "Provide both opening measurements or leave both blank")
+    if (width or height) and not all(re.fullmatch(r"\d{1,4}(?:\.\d{1,2})?", value) and 0 < float(value) <= 1000 for value in (width, height)):
         raise HTTPException(422, "Enter valid positive opening dimensions")
     if fulfillment == "Shipping" and not postal_code.strip():
         raise HTTPException(422, "Enter the shipping ZIP or postal code")
@@ -230,6 +234,47 @@ async def submit_door_quote(
         shutil.rmtree(photo_dir, ignore_errors=True)
         raise
     return {"ok": True, "message": "Request received", "reference": request_id[:8]}
+
+
+@router.get("/api/saddleback/door-quotes/export.csv")
+def export_door_quote_csv(request: Request):
+    """Staff-only plain CSV report; no private attachment paths are exported."""
+    import csv
+    from io import StringIO
+    from fastapi.responses import Response
+
+    _staff(request)
+    columns = ("created_at", "full_name", "email", "phone", "status", "door_style",
+               "door_count", "opening_width", "opening_height", "measurement_unit",
+               "material", "wood_finish", "fulfillment", "postal_code", "timeline", "notes",
+               "staff_notes", "utm_source", "utm_medium", "utm_campaign")
+    with ws._lock:
+        records = _read_existing(_records_path(request))
+    output = StringIO()
+    writer = csv.writer(output)
+    writer.writerow(columns)
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        values = []
+        for field in columns:
+            value = str(record.get(field, "") or "")
+            # Protect spreadsheet users from formula injection in user-supplied fields.
+            if value.lstrip().startswith(("=", "+", "-", "@")):
+                value = "'" + value
+            values.append(value)
+        writer.writerow(values)
+    return Response(output.getvalue(), media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": "attachment; filename=sdc_door_quote_requests.csv",
+                             "Cache-Control": "private, no-store", "X-Robots-Tag": "noindex, nofollow"})
+
+
+@router.get("/sdc/sales-reports")
+def sdc_sales_reports_page(request: Request):
+    """One staff-only landing page for software and door lead queues."""
+    _staff(request)
+    return FileResponse(Path(request.app.state.project_root) / "static" / "sdc_sales_reports.html",
+                        media_type="text/html", headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex, nofollow"})
 
 
 @router.get("/sdc/door-quote-requests")

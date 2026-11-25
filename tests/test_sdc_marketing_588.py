@@ -30,7 +30,7 @@ def test_compact_tour_and_accessibility():
 def test_sdc_marketing_navigation_and_simple_review_ui():
     app=(ROOT/'static/app.js').read_text()
     assert "addSdc('sdcDevelopmentNav','SDC Marketing'," in app
-    assert "'Atlas Software Sales'" in app
+    assert "'SDC Sales & Reports'" in app
     desk=(ROOT/'static/sdc_atlas_marketing.html').read_text()
     assert '<h1>SDC Marketing</h1>' in desk
     assert 'Review & approve' in desk
@@ -48,7 +48,7 @@ def test_approved_public_launch_images_are_brand_isolated(tmp_path):
     assert 'history_launch_diary.webp' in storefront.MARKETING_ASSETS_BY_BRAND['history']
     assert 'history_launch_diary.webp' not in storefront.MARKETING_ASSETS_BY_BRAND['atlas']
     assert 'atlas_launch_workflow.webp' not in storefront.MARKETING_ASSETS_BY_BRAND['history']
-    assert not storefront.MARKETING_ASSETS_BY_BRAND['saddleback']
+    assert 'sdc_project_hero.webp' in storefront.MARKETING_ASSETS_BY_BRAND['saddleback']
     r=req(tmp_path)
     atlas=storefront.AtlasMarketingDraft(brand='atlas', channel='both', title='Intro', caption='Text', asset='atlas_launch_workflow.webp')
     history=storefront.AtlasMarketingDraft(brand='history', channel='both', title='Intro', caption='Text', asset='history_launch_diary.webp')

@@ -439,7 +439,7 @@ ATLAS_POST_ASSETS = (
 MARKETING_ASSETS_BY_BRAND = {
     'atlas': tuple(x for x in ATLAS_POST_ASSETS if x not in ('beyond_history_profile.webp','history_launch_diary.webp')),
     'history': ('beyond_history_profile.webp', 'history_launch_diary.webp'),
-    'saddleback': (),  # Use real customer-authorized door photography when supplied.
+    'saddleback': ('sdc_project_hero.webp', 'sdc_project_collection.webp', 'sdc_project_cane.webp', 'sdc_project_sliding.webp', 'sdc_project_detail.webp'),  # Original Saddleback project photos.
 }
 
 
@@ -518,8 +518,8 @@ MARKETING_LAUNCH_DRAFTS = (
     ('atlas', 'atlas_custom_launch', 'Your workflow. Your software.',
      "Your company has its own way of getting things done. Why should your software force you into someone else's process?\n\nAtlas Software is built around the work you actually do—from scheduling and field forms to customer records, estimates, invoices, inventory, and reporting. Start with one challenge or create a fully personalized workspace.\n\nWant to see what software built around your business could look like? Visit the link in our bio.\n\n#AtlasSoftware #CustomSoftware #BusinessOperations",
      'atlas_hero_mountains.webp'),
-    ('saddleback', 'sdc_custom_doors_intro', 'Made for your space, not a showroom shelf.',
-     "A door should feel like part of your home—not an afterthought.\n\nAt Saddleback Design Co., we create made-to-order wood and rattan doors with attention to proportions, texture, finish, and the details that make a space your own. From the first idea to the finished piece, we love the craftsmanship behind every project.\n\nHave an opening in mind? Send us a message or use the link in our bio to request a custom quote.\n\n#SaddlebackDesignCo #CustomDoors #Woodworking #RattanDoors",
+    ('saddleback', 'sdc_custom_doors_intro', 'Made to order. Made for you.',
+     "Looking to upgrade the doors in your home?\n\nWe make custom wood and rattan doors built around your space and your style. Whether you're remodeling, building new, or finally tackling that project you've been thinking about, we'd love to hear your ideas.\n\nSend us a message or visit the link in our bio to get started on a custom quote.\n\n#SaddlebackDesignCo #CustomWoodDoors #CustomDoors #MadeToOrder",
      ''),
     ('history', 'beyond_history_intro', 'History is more than dates.',
      "What did a moment in history actually feel like for the people who lived through it?\n\nBeyond the History Books explores the past through human stories—family, discovery, everyday choices, hardship, and hope. We'll share historical lessons alongside character-driven fiction, from early Atlantic crossings to the lives changed by World War II and beyond.\n\nFollow along for the stories behind the events, the research behind the fiction, and the perspectives history books sometimes leave out.\n\n#BeyondTheHistoryBooks #HistoricalFiction #HistoryThroughStories",
