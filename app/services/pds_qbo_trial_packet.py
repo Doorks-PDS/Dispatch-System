@@ -203,7 +203,7 @@ def setup_diagnostics(request):
                 'Authorize as Office Admin, then verify the exact sandbox company',
                 'Review existing customer, supplier and item lists; approve links',
                 'Prepare one test invoice/PO and run a read-only trial packet',
-                'Accountant reviews tax, terms, numbering, processing fees and 0.5% fee treatment',
+                'Accountant reviews tax, terms, numbering, processing fees and payment-method costs',
                 'Supervised provider posting remains a separate follow-up release',
             ],
             'can_post': False, 'connection_changes_performed': False,

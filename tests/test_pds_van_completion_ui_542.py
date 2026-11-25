@@ -5,10 +5,15 @@ JS = (Path(__file__).resolve().parents[1] / 'static' / 'app.js').read_text(encod
 
 def test_completion_form_records_explicit_stock_only_after_saving():
     segment = JS[JS.index('async function openCompletionOrRecommendation('):]
-    assert 'Parts used from technician van (optional)' in segment
+    assert 'class="pds-parts-used-panel"' in segment
+    assert 'cf_parts_matches' in segment
+    assert 'cf_parts_other' in segment
     assert "savedForm = await apiAddCompletion(job.id, payload);" in segment
     assert segment.index('savedForm = await apiAddCompletion(job.id, payload);') < segment.index("fetchJSON('/pds-van-stock/completion-usage'")
-    assert 'Select a listed PDS part' in segment
+    assert 'Quantities are checked against van stock' in segment
+    assert 'vanUsage.labels.get(i.part_id)' in segment
+    assert 'byPart.set(id,(byPart.get(id)||0)+amount)' in segment
+    assert 'Van stock used:' in segment
     assert 'Some van stock was NOT deducted' in segment
 
 def test_manual_movement_is_compact_and_can_transfer_to_another_van():

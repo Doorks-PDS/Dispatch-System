@@ -89,15 +89,15 @@ def test_resend_transport_to_cc_arrays_are_strict(tmp_path,monkeypatch):
     assert len(captured)==1
 
 
-def test_fee_0_5_percent_applies_to_all_methods_but_not_billed(tmp_path):
+def test_withdrawn_service_fee_is_not_billed(tmp_path):
     request,doc=setup_request(tmp_path)
     mark_sent(request)
     plan=fees.summary(request)
-    assert plan['rate_percent']=='0.50' and plan['enabled_for_new_invoices'] is False
+    assert plan['rate_percent']=='0.00' and plan['enabled_for_new_invoices'] is False
     assert {'credit_card','ach_echeck','check','cash'}.issubset(set(plan['applies_to']))
     example=fees.invoice_preview(request,'JS00021')
     assert example['existing_invoice_total']=='243.10'
-    assert example['proposed_service_fee']=='1.20'
+    assert example['proposed_service_fee']=='0.00'
     assert example['fee_charged'] is False
     assert qb.preview(request)['invoices'][0]['total']=='243.10'
     request.state.auth_role='tech'
@@ -141,7 +141,7 @@ def test_ui_explicit_to_cc_and_fee_disabled_until_connected():
     assert 'To (separate multiple emails with semicolons)' in js
     assert 'Add to CC' in js and 'Add to To' in js
     assert 'data-qbh-tab="payments"' in js
-    assert 'No fee has been charged' in js
+    assert 'No added service fee' in js
 
 
 def test_invoice_description_edit_same_total_invalidates_qb_handoff(tmp_path):

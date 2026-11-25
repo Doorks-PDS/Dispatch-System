@@ -10,7 +10,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from fastapi import HTTPException
 from app.services import pds_quickbooks_bridge as qb
 
-RATE = Decimal('0.005')  # 0.5%, not a payment-method surcharge
+RATE = Decimal('0')  # Universal service fee proposal withdrawn; no charge
 CENT = Decimal('0.01')
 ALL_METHODS = ('credit_card', 'debit_card', 'ach_echeck', 'check', 'cash', 'other')
 
@@ -18,9 +18,9 @@ ALL_METHODS = ('credit_card', 'debit_card', 'ach_echeck', 'check', 'cash', 'othe
 def summary(request):
     qb._admin(request)
     return {
-        'service_fee_name': 'Service fee', 'rate_percent': '0.50',
+        'service_fee_name': 'Service fee (withdrawn)', 'rate_percent': '0.00',
         'applies_to': list(ALL_METHODS), 'base': 'pre_tax_invoice_subtotal',
-        'application_state': 'plan_only_not_charged',
+        'application_state': 'withdrawn_not_charged',
         'enabled_for_new_invoices': False,
         'applied_to_existing_invoices': False,
         'fee_shown_on_issued_pdf': False,
@@ -30,14 +30,12 @@ def summary(request):
         'tax_treatment': 'needs_accountant_review',
         'accounting': {
             'merchant_of_record': 'pds_proposed',
-            'service_fee_revenue_owner': 'sdc_proposed_not_collected',
-            'requires_separate_fee_line': True,
-            'requires_income_liability_mapping': True,
+            'service_fee_revenue_owner': 'none',
+            'requires_separate_fee_line': False,
+            'requires_income_liability_mapping': False,
             'requires_processor_reconciliation': True,
         },
-        'note': ('A required 0.5% fee should be included in the agreed quoted and invoiced '
-                 'all-in price before payment, shown as a separate line, and mapped to '
-                 'accounting. This preview does not change customer charges.'),
+        'note': 'Universal service fee proposal withdrawn. No fee is added to invoices or payments.',
     }
 
 
@@ -65,4 +63,4 @@ def invoice_preview(request, invoice_number):
             'fee_charged': False, 'fee_applied_to_document': False,
             'payment_link_available': False,
             'all_payment_methods': list(ALL_METHODS),
-            'note': 'Illustration only. The saved customer invoice and QuickBooks handoff are unchanged.'}
+            'note': 'No added service fee. The saved customer invoice and QuickBooks handoff are unchanged.'}

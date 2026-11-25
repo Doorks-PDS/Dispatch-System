@@ -3153,6 +3153,12 @@
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
       addSdc('sdcDevelopmentNav','Atlas Software Sales',()=>renderAtlasSales('overview'));
+      addSdc('sdcDevelopmentNav','Atlas Marketing',()=>{
+        clearWorkspaceActions();setWorkspace('SDC — Atlas Marketing');workspaceBody.replaceChildren();
+        const frame=document.createElement('iframe');frame.title='Atlas marketing drafts and approval desk';
+        frame.src='/sdc/atlas-marketing';frame.style.cssText='width:100%;height:1200px;min-height:75vh;border:1px solid #dce5dd;border-radius:18px;background:#f7faf7;display:block';
+        workspaceBody.append(frame);frame.addEventListener('load',()=>{try{const doc=frame.contentDocument;if(!doc)return;const resize=()=>{frame.style.height=Math.min(Math.max(950,doc.documentElement.scrollHeight+40),14000)+'px'};resize();if(typeof ResizeObserver!=='undefined'){new ResizeObserver(resize).observe(doc.body)}}catch(e){}});
+      });
       addSdc('sdcDevelopmentNav','Open Atlas Storefront',()=>{window.open('/software','_blank','noopener');});
     }
     if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbJobNav','Job Flow',renderDoorksJobFlow);add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Payroll',()=>renderDoorksStaff('payroll'));add('dbOfficeNav','Employees',()=>renderDoorksStaff('employees'));add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer & Vendor Portals',renderDoorksPortalAdmin);add('dbPortalNav','Customer Hub',()=>renderDoorksRelationshipHub('customers'));add('dbPortalNav','Vendor Hub',()=>renderDoorksRelationshipHub('vendors'));}
@@ -7486,12 +7492,22 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         techNotes.style.marginTop = "10px";
         techNotes.innerHTML = `<div class="label">Tech Notes</div><textarea id="cf_tech_notes"></textarea>`;
 
+        pdsWorkflowPolish();
         const partsRecs = document.createElement("div");
         partsRecs.className = "grid2";
         partsRecs.style.marginTop = "10px";
         partsRecs.innerHTML = `
-          <div><div class="label">Parts Used</div><textarea id="cf_parts" placeholder="Parts used"></textarea></div>
-          <div><div class="label">Additional Recommendations</div><textarea id="cf_add_recs" placeholder="Additional recommendations"></textarea></div>
+          <div class="pds-parts-used-panel">
+            <label class="label" for="cf_parts">Parts Used</label>
+            <div class="pds-parts-entry">
+              <input class="input" id="cf_parts" type="search" autocomplete="off" placeholder="Search van parts or enter another item…" aria-controls="cf_parts_matches" aria-expanded="false" />
+              <button type="button" class="btn" id="cf_parts_other">+ Unlisted</button>
+            </div>
+            <div id="cf_parts_matches" class="pds-parts-matches" role="listbox" hidden></div>
+            <div id="cf_parts_selected" class="pds-parts-selected" aria-live="polite"></div>
+            <p id="cf_parts_hint" class="hint pds-parts-note">Search by part number or name. Select a van part to track stock, or add an unlisted item. Nothing is deducted until the form saves.</p>
+          </div>
+          <div><label class="label" for="cf_add_recs">Additional Recommendations</label><textarea id="cf_add_recs" placeholder="Additional recommendations"></textarea></div>
         `;
 
         card.appendChild(timeRow);
@@ -7499,44 +7515,110 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         card.appendChild(partsRecs);
       }
 
-      // Explicit parts linked to the saved completion form, not parsed from notes.
-      // The warehouse was already reduced when these items were loaded onto a van.
-      const vanUseRows=[];
+      // Unified parts box: selection, quantity, and manual items stay in one place.
+      // Inventory deduction remains server-side, after a verified completion save,
+      // keyed by the saved (job, form, van, part) identity for at-most-once usage.
       if(!isSalesLead){
-        const vanUsage=document.createElement('details');vanUsage.className='card';vanUsage.style.cssText='margin-top:10px;padding:12px';
-        const summary=document.createElement('summary');summary.textContent='🚐 Parts used from technician van (optional)';summary.style.cssText='font-weight:700;cursor:pointer';vanUsage.append(summary);
-        const hint=document.createElement('p');hint.className='hint';hint.textContent='Record exact parts and quantities after saving this completion form. Stock deducts from the selected technician’s van only—not the warehouse again. Free-text notes never change stock.';vanUsage.append(hint);
-        const rows=document.createElement('div');rows.style.cssText='display:grid;gap:8px';vanUsage.append(rows);
-        const add=document.createElement('button');add.className='btn';add.type='button';add.textContent='+ Part used';vanUsage.append(add);
-        let catalog=[],vans=[];
-        const list=document.createElement('datalist');list.id='completionVanParts_'+Math.random().toString(36).slice(2);vanUsage.append(list);
-        const lookup=(p)=>`${p.part_number||'Part'} — ${p.description||'No description'} [${p.id}]`;
+        const search=card.querySelector('#cf_parts');
+        const matches=card.querySelector('#cf_parts_matches');
+        const selected=card.querySelector('#cf_parts_selected');
+        const manual=card.querySelector('#cf_parts_other');
+        const hint=card.querySelector('#cf_parts_hint');
+        let catalog=[],vans=[],loadFailed=false;
+        const entries=[];
         const currentVan=()=>vans.find(v=>v.enabled&&String(v.employee_name||'').trim().toLowerCase()===String(techSel.value||'').trim().toLowerCase());
-        add.onclick=()=>{
-          if(!currentVan()){alert('The selected technician does not have an active van. Save the completion form normally and reconcile any untracked stock through Van Stock.');return;}
-          const row=document.createElement('div');row.style.cssText='display:flex;gap:8px;flex-wrap:wrap;align-items:center';
-          const part=document.createElement('input');part.type='search';part.className='input';part.placeholder='Search part number or description';part.setAttribute('list',list.id);part.style.cssText='flex:1 1 220px';
-          const qty=document.createElement('input');qty.className='input';qty.type='number';qty.min='1';qty.max='100000';qty.step='1';qty.value='1';qty.style.width='85px';qty.setAttribute('aria-label','Quantity used');
-          const remove=document.createElement('button');remove.type='button';remove.className='btn';remove.textContent='Remove';
-          const entry={row,part,qty};vanUseRows.push(entry);remove.onclick=()=>{vanUseRows.splice(vanUseRows.indexOf(entry),1);row.remove();};
-          row.append(part,qty,remove);rows.append(row);part.focus();
+        const lookup=p=>`${p.part_number||'Part'} — ${p.description||'No description'} [${p.id}]`;
+        const available=(partId)=>Number(currentVan()?.items?.find(i=>String(i.part_id)===String(partId))?.quantity||0);
+        const formatPart=p=>[p.part_number,p.description].filter(Boolean).join(' · ')||String(p.id);
+        const addEntry=(part,freeText='')=>{
+          if(part){
+            const existing=entries.find(e=>e.part&&String(e.part.id)===String(part.id));
+            if(existing){existing.quantity.value=String(Number(existing.quantity.value||0)+1);existing.quantity.focus();updateHint();return;}
+          } else if(!freeText.trim())return;
+          const entry={part,freeText:freeText.trim()};
+          const row=document.createElement('div');row.className='pds-part-selection';
+          const label=document.createElement('span');label.className='pds-part-selection-label';label.textContent=part?formatPart(part):entry.freeText;
+          const qty=document.createElement('input');qty.type='number';qty.className='input';qty.min='1';qty.max='100000';qty.step='1';qty.value='1';qty.setAttribute('aria-label','Quantity used for '+label.textContent);
+          const badge=document.createElement('span');badge.className='pds-part-selection-kind';
+          badge.textContent=part?'Van stock':'Untracked';
+          const remove=document.createElement('button');remove.type='button';remove.className='btn';remove.textContent='×';remove.setAttribute('aria-label','Remove '+label.textContent);
+          entry.quantity=qty;entry.row=row;
+          remove.onclick=()=>{const pos=entries.indexOf(entry);if(pos>=0)entries.splice(pos,1);row.remove();updateHint()};
+          qty.addEventListener('input',updateHint);
+          row.append(label,badge,qty,remove);selected.append(row);entries.push(entry);
+          search.value='';matches.hidden=true;search.setAttribute('aria-expanded','false');search.focus();updateHint();
         };
-        fetchJSON('/pds-van-stock').then(state=>{
-          catalog=state.catalog||[];vans=state.vans||[];
-          for(const p of catalog){const option=document.createElement('option');option.value=lookup(p);list.append(option);}
-        }).catch(()=>{hint.textContent='Van stock is unavailable. The completion form can still be saved; record parts later in Van Stock.';add.disabled=true;});
-        vanUsage._collect=()=>{
-          const selectedVan=currentVan();if(vanUseRows.length&&!selectedVan)throw Error('Choose the technician with an active van for recorded parts.');
-          const byPart=new Map();
-          for(const row of vanUseRows){const found=catalog.find(p=>lookup(p)===row.part.value.trim());
-            if(!found)throw Error('Select a listed PDS part for each van usage entry.');
-            const amount=Number(row.qty.value);if(!Number.isSafeInteger(amount)||amount<1)throw Error('Use a positive whole-number quantity.');
-            byPart.set(String(found.id),(byPart.get(String(found.id))||0)+amount);
+        const updateHint=()=>{
+          const stock=entries.filter(e=>e.part).length,other=entries.length-stock;
+          if(loadFailed)hint.textContent='Van stock could not be loaded. Unlisted items can still be saved, but inventory will not be deducted.';
+          else if(!currentVan())hint.textContent='No active van for this technician. Enter items as unlisted; inventory cannot be deducted.';
+          else hint.textContent=entries.length?`${stock} van part(s) tracked · ${other} unlisted · Quantities are checked against van stock when saving.`:'Type a part number or name to find this technician’s van stock. Unlisted parts are saved without an inventory deduction.';
+        };
+        const showMatches=()=>{
+          matches.replaceChildren();
+          const term=search.value.trim().toLowerCase();
+          if(!term||!catalog.length||loadFailed){matches.hidden=true;search.setAttribute('aria-expanded','false');return;}
+          const van=currentVan();
+          const filtered=catalog.filter(p=>`${p.part_number||''} ${p.description||''}`.toLowerCase().includes(term))
+            .sort((a,b)=>Number(available(b.id)>0)-Number(available(a.id)>0)).slice(0,8);
+          for(const part of filtered){
+            const inVan=available(part.id);
+            const button=document.createElement('button');button.type='button';button.className='pds-part-suggestion';button.setAttribute('role','option');
+            const title=document.createElement('strong');title.textContent=formatPart(part);
+            const count=document.createElement('span');count.textContent=inVan>0?`${inVan} in van`:'Not in van';count.className=inVan>0?'pds-part-in-stock':'pds-part-out-stock';
+            button.append(title,count);
+            button.onclick=()=>{
+              // Never infer a warehouse transfer or consume a different technician's inventory.
+              if(van&&inVan>0)addEntry(part);
+              else addEntry(null,formatPart(part));
+            };
+            matches.append(button);
           }
-          return {employee_id:selectedVan?.employee_id,items:Array.from(byPart,([part_id,quantity])=>({part_id,quantity}))};
+          matches.hidden=!filtered.length;search.setAttribute('aria-expanded',String(!!filtered.length));
         };
-        card.appendChild(vanUsage);
-        card._vanStockUsage=vanUsage;
+        manual.onclick=()=>addEntry(null,search.value);
+        search.addEventListener('input',showMatches);
+        search.addEventListener('keydown',event=>{
+          if(event.key==='Escape'){matches.hidden=true;search.setAttribute('aria-expanded','false')}
+          if(event.key==='Enter'){event.preventDefault();
+            const first=matches.querySelector('button');if(first&&!matches.hidden)first.click();else manual.click();
+          }
+        });
+        techSel.addEventListener('change',()=>{
+          // A changed technician must not inherit van reservations from another van.
+          for(const entry of entries.filter(e=>e.part)){
+            entry.freeText=entry.part?formatPart(entry.part):entry.freeText;
+            entry.part=null;entry.row.querySelector('.pds-part-selection-kind').textContent='Untracked';
+          }
+          showMatches();updateHint();
+        });
+        fetchJSON('/pds-van-stock').then(state=>{
+          catalog=Array.isArray(state.catalog)?state.catalog:[];
+          vans=Array.isArray(state.vans)?state.vans:[];
+          showMatches();updateHint();
+        }).catch(()=>{loadFailed=true;updateHint()});
+        // Raw text left in the search field is recorded as an untracked item,
+        // including AI-assisted text. It is not automatically interpreted as stock.
+        card._vanStockUsage={_collect:()=>{
+          const extra=search.value.trim();
+          const selectedVan=currentVan(),byPart=new Map(),labels=new Map(),manualItems=[];
+          for(const entry of entries){
+            const amount=Number(entry.quantity.value);
+            if(!Number.isSafeInteger(amount)||amount<1||amount>100000)throw Error('Enter a positive whole-number quantity for each part.');
+            if(entry.part){
+              const id=String(entry.part.id);
+              byPart.set(id,(byPart.get(id)||0)+amount);
+              labels.set(id,lookup(entry.part));
+            }else manualItems.push(`${amount} × ${entry.freeText} (untracked)`);
+          }
+          if(extra)manualItems.push(extra);
+          if(byPart.size&&!selectedVan)throw Error('Select the technician with an active van or record the part as unlisted.');
+          for(const [id,quantity] of byPart){
+            if(quantity>available(id))throw Error(`${labels.get(id)}: ${quantity} requested but only ${available(id)} in the selected van. Adjust quantity or enter as unlisted.`);
+          }
+          return {employee_id:selectedVan?.employee_id,items:Array.from(byPart,([part_id,quantity])=>({part_id,quantity})),labels,manualItems};
+        }};
+        updateHint();
       }
 
       const syncTimeOnsite = () => {
@@ -7831,7 +7913,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
               payload.rollup_includes_lunch = false;
             }
             payload.tech_notes = card.querySelector("#cf_tech_notes").value.trim();
-            payload.parts_used = card.querySelector("#cf_parts").value.trim();
+            // Unified picker writes tracked and untracked items below. Do not
+            // duplicate pending search text when collecting parts.
+            payload.parts_used = "";
             payload.additional_recommendations = card.querySelector("#cf_add_recs").value.trim();
           }
 
@@ -7839,13 +7923,15 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             alert("Please complete the save confirmation checklist."); return;
           }
           // Validate structured inventory rows before committing the completion.
-          const vanUsage=card._vanStockUsage?card._vanStockUsage._collect():{items:[]};
+          const vanUsage=card._vanStockUsage?card._vanStockUsage._collect():{items:[],manualItems:[],labels:new Map()};
+          // Keep exact existing backend verification format. No stock movement is
+          // performed based on free text or unknown items.
           if(vanUsage.items.length){
-            const vanDetail=vanUsage.items.map(i=>{
-              const row=(card._vanStockUsage?Array.from(card._vanStockUsage.querySelectorAll('input[list]')):[]).find(input=>input.value.includes(`[${i.part_id}]`));
-              return `${i.quantity} × ${row?.value||i.part_id}`;
-            }).join('; ');
-            payload.parts_used=[payload.parts_used,`Van stock used: ${vanDetail}`].filter(Boolean).join('\n');
+            const detail=vanUsage.items.map(i=>`${i.quantity} × ${vanUsage.labels.get(i.part_id)}`).join('; ');
+            payload.parts_used=`Van stock used: ${detail}`;
+          }
+          if(vanUsage.manualItems.length){
+            payload.parts_used=[payload.parts_used,`Other parts used: ${vanUsage.manualItems.join('; ')}`].filter(Boolean).join('\n');
           }
           const selectedFiles = Array.from(card.querySelector("#cf_files")?.files || []);
           savingForm = true;
@@ -8735,6 +8821,50 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     refresh();
   }
 
+  // Small, scoped visual polish for field completion and personal schedule.
+  function pdsWorkflowPolish(){
+    if(document.getElementById('pdsWorkflowPolish584'))return;
+    const style=document.createElement('style');style.id='pdsWorkflowPolish584';style.textContent=`
+      .pds-personal-schedule{padding:18px!important}
+      .pds-personal-schedule-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+      .pds-personal-schedule-head h4{margin:0;font-size:17px}
+      .pds-week-grid{display:grid;grid-template-columns:repeat(7,minmax(138px,1fr));gap:8px;min-width:1030px}
+      .pds-week-column{border:1px solid #dce3ed;border-radius:14px;padding:9px;display:flex;flex-direction:column;gap:7px;min-height:144px;background:#f8fafc}
+      .pds-week-column[data-today=true]{background:#fff7ed;border-color:#fb923c}
+      .pds-week-day{padding:5px 7px!important;font-weight:800!important;font-size:12px!important;width:100%;border-radius:9px!important}
+      .pds-week-count{font-size:11px;color:#64748b;text-align:center}
+      .pds-todo-visit{display:flex;flex-direction:column;align-items:stretch;gap:5px;text-align:left;width:100%;background:#fff;border:1px solid #e2e8f0;border-left:4px solid var(--pds-visit-color,#94a3b8);border-radius:10px;padding:8px;cursor:pointer;min-width:0;transition:transform .12s,box-shadow .12s}
+      .pds-todo-visit:hover,.pds-todo-visit:focus-visible{transform:translateY(-1px);box-shadow:0 3px 10px #0f172a1a;outline-offset:2px}
+      .pds-visit-time{font-size:12px;font-weight:850;color:#334155}
+      .pds-visit-customer{font-weight:750;color:#1e293b;font-size:12px;line-height:1.35;overflow-wrap:anywhere;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+      .pds-visit-footer{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px;color:#64748b;font-size:10px}
+      .pds-visit-status{font-size:10px;font-weight:800;color:var(--pds-visit-color,#64748b)}
+      .pds-parts-used-panel{border:1px solid #dbe3eb;border-radius:13px;background:#f8fafc;padding:12px;min-width:0}
+      .pds-parts-entry{display:flex;gap:7px;align-items:center;flex-wrap:wrap;margin:5px 0}
+      .pds-parts-entry input{flex:1 1 180px;min-width:0}
+      .pds-parts-matches{max-height:190px;overflow:auto;border:1px solid #cbd5e1;border-radius:10px;background:white;box-shadow:0 8px 18px #0f172a14}
+      .pds-part-suggestion{width:100%;display:flex;justify-content:space-between;align-items:center;gap:8px;border:0;border-bottom:1px solid #e2e8f0;background:white;padding:9px;text-align:left;cursor:pointer}
+      .pds-part-suggestion:hover,.pds-part-suggestion:focus-visible{background:#fff7ed}
+      .pds-part-suggestion strong{font-size:12px;overflow-wrap:anywhere}
+      .pds-part-in-stock{color:#166534;font-size:11px;white-space:nowrap}
+      .pds-part-out-stock{color:#9a3412;font-size:11px;white-space:nowrap}
+      .pds-parts-selected{display:grid;gap:6px;margin-top:8px}
+      .pds-part-selection{display:flex;align-items:center;gap:6px;background:#fff;border:1px solid #e2e8f0;border-radius:9px;padding:6px}
+      .pds-part-selection-label{flex:1;min-width:0;font-size:12px;font-weight:700;overflow-wrap:anywhere}
+      .pds-part-selection-kind{font-size:10px;color:#64748b;white-space:nowrap}
+      .pds-part-selection input{width:70px;min-width:55px;padding:6px}
+      .pds-part-selection button{padding:5px 8px}
+      .pds-parts-note{font-size:11px;line-height:1.4;margin:8px 0 0}
+      @media(max-width:780px){.pds-parts-entry button{flex:0 0 auto}.pds-parts-used-panel{padding:10px}.pds-part-selection{flex-wrap:wrap}.pds-personal-schedule{padding:12px!important}}
+    `;document.head.append(style);
+  }
+  function pdsScheduleStatusColor(status){
+    const key=String(status||'Dispatch').trim().toLowerCase();
+    return ({'dispatch':'#2563eb','new':'#2563eb','scheduled':'#7c3aed','in progress':'#ca8a04','quote':'#dc2626',
+      'to be quoted':'#dc2626','quote sent':'#64748b','approved':'#db2777','parts on order':'#92400e',
+      'complete/quote':'#c2410c','complete':'#16a34a','done':'#16a34a','invoiced':'#16a34a','cancelled':'#6b7280'})[key]||'#64748b';
+  }
+
   // Complete/Quote is genuinely two work paths; allow the estimator to choose.
   function pdsToDoDocumentTypes(job, isInvoiceQueue) {
     const status=String(job?.status||'').trim().toLowerCase();
@@ -8744,6 +8874,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
   // Personal work tickets; no fabricated mileage. The office can set a
   // specific visit order later; until then date and job number are authoritative.
   function renderMyAssignments() {
+    pdsWorkflowPolish();
     if (!currentUser || !['tech','lead','office','office_admin','admin'].includes(String(currentUser.role || ''))) return;
     setNavActive(navMyAssignments);
     setActiveChip('Work Flow');
@@ -8768,29 +8899,41 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     clear.onclick = () => { dateField.value = ''; refresh(); };
     heading.append(h,dateField,clear);
     root.append(heading);
-    const personalSchedule=document.createElement('section');personalSchedule.className='card';
-    personalSchedule.style.cssText='margin-top:12px;padding:14px';
-    const scheduleHeader=document.createElement('h4');scheduleHeader.textContent='My Upcoming Schedule';scheduleHeader.style.margin='0 0 10px';
-    const scheduleGrid=document.createElement('div');scheduleGrid.style.cssText='display:grid;grid-template-columns:repeat(7,minmax(135px,1fr));gap:6px;min-width:980px';
+    const personalSchedule=document.createElement('section');personalSchedule.className='card pds-personal-schedule';
+    personalSchedule.style.marginTop='12px';
+    const personalHead=document.createElement('div');personalHead.className='pds-personal-schedule-head';
+    const scheduleHeader=document.createElement('h4');scheduleHeader.textContent='My Upcoming Schedule';
+    const scheduleGuide=document.createElement('small');scheduleGuide.className='hint';scheduleGuide.textContent='Status colors · Select a job to open its ticket';
+    personalHead.append(scheduleHeader,scheduleGuide);
+    const scheduleGrid=document.createElement('div');scheduleGrid.className='pds-week-grid';
     const scheduleScroll=document.createElement('div');scheduleScroll.style.cssText='overflow-x:auto;width:100%';scheduleScroll.append(scheduleGrid);
-    personalSchedule.append(scheduleHeader,scheduleScroll);root.append(personalSchedule);
+    personalSchedule.append(personalHead,scheduleScroll);root.append(personalSchedule);
     const renderPersonalSchedule=jobs=>{
       scheduleGrid.replaceChildren();
-      const today=new Date(),base=new Date((dateField.value||[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-'))+'T12:00:00');
+      const today=new Date();
+      const todayIso=[today.getFullYear(),String(today.getMonth()+1).padStart(2,'0'),String(today.getDate()).padStart(2,'0')].join('-');
+      const base=new Date((dateField.value||todayIso)+'T12:00:00');
       for(let offset=0;offset<7;offset++){
         const day=new Date(base);day.setDate(base.getDate()+offset);
         const iso=[day.getFullYear(),String(day.getMonth()+1).padStart(2,'0'),String(day.getDate()).padStart(2,'0')].join('-');
-        const column=document.createElement('div');column.style.cssText='border:1px solid #dbe3e8;border-radius:10px;padding:7px;display:grid;gap:6px;align-content:start;background:#fafcfd';
-        const dayButton=document.createElement('button');dayButton.type='button';dayButton.className='btn';dayButton.style.cssText='padding:5px 6px;font-size:12px';
+        const column=document.createElement('div');column.className='pds-week-column';column.dataset.today=String(iso===todayIso);
+        const dayButton=document.createElement('button');dayButton.type='button';dayButton.className='btn pds-week-day';
         dayButton.textContent=day.toLocaleDateString(undefined,{weekday:'short',month:'short',day:'numeric'});
         dayButton.setAttribute('aria-label','Show assigned jobs for '+iso);
         dayButton.onclick=()=>{dateField.value=iso;refresh()};column.append(dayButton);
         const matches=jobs.filter(j=>String(j.scheduled_date||j.date||'')===iso)
           .sort((a,b)=>String(a.scheduled_time||'').localeCompare(String(b.scheduled_time||'')));
+        const counter=document.createElement('small');counter.className='pds-week-count';counter.textContent=matches.length?`${matches.length} scheduled`:'No visits';column.append(counter);
         for(const job of matches){
-          const visit=document.createElement('button');visit.type='button';visit.className='btn';
-          visit.style.cssText='font-size:11px;line-height:1.35;text-align:left;padding:7px;white-space:normal;overflow-wrap:anywhere';
-          visit.textContent=(job.scheduled_time||'Time TBD')+' · '+(job.customer||'Job')+' · #'+(job.job_number||'');
+          const visit=document.createElement('button');visit.type='button';visit.className='pds-todo-visit';
+          const accent=pdsScheduleStatusColor(job.status);visit.style.setProperty('--pds-visit-color',accent);
+          const time=document.createElement('span');time.className='pds-visit-time';time.textContent=job.scheduled_time||'Time TBD';
+          const customer=document.createElement('span');customer.className='pds-visit-customer';customer.textContent=job.customer||'Job';
+          const footer=document.createElement('span');footer.className='pds-visit-footer';
+          const number=document.createElement('span');number.textContent=job.job_number?'#'+job.job_number:'Job';
+          const status=document.createElement('span');status.className='pds-visit-status';status.textContent=job.status||'Dispatch';
+          footer.append(number,status);visit.append(time,customer,footer);
+          visit.title=[job.customer,job.job_number,job.status,job.scheduled_time].filter(Boolean).join(' · ');
           visit.onclick=async()=>{
             try{const full=await apiGetJob(job.id);openDrawer('Job Details',drawerBody=>{
               const content=document.createElement('div');drawerBody.append(content);
@@ -8799,7 +8942,6 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           };
           column.append(visit);
         }
-        if(!matches.length){const empty=document.createElement('small');empty.className='hint';empty.textContent='No visits';column.append(empty);}
         scheduleGrid.append(column);
       }
     };
@@ -8923,6 +9065,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
         for (const job of visibleJobs) {
           const card = document.createElement('div');
           card.className = 'jobrow';
+          card.style.borderLeft='4px solid '+pdsScheduleStatusColor(job.status);
           const top = document.createElement('div');
           top.className = 'jobrow-top';
           const name = document.createElement('strong');
@@ -10799,17 +10942,17 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <p class="qbh-footnote">Estimates are included in the numbering plan for future compatibility, but 5.71 does not sync estimates. Customer PO numbers are separate from PDS supplier PO-000xx numbers. No posting, tax remapping or accounting adjustments occur here.</p>
         </section>
         <section class="qbh-section" data-qbh-panel="payments" hidden>
-          <div class="qbh-section-head"><div><div class="qbh-kicker">PAYMENTS PLANNING</div><h3>Invoice payment options &amp; service fee</h3>
-            <p>Draft 0.5% service fee shown separately for all payment types. Not yet charged, posted or added to saved invoices.</p></div></div>
-          <div class="qbh-connection-note"><strong>Proposed customer-facing payment total</strong>
-            <p>Show the service-fee line on the agreed estimate and issued invoice, with one complete total before the customer pays. Don't add a surprise checkout-only fee.</p>
+          <div class="qbh-section-head"><div><div class="qbh-kicker">PAYMENTS PLANNING</div><h3>Invoice payment options</h3>
+            <p>The proposed universal service fee was withdrawn. No extra platform fee will be added to invoices.</p></div></div>
+          <div class="qbh-connection-note"><strong>Payment options planning</strong>
+            <p>Offer ACH and card payment options after approved processor setup. Existing customer invoice totals remain unchanged.</p>
             <div class="qbh-muted" id="qbhFeeStatus">Loading payment plan…</div></div>
           <div style="display:grid;grid-template-columns:1fr auto;align-items:end;gap:10px;margin:14px 0">
-            <label style="display:grid;gap:5px">Preview saved invoice fee (no changes)<input class="input" id="qbhFeeInvoice" placeholder="JS00021" maxlength="20" /></label>
+            <label style="display:grid;gap:5px">Preview saved invoice total (no changes)<input class="input" id="qbhFeeInvoice" placeholder="JS00021" maxlength="20" /></label>
             <button type="button" class="btn" id="qbhFeePreview">Preview</button>
           </div>
-          <div class="qbh-connection-note" id="qbhFeeResult" role="status">Choose an issued invoice to preview the proposed fee. Nothing is charged.</div>
-          <p class="qbh-footnote">Before activation: confirm tax treatment, customer price disclosures, your processor, and SDC's revenue accounting. PDS and SDC are separate businesses; showing a line doesn't transfer funds to SDC.</p>
+          <div class="qbh-connection-note" id="qbhFeeResult" role="status">Choose an issued invoice to check its saved total. Nothing is charged.</div>
+          <p class="qbh-footnote">Before activation: verify your payment processor, fee ownership, accounting reconciliation and customer payment methods. No SDC fee is planned.</p>
         </section>
         <section class="qbh-section" data-qbh-panel="setup" hidden>
           <div class="qbh-section-head"><div><div class="qbh-kicker">CONNECTION</div><h3>Connection setup</h3>
@@ -11032,8 +11175,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     function drawFeePlan(){
       const target=$('qbhFeeStatus');if(!target)return;
       if(!feePlan){target.textContent='Payment plan not available';return;}
-      target.textContent='Proposed service fee: '+feePlan.rate_percent+'% of pre-tax subtotal · Applies to all payment forms · '+
-        'Current state: not enabled · No QuickBooks payment sync · No SDC payout configured.';
+      target.textContent='No added service fee · Credit card and ACH setup pending · QuickBooks payment sync is off.';
     }
     function drawConnection(){
       if(!connection)return;
@@ -11170,8 +11312,7 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       try{
         const value=await fetchJSON('/pds-quickbooks/payment-fee-plan/invoices/'+encodeURIComponent(number));
         $('qbhFeeResult').textContent=value.ready
-          ?number+': Existing issued total '+money(value.existing_invoice_total)+' · Proposed service fee '+money(value.proposed_service_fee)+
-            ' · Illustration '+money(value.illustrative_total_before_any_fee_tax)+' before any fee-related tax review. No fee has been charged.'
+          ?number+': Saved issued total '+money(value.existing_invoice_total)+' · No added service fee. Payment collection remains disabled.'
           :number+' requires review: '+(value.needs_review||[]).join(' · ');
       }catch(error){$('qbhFeeResult').textContent='Cannot preview: '+(error.message||error);}
       finally{button.disabled=false;}

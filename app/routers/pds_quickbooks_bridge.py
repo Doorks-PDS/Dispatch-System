@@ -190,11 +190,11 @@ def qbo_sync_readiness(request: Request):
                 'Verify income, expense, items and tax mapping',
                 'Check existing QuickBooks DocNumbers for collisions',
                 'Approve a single invoice and PO test with an accountant',
-                'Confirm how a 0.5% service fee is disclosed, taxed, and allocated',
+                'Confirm payment processor costs and accepted payment methods',
             ],
             'provider_transaction_posting_enabled': False,
             'automatic_sync_enabled': False, 'payment_link_enabled': False,
-            'service_fee_rate_percent': '0.50', 'service_fee_live': False}
+            'service_fee_rate_percent': '0.00', 'service_fee_live': False}
 
 # 5.74: bounded provider lookup to review customer/vendor/item/account mappings.
 # Strictly Office Admin read-only; no accounting writes or saved mapping guesses.

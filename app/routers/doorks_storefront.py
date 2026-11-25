@@ -1,6 +1,6 @@
 """Public Atlas software catalog and inquiry intake on the existing Doorks service."""
 from __future__ import annotations
-import csv, io, json, os, uuid
+import csv, io, json, os, re, uuid
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request
@@ -416,3 +416,155 @@ def convert_software_inquiry_to_customer(lead_id: str, request: Request):
         ws.save(customers_path, customers)
         # Do not mutate the lead: conversion is traceable via customer linkage.
         return {'ok': True, 'already_exists': False, 'customer': customer}
+
+
+# Moses 5.85: SDC Atlas marketing desk. All content remains internal until
+# Meta business authorization and explicit outbound publishing are implemented.
+# Uses the existing SDC durable workspace directory and permission gate.
+from typing import Literal
+
+ATLAS_POST_CHANNELS = ('instagram', 'facebook', 'both', 'linkedin')
+ATLAS_POST_ASSETS = (
+    'atlas_real_dashboard.webp', 'atlas_real_requests.webp',
+    'atlas_real_extra_1.webp', 'atlas_real_extra_2.webp', 'atlas_real_team.webp',
+)
+
+class AtlasMarketingDraft(BaseModel):
+    channel: Literal['instagram', 'facebook', 'both', 'linkedin']
+    title: str = Field(min_length=1, max_length=120)
+    caption: str = Field(min_length=1, max_length=2200)
+    asset: str = Field(default='', max_length=70)
+    planned_at: str = Field(default='', max_length=35)
+    campaign: str = Field(default='', max_length=100)
+
+class AtlasMarketingDecision(BaseModel):
+    approve: bool
+    confirm: bool = False
+
+
+def _atlas_marketing_guard(request):
+    from app.routers import workspaces as ws
+    ws.guard(request, 'sdc', 'software_leads')
+
+
+def _atlas_marketing_path(request):
+    from app.routers import workspaces as ws
+    return ws.location(request, 'sdc', 'software_leads').with_name('atlas_marketing_posts.json')
+
+
+def _atlas_marketing_validate(payload):
+    if payload.asset and payload.asset not in ATLAS_POST_ASSETS:
+        raise HTTPException(422, 'Select an approved public Atlas screenshot')
+    if payload.planned_at:
+        try:
+            planned = datetime.fromisoformat(payload.planned_at.replace('Z', '+00:00'))
+            if planned.tzinfo is None:
+                raise ValueError('Timezone required')
+        except ValueError as exc:
+            raise HTTPException(422, 'Planned time must include a timezone') from exc
+    if not payload.title.strip() or not payload.caption.strip():
+        raise HTTPException(422, 'Post title and caption required')
+
+
+def _atlas_marketing_audit(request, rows):
+    # No secrets or identity assumptions: only the verified session's user ID.
+    user = request.state.auth_user
+    actor = user.get('id') or user.get('username') if isinstance(user, dict) else str(user)
+    return str(actor or 'office_admin')[:80]
+
+
+@router.get('/sdc/atlas-marketing')
+def atlas_marketing_workspace(request: Request):
+    _atlas_marketing_guard(request)
+    root = Path(getattr(request.app.state, 'project_root', Path(__file__).resolve().parents[2]))
+    return FileResponse(root / 'static' / 'sdc_atlas_marketing.html', media_type='text/html', headers={'Cache-Control':'no-store'})
+
+
+@router.get('/api/software/marketing/posts')
+def atlas_marketing_posts(request: Request):
+    _atlas_marketing_guard(request)
+    from app.routers import workspaces as ws
+    with _shared_workspace_lock():
+        rows = ws.load(_atlas_marketing_path(request))
+    return {'posts': sorted(rows, key=lambda row: str(row.get('updated_at', '')), reverse=True),
+            'assets': list(ATLAS_POST_ASSETS), 'meta_connected': False,
+            'auto_publishing_enabled': False, 'publish_enabled': False,
+            'note': 'Approved posts and planned dates do not publish to social networks. Meta business authorization is required.'}
+
+
+@router.post('/api/software/marketing/posts', status_code=201)
+def atlas_marketing_create(payload: AtlasMarketingDraft, request: Request):
+    _atlas_marketing_guard(request)
+    _atlas_marketing_validate(payload)
+    from app.routers import workspaces as ws
+    now = datetime.now(timezone.utc).isoformat()
+    record = {'id': uuid.uuid4().hex, 'channel': payload.channel,
+              'title': payload.title.strip(), 'caption': payload.caption.strip(),
+              'asset': payload.asset, 'planned_at': payload.planned_at,
+              'campaign': payload.campaign.strip(), 'status': 'draft',
+              'created_at': now, 'updated_at': now, 'created_by': _atlas_marketing_audit(request, None),
+              'revision': 1, 'history': []}
+    with _shared_workspace_lock():
+        path = _atlas_marketing_path(request)
+        rows = ws.load(path)
+        rows.append(record)
+        ws.save(path, rows)
+    return {'post': record, 'published': False}
+
+
+@router.put('/api/software/marketing/posts/{post_id}')
+def atlas_marketing_edit(post_id: str, payload: AtlasMarketingDraft, request: Request):
+    _atlas_marketing_guard(request)
+    _atlas_marketing_validate(payload)
+    from app.routers import workspaces as ws
+    if not re.fullmatch('[a-f0-9]{32}', post_id):
+        raise HTTPException(422, 'Invalid post')
+    with _shared_workspace_lock():
+        path = _atlas_marketing_path(request)
+        rows = ws.load(path)
+        post = next((x for x in rows if x.get('id') == post_id), None)
+        if not post:
+            raise HTTPException(404, 'Post not found')
+        if post['status'] == 'archived':
+            raise HTTPException(409, 'Archived posts cannot be edited')
+        old = post['status']
+        post.update({'channel': payload.channel, 'title': payload.title.strip(),
+                     'caption': payload.caption.strip(), 'asset': payload.asset,
+                     'planned_at': payload.planned_at, 'campaign': payload.campaign.strip(),
+                     'status': 'draft', 'approved_by': None, 'approved_at': None,
+                     'updated_at': datetime.now(timezone.utc).isoformat(),
+                     'revision': int(post.get('revision') or 0) + 1})
+        post.setdefault('history', []).append({'action': 'edited', 'from': old, 'by': _atlas_marketing_audit(request, None), 'at': post['updated_at']})
+        post['history'] = post['history'][-40:]
+        ws.save(path, rows)
+    return {'post': post, 'published': False}
+
+
+@router.post('/api/software/marketing/posts/{post_id}/decision')
+def atlas_marketing_decide(post_id: str, payload: AtlasMarketingDecision, request: Request):
+    _atlas_marketing_guard(request)
+    from app.routers import workspaces as ws
+    if not payload.confirm:
+        raise HTTPException(422, 'Explicit marketing approval confirmation required')
+    if not re.fullmatch('[a-f0-9]{32}', post_id):
+        raise HTTPException(422, 'Invalid post')
+    with _shared_workspace_lock():
+        path = _atlas_marketing_path(request)
+        rows = ws.load(path)
+        post = next((x for x in rows if x.get('id') == post_id), None)
+        if not post:
+            raise HTTPException(404, 'Post not found')
+        if post['status'] == 'archived':
+            raise HTTPException(409, 'Archived post')
+        if post['status'] != 'draft':
+            raise HTTPException(409, 'Post already approved; edit to create a new review')
+        now = datetime.now(timezone.utc).isoformat()
+        post['status'] = 'approved' if payload.approve else 'archived'
+        post['approved_by'] = _atlas_marketing_audit(request, None) if payload.approve else None
+        post['approved_at'] = now if payload.approve else None
+        post['updated_at'] = now
+        post.setdefault('history', []).append({'action': 'approved' if payload.approve else 'archived',
+                                               'by': _atlas_marketing_audit(request, None), 'at': now})
+        post['history'] = post['history'][-40:]
+        ws.save(path, rows)
+    return {'post': post, 'published': False, 'auto_publishing_enabled': False}
