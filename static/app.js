@@ -7324,6 +7324,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     });
   }
 
+  // 5.82: show document shortcuts for the status the technician selected on this form.
+  // No form shortcut issues, sends, or posts the document; it only opens a draft editor.
+  function pdsCompletionDocumentActions(status, isRecommendation = false) {
+    if (isRecommendation) return ['estimate'];
+    const value = String(status || '').trim().toLowerCase().replace(/\s*\/\s*/g, '/');
+    if (value === 'complete/quote') return ['estimate', 'invoice'];
+    if (['complete', 'to be invoiced', 'invoiced', 'done'].includes(value)) return ['invoice'];
+    return ['estimate'];
+  }
+
   async function openCompletionOrRecommendation(job, container, ctx) {
     const isSalesLead = job.kind === "sales_lead";
     let employees = [];
@@ -7741,29 +7751,48 @@ Notes: ${job.parts_order.notes || ""}</div>`;
       btnSaveAndEstimate.type = "button";
       btnSaveAndEstimate.title = "Save this form first, then open a draft estimate based on this form";
       btnSaveAndEstimate.textContent = "✦ Save & Estimate";
+      const btnSaveAndInvoice = document.createElement("button");
+      btnSaveAndInvoice.className = "btn";
+      btnSaveAndInvoice.type = "button";
+      btnSaveAndInvoice.title = "Save this form first, then review a draft invoice based on the saved work";
+      btnSaveAndInvoice.textContent = "✦ Save & Invoice";
       const btnClose = document.createElement("button");
       btnClose.className = "btn";
       btnClose.textContent = "Close";
 
+      actions.style.flexWrap = "wrap";
       actions.appendChild(btnSave);
       actions.appendChild(btnSaveAndEstimate);
+      actions.appendChild(btnSaveAndInvoice);
       actions.appendChild(btnClose);
       card.appendChild(actions);
 
       drawerBody.appendChild(card);
 
       btnClose.addEventListener("click", () => overlay.remove());
-      let saveAndEstimateRequested = false;
+      let requestedDocumentType = null;
       let savingForm = false;
-      btnSaveAndEstimate.addEventListener("click", () => {
-        if(savingForm)return;
-        saveAndEstimateRequested = true;
+      const updateDocumentActions = () => {
+        const allowed = pdsCompletionDocumentActions(stSel?.value || job.status, isSalesLead);
+        btnSaveAndEstimate.hidden = !allowed.includes('estimate');
+        btnSaveAndInvoice.hidden = !allowed.includes('invoice');
+        // The app's global button CSS may override [hidden].
+        btnSaveAndEstimate.style.display = btnSaveAndEstimate.hidden ? 'none' : '';
+        btnSaveAndInvoice.style.display = btnSaveAndInvoice.hidden ? 'none' : '';
+      };
+      if(stSel) stSel.addEventListener('change', updateDocumentActions);
+      updateDocumentActions();
+      const requestSaveAndDocument = type => {
+        if(savingForm || !pdsCompletionDocumentActions(stSel?.value || job.status, isSalesLead).includes(type)) return;
+        requestedDocumentType = type;
         btnSave.click();
-      });
+      };
+      btnSaveAndEstimate.addEventListener('click', () => requestSaveAndDocument('estimate'));
+      btnSaveAndInvoice.addEventListener('click', () => requestSaveAndDocument('invoice'));
 
       btnSave.addEventListener("click", async event => {
-        // A normal Save click cancels any earlier, unsuccessful Save & Estimate attempt.
-        if(event.isTrusted) saveAndEstimateRequested = false;
+        // A direct Save never inherits a previous Save & Document request.
+        if(event.isTrusted) requestedDocumentType = null;
         if(savingForm)return;
         try {
           const selectedDate = (card.querySelector("#cf_form_date")?.value || "").trim();
@@ -7822,6 +7851,8 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           savingForm = true;
           btnSave.disabled = true;
           btnSaveAndEstimate.disabled = true;
+          btnSaveAndInvoice.disabled = true;
+          const documentTypeToOpen = requestedDocumentType;
           pdsSaveNoticePending++;
           pdsSaveNotice('Saving…','saving');
           let savedForm;
@@ -7937,11 +7968,16 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           if (ctx && ctx.afterSave) await ctx.afterSave();
           renderJobDetails(container, updatedJob, ctx);
           refreshBadges();
-          if(saveAndEstimateRequested && !completionWarnings){
+          if(documentTypeToOpen && !completionWarnings){
             const forms = Array.isArray(updatedJob.completion_forms) ? updatedJob.completion_forms : [];
             const sourceIndex = forms.findIndex(form => String(form?.id || '') === String(savedForm?.id || ''));
-            if(sourceIndex < 0 || !savedForm?.id){
-              alert('Form saved, but its exact ID could not be verified for the estimate. Open the saved form from the job to continue.');
+            const allowed = pdsCompletionDocumentActions(payload.status_update || updatedJob.status, isSalesLead);
+            if(sourceIndex < 0 || !savedForm?.id || !allowed.includes(documentTypeToOpen)){
+              alert('Form saved, but the exact form/status could not be confirmed for the document. Open the saved form from the job to continue.');
+            }else if(documentTypeToOpen === 'invoice'){
+              // Invoice helper retains optional "from saved estimate" selection and
+              // reviews actual completed work; no unverified charges are copied.
+              await openEstimateInvoiceHelper(updatedJob,'invoice',null,{sourceFormId:String(savedForm.id)});
             }else{
               await openEstimateInvoiceDrawer(updatedJob,'estimate',null,{
                 skipHelper:true,
@@ -7953,9 +7989,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           alert(e.message || String(e));
         } finally {
           savingForm = false;
-          saveAndEstimateRequested = false;
+          requestedDocumentType = null;
           btnSave.disabled = false;
           btnSaveAndEstimate.disabled = false;
+          btnSaveAndInvoice.disabled = false;
         }
       });
     });
@@ -10850,6 +10887,29 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             </div>
             <div id="qbhPartyApprovalNote" class="qbh-muted" role="status">Approval stores a local, auditable ID mapping only. No accounting posting.</div>
           </div>
+          <div class="qbh-connection-note"><strong>QuickBooks trial readiness (no posting)</strong>
+            <p>Choose a prepared PDS invoice or supplier PO and see what's mapped and what still requires review. This does not send or create anything.</p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <select class="input" id="qbhTrialKind" aria-label="Trial document type"><option value="invoice">Invoice</option><option value="supplier_po">Supplier PO</option></select>
+              <input class="input" id="qbhTrialNumber" maxlength="30" placeholder="Prepared document #" aria-label="PDS document number for trial" />
+              <button type="button" class="btn" id="qbhTrialCheck">Review trial checklist</button>
+            </div>
+            <div id="qbhTrialResult" class="qbh-muted" role="status">The report is read-only. First prepare an unchanged document in the handoff queue.</div>
+          </div>
+          <div class="qbh-connection-note"><strong>Tomorrow's QuickBooks launchpad · 5.83</strong>
+            <p>Run a safe connection preflight and export one prepared invoice/PO trial packet. The packet uses approved PDS IDs and flags missing tax, terms and provider checks. <b>It cannot post to QuickBooks.</b></p>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0">
+              <button type="button" class="btn" id="qbhSetupPreflight">Check setup</button>
+              <button type="button" class="btn" id="qbhCoverage">Link coverage</button>
+              <select class="input" id="qbhPacketKind" aria-label="Trial packet document type"><option value="invoice">Invoice</option><option value="supplier_po">Supplier PO</option></select>
+              <input class="input" id="qbhPacketNumber" maxlength="30" placeholder="Prepared document #" aria-label="PDS invoice or purchase order number" />
+              <button type="button" class="btn" id="qbhPacketPreview">Preview packet</button>
+              <button type="button" class="btn" id="qbhPacketDownload" disabled>Download JSON</button>
+              <label class="qbh-muted"><input type="checkbox" id="qbhPacketDuplicates" /> Include live duplicate check (read-only)</label>
+            </div>
+            <div id="qbhLaunchpadStatus" class="qbh-muted" role="status">Preflight is read-only. Prepare one unchanged invoice or supplier PO before review.</div>
+            <div id="qbhLaunchpadDetails" style="display:grid;gap:6px;margin-top:8px;max-height:360px;overflow:auto"></div>
+          </div>
           <div class="qbh-connection-note"><strong>Before enabling synchronization</strong><p id="qbhNextStep">Select the edition to see the next connection step.</p>
             <div class="qbh-muted" id="qbhSyncReadiness">Checking invoice and PO readiness…</div>
             <div class="qbh-muted">Match customers and suppliers, tax classifications and expense items. Confirm duplicate detection and perform a single supervised test before turning on any automatic sync.</div></div>
@@ -11010,6 +11070,99 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           ' prepared supplier POs · '+((iv.needs_review||0)+(po.needs_review||0))+
           ' records needing attention. Customer/vendor, item, tax and numbering mappings are required before posting.';}
     }
+    // 5.83: no QuickBooks/Render mutations from the trial launchpad.
+    let reviewedTrialPacket = null;
+    function selectedPacket(){
+      const kind=$('qbhPacketKind').value,number=String($('qbhPacketNumber').value||'').trim().toUpperCase();
+      if(!(kind==='invoice'?/^JS[0-9]{5,}$/.test(number):/^PO-[0-9]{5,}$/.test(number)))return null;
+      return {kind,number};
+    }
+    $('qbhSetupPreflight').onclick=async()=>{
+      const btn=$('qbhSetupPreflight'),view=$('qbhLaunchpadDetails');
+      btn.disabled=true;$('qbhLaunchpadStatus').textContent='Checking server-side prerequisites (without showing secret values)…';
+      try{
+        const result=await fetchJSON('/pds-quickbooks/trial-setup-diagnostics');view.replaceChildren();
+        for(const [key,ready] of Object.entries(result.checks||{})){
+          view.append(node('div','qbh-muted',(ready?'✓ ':'○ ')+key.replaceAll('_',' ')));
+        }
+        const order=node('div','qbh-muted','Next: '+(result.setup_order||[]).join(' → '));view.append(order);
+        $('qbhLaunchpadStatus').textContent='Environment: '+result.environment+' · '+
+          (result.authorized?'Company authorized: '+(result.company_name||result.company_id):'QuickBooks authorization still required')+
+          ' · Posting and payments disabled.';
+      }catch(err){$('qbhLaunchpadStatus').textContent='Preflight unavailable: '+(err.message||err);}
+      finally{btn.disabled=false;}
+    };
+    $('qbhCoverage').onclick=async()=>{
+      const btn=$('qbhCoverage'),view=$('qbhLaunchpadDetails');btn.disabled=true;
+      try{
+        const result=await fetchJSON('/pds-quickbooks/master-link-coverage');view.replaceChildren();
+        const names={customers:'PDS customers',vendors:'Service vendors',suppliers:'Purchasing suppliers',items:'Parts / services'};
+        for(const [kind,c] of Object.entries(result.counts||{})){
+          view.append(node('div','qbh-muted',names[kind]+': '+c.approved_local_links+' of '+c.total+
+            ' linked · '+c.unlinked+' unlinked · '+c.stale_or_wrong_company+' needs review'));
+        }
+        $('qbhLaunchpadStatus').textContent='Saved links reviewed for '+result.environment+'. QuickBooks records were not modified.';
+      }catch(err){$('qbhLaunchpadStatus').textContent='Link coverage unavailable: '+(err.message||err);}
+      finally{btn.disabled=false;}
+    };
+    $('qbhPacketPreview').onclick=async()=>{
+      const selected=selectedPacket(),view=$('qbhLaunchpadDetails');
+      const btn=$('qbhPacketPreview');reviewedTrialPacket=null;$('qbhPacketDownload').disabled=true;
+      if(!selected){$('qbhLaunchpadStatus').textContent='Enter a prepared JS000xx invoice or PO-000xx supplier PO.';return;}
+      btn.disabled=true;$('qbhLaunchpadStatus').textContent='Reviewing prepared document, IDs, line totals and accounting blockers…';
+      try{
+        const includeDuplicates=Boolean($('qbhPacketDuplicates').checked);
+        const result=await fetchJSON('/pds-quickbooks/trial-packet/'+encodeURIComponent(selected.kind)+'/'+encodeURIComponent(selected.number)+
+          (includeDuplicates?'?check_duplicates=true':''));
+        reviewedTrialPacket=selected;view.replaceChildren();
+        view.append(node('strong','',result.pds_number+' · '+result.mapped_lines+'/'+result.total_lines+' lines reviewed'));
+        view.append(node('div','qbh-muted','Company: '+(result.company_name||'not verified')+' · '+result.environment+
+          ' · source fingerprint '+String(result.source_fingerprint||'').slice(0,12)));
+        for(const message of result.blockers||[]){view.append(node('div','qbh-muted','○ '+message));}
+        if(result.provider_shape_draft)view.append(node('div','qbh-muted','Item/customer references available in downloadable draft. Tax and terms remain blocked.'));
+        $('qbhLaunchpadStatus').textContent='Read-only trial packet ready. '+(result.blockers||[]).length+
+          ' checkpoints remain; no QuickBooks transaction or payment created.';
+        $('qbhPacketDownload').disabled=false;
+      }catch(err){$('qbhLaunchpadStatus').textContent='Unable to build packet: '+(err.message||err);}
+      finally{btn.disabled=false;}
+    };
+    const forgetPacket=()=>{reviewedTrialPacket=null;$('qbhPacketDownload').disabled=true;};
+    $('qbhPacketKind').onchange=forgetPacket;
+    $('qbhPacketNumber').oninput=forgetPacket;
+    $('qbhPacketDuplicates').onchange=forgetPacket;
+    $('qbhPacketDownload').onclick=()=>{
+      if(!reviewedTrialPacket)return;
+      const next=selectedPacket();
+      if(!next||next.kind!==reviewedTrialPacket.kind||next.number!==reviewedTrialPacket.number)return;
+      window.location.href='/pds-quickbooks/trial-packet/'+encodeURIComponent(next.kind)+'/'+encodeURIComponent(next.number)+
+        '/download'+($('qbhPacketDuplicates').checked?'?check_duplicates=true':'');
+    };
+    $('qbhTrialCheck').onclick=async()=>{
+      const kind=$('qbhTrialKind').value;
+      const number=String($('qbhTrialNumber').value||'').trim().toUpperCase();
+      const result=$('qbhTrialResult');
+      const btn=$('qbhTrialCheck');
+      if(!(kind==='invoice'?/^JS[0-9]{5,}$/.test(number):/^PO-[0-9]{5,}$/.test(number))){
+        result.textContent=kind==='invoice'?'Enter an existing invoice number like JS00021.':'Enter a supplier PO number like PO-00001.';
+        return;
+      }
+      btn.disabled=true;result.textContent='Checking saved handoff and accounting approvals…';
+      try{
+        const report=await fetchJSON('/pds-quickbooks/trial-readiness/'+encodeURIComponent(kind)+'/'+encodeURIComponent(number));
+        result.replaceChildren();
+        const heading=node('strong','',number+' · '+report.passed_count+' / '+report.total_checks+' checks reviewed');
+        result.append(heading);
+        const list=node('div','');list.style.cssText='display:grid;gap:7px;margin-top:10px';
+        for(const check of report.checks||[]){
+          const row=node('div','');row.style.cssText='padding:8px;border:1px solid #e2e8f0;border-radius:8px';
+          const title=node('div','', (check.passed?'✓ ':'○ ')+check.label);
+          const detail=node('small','qbh-muted',check.detail);
+          row.append(title,detail);list.append(row);
+        }
+        result.append(list,node('small','qbh-muted',report.note+' Live sync and payments remain off.'));
+      }catch(error){result.textContent='Trial preview unavailable: '+(error.message||error)+'. Confirm the document is prepared and unchanged.';}
+      finally{btn.disabled=false;}
+    };
     $('qbhFeePreview').onclick=async()=>{
       const number=String($('qbhFeeInvoice').value||'').trim().toUpperCase();
       if(!/^JS[0-9]{5,}$/.test(number)){$('qbhFeeResult').textContent='Enter a saved PDS invoice number, for example JS00021.';return;}
@@ -15660,6 +15813,22 @@ const updated = await apiUpdateJob(job.id, {
       drawerBody.appendChild(card);
 
       const questions = card.querySelector("#helper_questions");
+      // A completion-form shortcut must reference its exact saved form, never
+      // silently fall back to a different record in a multi-form job.
+      if(ctx?.sourceFormId){
+        const wanted=String(ctx.sourceFormId);
+        const sourceIndex=forms.findIndex(f=>String(f?.id||'')===wanted);
+        if(sourceIndex<0){alert('The saved source form changed. Review the job before invoicing.');overlay.remove();return;}
+        const source=card.querySelector('#helper_source_form');
+        source.value=String(sourceIndex);
+        questions.style.display='block';
+        card.querySelector('#help_yes').disabled=true;
+        card.querySelector('#help_yes').closest('.card').style.display='none';
+        if(initialType==='invoice'){
+          card.querySelector('#helper_trip_qty').value='0';
+          card.querySelector('#helper_fuel_qty').value='0';
+        }
+      }
       const laborType = card.querySelector("#helper_labor_type");
       const otherWrap = card.querySelector("#helper_other_wrap");
       let linkedEstimates=[];
@@ -15679,7 +15848,7 @@ const updated = await apiUpdateJob(job.id, {
         if(forms.some(isRecommendationForm))renderReferencePanel('recommendation');
         else renderReferencePanel('completion');
       }
-      if(ctx?.mosesJobFlow && initialType==='invoice' && job?.id){
+      if((ctx?.mosesJobFlow || ctx?.sourceFormId) && initialType==='invoice' && job?.id){
         linkedSource.style.display='grid';linkedSource.style.gap='8px';
         const title=document.createElement('strong');title.textContent='Invoice from saved Doorks estimate (optional)';
         linkedSelect.append(new Option('Independent T&M invoice · No linked estimate',''));
@@ -15723,7 +15892,15 @@ const updated = await apiUpdateJob(job.id, {
 
       card.querySelector("#help_no").addEventListener("click", () => {
         if (overlay) overlay.remove();
-        openEstimateInvoiceDrawer(job, initialType, container, { ...(ctx || {}), skipHelper: true });
+        const selectedIndex=ctx?.sourceFormId
+          ? forms.findIndex(f=>String(f?.id||'')===String(ctx.sourceFormId)) : -1;
+        if(ctx?.sourceFormId && selectedIndex<0){
+          alert('The saved source form is no longer available. Review the job before invoicing.');return;
+        }
+        openEstimateInvoiceDrawer(job, initialType, container, {
+          ...(ctx || {}), skipHelper: true,
+          ...(selectedIndex>=0 ? {helperPrefill:{autoFill:true,sourceIndex:selectedIndex,tripQty:0,fuelQty:0}} : {})
+        });
       });
 
       card.querySelector("#help_yes").addEventListener("click", () => {
@@ -15784,6 +15961,13 @@ const updated = await apiUpdateJob(job.id, {
       });
 
       card.querySelector("#helper_continue").addEventListener("click", () => {
+        if(ctx?.sourceFormId){
+          const source=card.querySelector('#helper_source_form');
+          const selected=forms[Number(source?.value)];
+          if(!selected || String(selected.id||'')!==String(ctx.sourceFormId)){
+            alert('The invoice source must be the saved completion form. Please review its selection.');return;
+          }
+        }
         const linkedEstimate=linkedEstimates.find(doc=>doc.filename===linkedSelect.value);
         if(linkedEstimate && !Array.isArray(linkedEstimate.items)){
           alert('This estimate has no verified structured pricing lines. Open its saved document to review before invoicing.');return;

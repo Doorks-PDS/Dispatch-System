@@ -280,3 +280,38 @@ def qbo_line_mapping_status(kind: str, number: str, request: Request):
 def qbo_approve_line_item(kind: str, number: str, position: int, payload: LineItemApproval, request: Request):
     from app.services import pds_qbo_line_mappings as mapper
     return mapper.approve(request, kind, number, position, payload.provider_id, confirm=payload.confirm)
+
+
+# Moses 5.82: one-document dry-run worksheet; read only, no provider writes.
+@router.get('/trial-readiness/{kind}/{number}')
+def qbo_trial_readiness(kind: str, number: str, request: Request):
+    from app.services import pds_qbo_trial_plan as trial
+    return trial.report(request, kind, number)
+
+# 5.83: read-only, redacted connection diagnostics and one-document trial packet.
+@router.get('/trial-setup-diagnostics')
+def qbo_trial_setup_diagnostics(request: Request):
+    from app.services import pds_qbo_trial_packet as packet
+    return packet.setup_diagnostics(request)
+
+@router.get('/trial-packet/{kind}/{number}')
+def qbo_trial_packet(kind: str, number: str, request: Request, check_duplicates: bool = False):
+    from app.services import pds_qbo_trial_packet as packet
+    return packet.packet(request, kind, number, check_duplicates=check_duplicates)
+
+@router.get('/trial-packet/{kind}/{number}/download')
+def qbo_download_trial_packet(kind: str, number: str, request: Request, check_duplicates: bool = False):
+    from app.services import pds_qbo_trial_packet as packet
+    import json
+    from fastapi.responses import Response
+    data = packet.packet(request, kind, number, check_duplicates=check_duplicates)
+    safe_number = data['pds_number']
+    return Response(json.dumps(data, indent=2), media_type='application/json', headers={
+        'Content-Disposition': f'attachment; filename="PDS_QBO_TRIAL_{safe_number}.json"',
+        'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
+    })
+
+@router.get('/master-link-coverage')
+def qbo_master_link_coverage(request: Request):
+    from app.services import pds_qbo_trial_packet as packet
+    return packet.mapping_coverage(request)

@@ -54,8 +54,23 @@ def _durable_path(request):
     # tree. A configured Render disk or a durable external directory is required.
     if (os.getenv('RENDER') or _environment() == 'production'):
         source_root = Path(getattr(request.app.state, 'project_root', '') or '.').resolve()
-        if root == source_root or source_root in root.parents:
-            raise HTTPException(503, 'Configure a persistent DOORKS_DATA_DIR/Render disk before QuickBooks authorization')
+        if root == source_root:
+            raise HTTPException(503, 'QuickBooks credentials cannot be stored in the application source directory')
+        if source_root in root.parents:
+            # Render allows persistent disks mounted inside /opt/render/project/src,
+            # including PDS's existing /opt/render/project/src/data mount. Requiring
+            # data to live *outside* the source tree incorrectly rejects that disk.
+            # Confirm a real filesystem mount lies between source_root and data_dir;
+            # an ordinary source subdirectory is still ephemeral and is rejected.
+            directory = root
+            on_persistent_mount = False
+            while directory != source_root and directory != directory.parent:
+                if os.path.ismount(directory):
+                    on_persistent_mount = True
+                    break
+                directory = directory.parent
+            if not on_persistent_mount:
+                raise HTTPException(503, 'QuickBooks credentials require a mounted persistent data volume')
     return root / CONNECTED_FILE
 
 
