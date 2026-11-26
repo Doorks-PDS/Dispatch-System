@@ -29,8 +29,9 @@ def test_compact_tour_and_accessibility():
 
 def test_sdc_marketing_navigation_and_simple_review_ui():
     app=(ROOT/'static/app.js').read_text()
-    assert "addSdc('sdcDevelopmentNav','SDC Marketing'," in app
-    assert "'SDC Sales & Reports'" in app
+    assert "addSdc('sdcDevelopmentNav','SDC Marketing'," not in app
+    assert "addSdc('sdcDevelopmentNav','Sales & Reports'," in app
+    assert "addSdc('sdcDevelopmentNav','PDS Parts Storefront'," in app
     desk=(ROOT/'static/sdc_atlas_marketing.html').read_text()
     assert '<h1>SDC Marketing</h1>' in desk
     assert 'Review & approve' in desk

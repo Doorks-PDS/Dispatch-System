@@ -3152,20 +3152,15 @@
       addSdc('sdcOfficeNav','Business Hub',()=>renderBusinessHub('sdc'));
       addSdc('sdcOfficeNav','Accounting Hub',()=>renderSdcAccounting());
       addSdc('sdcOfficeNav','Data Import',()=>renderAIDataImportCenter('sdc'));
-      addSdc('sdcDevelopmentNav','SDC Sales & Reports',()=>{
+      addSdc('sdcDevelopmentNav','Sales & Reports',()=>{
         clearWorkspaceActions();setWorkspace('SDC — Sales & Reports');workspaceBody.replaceChildren();
         const frame=document.createElement('iframe');frame.title='SDC sales and lead reports';
         frame.src='/sdc/sales-reports';frame.style.cssText='width:100%;height:1050px;min-height:76vh;border:1px solid #dce5dd;border-radius:18px;background:#f7faf7;display:block';
         workspaceBody.append(frame);frame.addEventListener('load',()=>{try{const doc=frame.contentDocument;if(!doc)return;const resize=()=>{frame.style.height=Math.min(Math.max(950,doc.documentElement.scrollHeight+40),14000)+'px'};resize();if(typeof ResizeObserver!=='undefined'){new ResizeObserver(resize).observe(doc.body)}}catch(e){}});
       });
-      addSdc('sdcDevelopmentNav','SDC Marketing',()=>{
-        clearWorkspaceActions();setWorkspace('SDC — Marketing');workspaceBody.replaceChildren();
-        const frame=document.createElement('iframe');frame.title='SDC marketing review desk';
-        frame.src='/sdc/atlas-marketing';frame.style.cssText='width:100%;height:1200px;min-height:75vh;border:1px solid #dce5dd;border-radius:18px;background:#f7faf7;display:block';
-        workspaceBody.append(frame);frame.addEventListener('load',()=>{try{const doc=frame.contentDocument;if(!doc)return;const resize=()=>{frame.style.height=Math.min(Math.max(950,doc.documentElement.scrollHeight+40),14000)+'px'};resize();if(typeof ResizeObserver!=='undefined'){new ResizeObserver(resize).observe(doc.body)}}catch(e){}});
-      });
       addSdc('sdcDevelopmentNav','Atlas Storefront',()=>{window.open('/software','_blank','noopener');});
-      addSdc('sdcDevelopmentNav','Door Storefront',()=>{window.open('/saddleback/doors','_blank','noopener');});
+      addSdc('sdcDevelopmentNav','SDC Storefront',()=>{window.open('/saddleback/doors','_blank','noopener');});
+      addSdc('sdcDevelopmentNav','PDS Parts Storefront',()=>{window.open('/pds-parts','_blank','noopener');});
     }
     if(platform==='doorks'){businessSide.innerHTML=`<section class="panel"><div class="panel-hd static">Job Flow</div><div class="panel-bd" id="dbJobNav"></div></section><section class="panel"><div class="panel-hd static">Office Flow</div><div class="panel-bd" id="dbOfficeNav"></div></section><section class="panel"><div class="panel-hd static">Portals & Inquiries</div><div class="panel-bd" id="dbPortalNav"></div></section>`;const add=(host,label,action)=>{const b=document.createElement('button');b.className='doorks-side-link';b.type='button';b.textContent=label;b.onclick=action;document.getElementById(host).append(b);};add('dbJobNav','Dashboard',()=>showPlatformShell('doorks'));add('dbJobNav','+ New Dispatch',()=>renderBusinessCollection('doorks','work_orders',true));add('dbJobNav','All Work Orders',()=>renderBusinessCollection('doorks','work_orders'));add('dbJobNav','Job Flow',renderDoorksJobFlow);add('dbOfficeNav','Business Hub',()=>renderBusinessHub('doorks'));add('dbOfficeNav','Accounting Hub',()=>renderDoorksAccountingHub());add('dbOfficeNav','Payroll',()=>renderDoorksStaff('payroll'));add('dbOfficeNav','Employees',()=>renderDoorksStaff('employees'));add('dbOfficeNav','Data Import',()=>renderAIDataImportCenter('doorks'));add('dbPortalNav','Customer & Vendor Portals',renderDoorksPortalAdmin);add('dbPortalNav','Customer Hub',()=>renderDoorksRelationshipHub('customers'));add('dbPortalNav','Vendor Hub',()=>renderDoorksRelationshipHub('vendors'));}
     if(loginPanel){

@@ -102,10 +102,11 @@ def test_bad_status_cannot_modify_and_links_visible(tmp_path):
                         json={"status": "Closed"}).status_code == 401
     assert client.get(f"/api/saddleback/door-quotes/{item['id']}/photos/0",headers=admin).status_code == 404
     dash = (ROOT / "static/app.js").read_text(encoding="utf-8")
-    assert "'SDC Sales & Reports'" in dash
-    assert "'Door Storefront'" in dash
+    assert "'Sales & Reports'" in dash
+    assert "'SDC Storefront'" in dash
     assert "'Atlas Storefront'" in dash
-    assert "'SDC Marketing'" in dash
+    assert "'PDS Parts Storefront'" in dash
+    assert "addSdc('sdcDevelopmentNav','SDC Marketing'" not in dash
     marketing = (ROOT / "static/sdc_atlas_marketing.html").read_text(encoding="utf-8")
     assert 'href="/saddleback/doors"' in marketing
     assert "Copy door quote campaign link" in marketing

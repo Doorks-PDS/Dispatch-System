@@ -74,15 +74,17 @@ def test_private_sales_overview_and_export(tmp_path):
 
 def test_navigation_form_and_photo_paths():
     app = (ROOT / 'static' / 'app.js').read_text()
-    for item in ('SDC Sales & Reports', 'SDC Marketing', 'Atlas Storefront', 'Door Storefront'):
+    for item in ('Sales & Reports', 'Atlas Storefront', 'SDC Storefront', 'PDS Parts Storefront'):
         assert f"addSdc('sdcDevelopmentNav','{item}'" in app
     assert "addSdc('sdcDevelopmentNav','Door Quote Requests'" not in app
     assert "addSdc('sdcDevelopmentNav','Atlas Software Sales'" not in app
     report = (ROOT / 'static' / 'sdc_sales_reports.html').read_text()
     assert '/api/software/inquiries' in report
     assert '/api/saddleback/door-quotes' in report
-    assert '/sdc/software-leads' in report
-    assert '/sdc/door-quote-requests' in report
+    assert 'data-type="atlas"' in report
+    assert 'data-type="doors"' in report
+    assert 'data-type="parts"' in report
+    assert '/pds-parts/api/sdc/orders' in report
     form = (ROOT / 'static' / 'sdc_doors.html').read_text()
     assert 'name="full_name"' in form and 'name="email"' in form
     assert 'name="opening_width"' not in form

@@ -32,7 +32,7 @@ CATEGORIES = (
     "Locks & Latches", "Storefront & Glass", "Accessories & Hardware",
 )
 IMAGE_NAME = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|webp)$")
-STATES = {"paid", "supplier_ordered", "shipped", "completed", "needs_review"}
+STATES = {"requested", "contacted", "cancelled", "paid", "supplier_ordered", "shipped", "completed", "needs_review"}
 
 
 def _now():
@@ -122,14 +122,26 @@ def _admin(request):
         raise HTTPException(403, "PDS office admin required")
 
 
+def _sdc_sales_admin(request):
+    # Narrow, explicit SDC report bridge. PDS catalog and accounting remain PDS-owned.
+    if not getattr(request.state, 'auth_user', None):
+        raise HTTPException(401, 'Sign in required')
+    if (getattr(request.state, 'auth_role', None) != 'office_admin'
+            or request.session.get('active_platform') != 'sdc'):
+        raise HTTPException(403, 'SDC office admin required')
+
+
 def _payment_settings():
     if not _enabled("PDS_PARTS_STORE_PAYMENTS_ENABLED"):
         raise HTTPException(503, "Card checkout is not enabled yet. Contact PDS for a quote.")
-    key = os.getenv("STRIPE_SECRET_KEY", "")
+    # A dedicated parts-store key takes priority. Reuse the existing sandbox
+    # key only for test sessions, never silently charge through a live key.
+    dedicated = os.getenv("PDS_PARTS_STORE_STRIPE_SECRET_KEY", "").strip()
+    key = dedicated or os.getenv("STRIPE_SECRET_KEY", "").strip()
     if not key.startswith(("sk_test_", "sk_live_")):
         raise HTTPException(503, "Stripe key is not configured")
-    if key.startswith("sk_live_") and not _enabled("PDS_PARTS_STORE_LIVE_ENABLED"):
-        raise HTTPException(503, "Live checkout requires an explicit launch approval")
+    if key.startswith("sk_live_") and (not dedicated or not _enabled("PDS_PARTS_STORE_LIVE_ENABLED")):
+        raise HTTPException(503, "Live checkout requires a dedicated key and explicit launch approval")
     shipping_raw = os.getenv("PDS_PARTS_STORE_SHIPPING_USD", "").strip()
     shipping = _cents(shipping_raw)
     if shipping_raw in ("0", "0.00", "0.0"):
@@ -195,12 +207,16 @@ def storefront(request: Request):
                         media_type="text/html", headers={"Cache-Control": "no-store"})
 
 
-def _checkout_ready():
+def _checkout_mode():
     try:
-        _payment_settings()
-        return True
+        key, _, _ = _payment_settings()
+        return "test" if key.startswith("sk_test_") else "live"
     except HTTPException:
-        return False
+        return "off"
+
+
+def _checkout_ready():
+    return _checkout_mode() != "off"
 
 
 @router.get("/api/catalog")
@@ -215,7 +231,9 @@ def catalog(request: Request, q: str = "", category: str = "All", limit: int = 1
         items = [p for p in items if words in " ".join((p["description"], p["part_number"], p["manufacturer"], p["category"])).casefold()]
     return {"items": items[:max(1, min(limit, 20000))], "categories": list(CATEGORIES),
             "matching": len(items), "checkout_enabled": _checkout_ready(),
-            "shipping_note": "Usually ships in 1–3 business days after order confirmation. Manufacturer and specialty items may take longer. Shipping dates are confirmed by email."}
+            "shipping_note": "Usually ships in 1–3 business days after order confirmation. Manufacturer and specialty items may take longer. Shipping dates are confirmed by email.",
+            "checkout_mode": _checkout_mode(),
+            "tax_mode": "sandbox_no_tax" if (_checkout_mode() == "test" and _enabled("PDS_PARTS_STORE_TEST_NO_TAX")) else "automatic"}
 
 
 @router.get("/image/{part_id}")
@@ -248,6 +266,80 @@ class Cart(BaseModel):
     token: uuid.UUID
 
 
+class OrderRequest(BaseModel):
+    lines: list[Line] = Field(min_length=1, max_length=15)
+    token: uuid.UUID
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=5, max_length=254)
+    phone: str = Field(default='', max_length=40)
+    postal_code: str = Field(default='', max_length=16)
+    note: str = Field(default='', max_length=800)
+    website: str = Field(default='', max_length=200)  # honeypot
+
+
+def _price_lines(request, entries):
+    products = {p['id']: p for p in _catalog(request)}
+    if len({line.id for line in entries}) != len(entries):
+        raise HTTPException(422, 'Duplicate products in cart')
+    lines = []
+    for entry in entries:
+        p = products.get(entry.id)
+        if p is None or p['price_cents'] is None:
+            raise HTTPException(409, 'A selected item needs a current price review')
+        lines.append({**{k: p[k] for k in ('id', 'description', 'part_number', 'manufacturer', 'price_cents')}, 'qty': entry.qty})
+    if sum(x['price_cents'] * x['qty'] for x in lines) > 2000000:
+        raise HTTPException(422, 'Large orders require a manual quote')
+    return lines
+
+
+@router.post('/api/order-requests', status_code=201)
+def request_order(request: Request, payload: OrderRequest):
+    """No charge or supplier order. Request status is never treated as paid."""
+    from datetime import timedelta
+    if payload.website:
+        return {'ok': True, 'message': 'Request received'}
+    name, email = payload.name.strip(), payload.email.strip().lower()
+    if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        raise HTTPException(422, 'Enter your name and a valid email address')
+    if any(ord(c) < 32 and c not in '\n\t\r' for c in payload.note):
+        raise HTTPException(422, 'Invalid request note')
+    lines = _price_lines(request, payload.lines)
+    token = str(payload.token)
+    path = _orders_path(request)
+    with _locked(path):
+        rows = _load(path)
+        old = next((row for row in rows if row.get('token') == token), None)
+        if old:
+            if old.get('lines') != lines or old.get('customer_email') != email:
+                raise HTTPException(409, 'This order reference was already used')
+            return {'ok': True, 'reference': old['id'][:8], 'duplicate': True}
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        recent = 0
+        for row in rows:
+            if row.get('customer_email', '').lower() != email:
+                continue
+            try:
+                stamp = datetime.fromisoformat(str(row.get('created_at', '')).replace('Z', '+00:00'))
+                if stamp.tzinfo and stamp >= cutoff:
+                    recent += 1
+            except ValueError:
+                pass
+        if recent >= 5:
+            raise HTTPException(429, 'Too many requests; please contact our parts team')
+        now = _now()
+        record = {'id': uuid.uuid4().hex, 'token': token, 'created_at': now,
+                  'updated_at': now, 'requested_at': now, 'state': 'requested',
+                  'lines': lines, 'subtotal_cents': sum(p['price_cents'] * p['qty'] for p in lines),
+                  'shipping_cents': None, 'currency': 'usd',
+                  'customer_name': name, 'customer_email': email,
+                  'customer_phone': payload.phone.strip(),
+                  'postal_code': payload.postal_code.strip(), 'customer_note': payload.note.strip(),
+                  'paid_at': None}
+        rows.append(record)
+        _save(path, rows)
+    return {'ok': True, 'reference': record['id'][:8], 'payment_received': False}
+
+
 def _checkout_payload(order, origin, shipping):
     fields = {"mode": "payment", "payment_method_types[0]": "card",
               "client_reference_id": order["id"],
@@ -256,7 +348,10 @@ def _checkout_payload(order, origin, shipping):
               "cancel_url": origin + "/pds-parts?payment=cancel",
               "shipping_address_collection[allowed_countries][0]": "US",
               "phone_number_collection[enabled]": "true",
-              "automatic_tax[enabled]": "true",  # Fail closed if Stripe Tax is not configured.
+              "automatic_tax[enabled]": "false" if (
+                  _enabled("PDS_PARTS_STORE_TEST_NO_TAX") and
+                  (os.getenv("PDS_PARTS_STORE_STRIPE_SECRET_KEY") or os.getenv("STRIPE_SECRET_KEY", "")).startswith("sk_test_")
+              ) else "true",  # Test-only bypass; production always requires Stripe Tax.
               "shipping_options[0][shipping_rate_data][type]": "fixed_amount",
               "shipping_options[0][shipping_rate_data][fixed_amount][amount]": str(shipping),
               "shipping_options[0][shipping_rate_data][fixed_amount][currency]": "usd",
@@ -310,7 +405,8 @@ def checkout(request: Request, cart: Cart):
             raise HTTPException(409, "Existing checkout needs review; do not retry payment")
         record = {"id": uuid.uuid4().hex, "token": token, "created_at": _now(),
                   "updated_at": _now(), "state": "creating", "lines": lines,
-                  "subtotal_cents": subtotal, "shipping_cents": shipping, "currency": "usd"}
+                  "subtotal_cents": subtotal, "shipping_cents": shipping, "currency": "usd",
+                  "test_mode": key.startswith("sk_test_")}
         orders.append(record)
         _save(path, orders)
         try:
@@ -321,7 +417,8 @@ def checkout(request: Request, cart: Cart):
             expected_prefix = "cs_live_" if key.startswith("sk_live_") else "cs_test_"
             if (not session_id.startswith(expected_prefix) or url.scheme != "https"
                     or url.hostname not in ("checkout.stripe.com", "checkout.stripe.dev")
-                    or session.get("mode") != "payment" or session.get("currency") != "usd"):
+                    or session.get("mode") != "payment" or session.get("currency") != "usd"
+                    or (session.get("amount_subtotal") is not None and session.get("amount_subtotal") != subtotal)):
                 raise ValueError("Stripe checkout mismatch")
         except Exception:
             record.update(state="checkout_uncertain", updated_at=_now())
@@ -382,7 +479,18 @@ async def stripe_webhook(request: Request):
             raise HTTPException(409, "Payment does not match order")
         if bool(event.get("livemode")) != session_id.startswith("cs_live_"):
             raise HTTPException(409, "Stripe payment mode mismatch")
-        if int(session.get("amount_total") or -1) < order["subtotal_cents"] + order["shipping_cents"]:
+        # Check Stripe's authoritative breakdown, not the redirect URL or a
+        # browser-supplied amount. Tax can vary by customer's shipping address.
+        details = session.get("total_details") or {}
+        amount_subtotal = session.get("amount_subtotal")
+        amount_shipping = details.get("amount_shipping")
+        amount_tax = details.get("amount_tax")
+        total = session.get("amount_total")
+        if (not isinstance(amount_subtotal, int) or amount_subtotal != order["subtotal_cents"]
+                or not isinstance(amount_shipping, int) or amount_shipping != order["shipping_cents"]
+                or not isinstance(amount_tax, int) or amount_tax < 0
+                or not isinstance(total, int)
+                or total != amount_subtotal + amount_shipping + amount_tax):
             raise HTTPException(409, "Payment total needs reconciliation")
         if order["state"] in STATES:
             return {"received": True, "processed": False, "duplicate": True}
@@ -392,6 +500,7 @@ async def stripe_webhook(request: Request):
         collected = session.get("collected_information") or {}
         ship = collected.get("shipping_details") or session.get("shipping_details") or {}
         order.update(state="paid", paid_at=_now(), updated_at=_now(),
+                     tax_cents=amount_tax, total_cents=total,
                      stripe_payment_intent=str(session.get("payment_intent") or ""),
                      customer_email=str(details.get("email") or "")[:254],
                      customer_phone=str(details.get("phone") or "")[:45],
@@ -399,6 +508,25 @@ async def stripe_webhook(request: Request):
                      shipping_address=ship.get("address") or details.get("address") or {})
         _save(path, orders)
     return {"received": True, "processed": True}
+
+
+def _public_order_rows(request):
+    path = _orders_path(request)
+    with _locked(path):
+        orders = list(reversed(_load(path)))
+    # Omit internal token and hosted checkout session URL.
+    public = []
+    for row in orders[:1000]:
+        safe = {k: v for k, v in row.items() if k not in ('token', 'checkout_url')}
+        safe['test_mode'] = bool(row.get('test_mode') or str(row.get('stripe_session_id') or '').startswith('cs_test_'))
+        public.append(safe)
+    return {'items': public}
+
+
+@router.get('/api/sdc/orders')
+def sdc_order_report(request: Request):
+    _sdc_sales_admin(request)
+    return _public_order_rows(request)
 
 
 @router.get("/orders")
@@ -411,38 +539,59 @@ def order_manager(request: Request):
 @router.get("/api/orders")
 def list_orders(request: Request):
     _admin(request)
-    path = _orders_path(request)
-    with _locked(path):
-        orders = list(reversed(_load(path)))
-    return {"items": [{k: v for k, v in row.items() if k not in ("token", "checkout_url")}
-                      for row in orders[:500]]}
+    return _public_order_rows(request)
 
 
 class OrderUpdate(BaseModel):
     status: str
-    tracking: str = Field(default="", max_length=160)
+    tracking: str = Field(default='', max_length=160)
+    carrier: str = Field(default='', max_length=80)
+    eta_date: str = Field(default='', max_length=10)
+    staff_notes: str = Field(default='', max_length=1600)
 
 
-@router.patch("/api/orders/{order_id}")
-def update_order(order_id: str, payload: OrderUpdate, request: Request):
-    _admin(request)
-    if payload.status not in ("supplier_ordered", "shipped", "completed", "needs_review"):
-        raise HTTPException(422, "Invalid fulfillment status")
-    if not re.fullmatch(r"[0-9a-f]{32}", order_id):
-        raise HTTPException(404, "Order not found")
+def _update_fulfillment(order_id, payload, request):
+    if not re.fullmatch(r'[0-9a-f]{32}', order_id):
+        raise HTTPException(404, 'Order not found')
+    if payload.eta_date:
+        from datetime import date
+        try:
+            date.fromisoformat(payload.eta_date)
+        except ValueError as exc:
+            raise HTTPException(422, 'Invalid estimated delivery date') from exc
     path = _orders_path(request)
     with _locked(path):
         orders = _load(path)
-        order = next((x for x in orders if x["id"] == order_id), None)
+        order = next((x for x in orders if x.get('id') == order_id), None)
         if not order:
-            raise HTTPException(404, "Order not found")
-        if order["state"] not in STATES:
-            raise HTTPException(409, "Only paid or review orders can be updated")
-        if payload.status in ("supplier_ordered", "shipped", "completed") and not order.get("paid_at"):
-            raise HTTPException(409, "Payment must be confirmed first")
-        order["state"] = payload.status
-        order["tracking"] = payload.tracking.strip()
-        order["updated_at"] = _now()
-        order["updated_by"] = str(request.state.auth_user.get("id") or "")[:90]
+            raise HTTPException(404, 'Order not found')
+        if order['state'] not in STATES:
+            raise HTTPException(409, 'Checkout is not confirmed')
+        paid = bool(order.get('paid_at'))
+        statuses = ('paid', 'supplier_ordered', 'shipped', 'completed', 'needs_review') if paid else ('requested', 'contacted', 'needs_review', 'cancelled')
+        if payload.status not in statuses:
+            raise HTTPException(409, 'Confirm payment before fulfillment')
+        before = order['state']
+        order.update(state=payload.status, tracking=payload.tracking.strip(),
+                     carrier=payload.carrier.strip(), eta_date=payload.eta_date.strip(),
+                     staff_notes=payload.staff_notes.strip(), updated_at=_now(),
+                     updated_by=str(request.state.auth_user.get('id') or '')[:90])
+        if payload.status == 'shipped' and before != 'shipped':
+            order['shipped_at'] = _now()
+        history = order.setdefault('history', [])
+        history.append({'at': _now(), 'status': payload.status, 'by': order['updated_by']})
+        order['history'] = history[-100:]
         _save(path, orders)
-    return {"ok": True, "status": order["state"]}
+    return {'ok': True, 'status': order['state'], 'paid': paid}
+
+
+@router.patch('/api/orders/{order_id}')
+def update_order(order_id: str, payload: OrderUpdate, request: Request):
+    _admin(request)
+    return _update_fulfillment(order_id, payload, request)
+
+
+@router.patch('/api/sdc/orders/{order_id}')
+def sdc_update_order(order_id: str, payload: OrderUpdate, request: Request):
+    _sdc_sales_admin(request)
+    return _update_fulfillment(order_id, payload, request)

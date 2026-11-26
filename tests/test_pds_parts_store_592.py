@@ -65,7 +65,7 @@ def event(order):
     return {'id': 'evt_test_123', 'type':'checkout.session.completed', 'livemode': False,
             'data':{'object':{'id':'cs_test_abc','client_reference_id':order['id'],
                     'metadata':{'pds_parts_order_id':order['id']},
-                    'amount_total':45200,'currency':'usd', 'payment_status':'paid',
+                    'amount_total':45200,'amount_subtotal':44000,'total_details':{'amount_shipping':1200,'amount_tax':0},'currency':'usd', 'payment_status':'paid',
                     'customer_details':{'email':'buyer@example.com'},
                     'collected_information':{'shipping_details':{'name':'Test Buyer','address':{'line1':'1 Main St','city':'Anytown','state':'CA','postal_code':'92000','country':'US'}}}}}}
 
@@ -195,3 +195,63 @@ def test_no_stock_or_supplier_cost_leakage_and_no_auto_fulfillment():
     assert 'supplier_rate' not in src
     assert 'supplier_ordered' in src
     assert 'send_email' not in src
+
+
+def test_order_request_is_idempotent_and_does_not_charge(tmp_path,monkeypatch):
+    original,path=seed(monkeypatch,tmp_path)
+    req=request(tmp_path,role=None)
+    token=uuid.uuid4()
+    data=store.OrderRequest(lines=[store.Line(id='p1',qty=3)],token=token,
+                            name='Parts Buyer',email='buyer@example.com',postal_code='92101')
+    first=store.request_order(req,data)
+    assert first['payment_received'] is False
+    assert store.request_order(req,data)['duplicate'] is True
+    orders=store._load(store._orders_path(req))
+    assert len(orders)==1 and orders[0]['state']=='requested'
+    assert orders[0]['subtotal_cents']==66000 and orders[0]['paid_at'] is None
+    assert json.loads(path.read_text())['items']==original
+
+
+def test_sdc_parts_view_and_unpaid_fulfillment_guard(tmp_path,monkeypatch):
+    seed(monkeypatch,tmp_path)
+    req=request(tmp_path,role=None)
+    order=store.OrderRequest(lines=[store.Line(id='p1',qty=1)],token=uuid.uuid4(),
+                             name='Test',email='test@example.com')
+    store.request_order(req,order)
+    order_id=store._load(store._orders_path(req))[0]['id']
+    with pytest.raises(HTTPException):store.sdc_order_report(req)
+    req=request(tmp_path,role='office_admin',platform='sdc')
+    assert len(store.sdc_order_report(req)['items'])==1
+    result=store.sdc_update_order(order_id,store.OrderUpdate(status='contacted',staff_notes='Follow up'),req)
+    assert result['paid'] is False
+    with pytest.raises(HTTPException) as error:
+        store.sdc_update_order(order_id,store.OrderUpdate(status='shipped'),req)
+    assert error.value.status_code==409
+    req=request(tmp_path,role='office_admin',platform='pds')
+    assert store.list_orders(req)['items'][0]['state']=='contacted'
+
+
+def test_sandbox_checkout_tax_toggle_never_bypasses_live(tmp_path,monkeypatch):
+    seed(monkeypatch,tmp_path)
+    settings(monkeypatch)
+    sample={'id':'abcdef0123','lines':[{'manufacturer':'ABC','part_number':'P','description':'Part','price_cents':1000,'qty':1}]}
+    assert store._checkout_payload(sample,'https://pds.example.com',1200)['automatic_tax[enabled]']=='true'
+    monkeypatch.setenv('PDS_PARTS_STORE_TEST_NO_TAX','true')
+    assert store._checkout_payload(sample,'https://pds.example.com',1200)['automatic_tax[enabled]']=='false'
+    monkeypatch.setenv('STRIPE_SECRET_KEY','sk_live_dont_use')
+    assert store._checkout_payload(sample,'https://pds.example.com',1200)['automatic_tax[enabled]']=='true'
+    with pytest.raises(HTTPException):store._payment_settings()
+
+
+def test_stripe_amounts_must_match_subtotal_shipping_and_tax(tmp_path,monkeypatch):
+    import asyncio
+    seed(monkeypatch,tmp_path);settings(monkeypatch);fake_stripe(monkeypatch)
+    req=request(tmp_path);store.checkout(req,checkout_request())
+    row=store._load(store._orders_path(req))[0]
+    bad=event(row);bad['data']['object']['amount_subtotal']=44001
+    raw,sig=signed(bad)
+    async def body():return raw
+    req.body=body;req.headers={'stripe-signature':sig}
+    with pytest.raises(HTTPException) as exc:asyncio.run(store.stripe_webhook(req))
+    assert exc.value.status_code==409
+    assert store._load(store._orders_path(req))[0]['state']=='checkout_pending'

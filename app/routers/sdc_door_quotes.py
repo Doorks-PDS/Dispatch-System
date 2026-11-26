@@ -295,18 +295,29 @@ def list_door_quotes(request: Request):
 class DoorQuoteUpdate(BaseModel):
     status: Literal["New", "Reviewing", "Quoted", "Closed"]
     staff_notes: str = Field(default="", max_length=2500)
+    follow_up_date: str | None = Field(default=None, max_length=10)
 
 
 @router.patch("/api/saddleback/door-quotes/{request_id}")
 def update_door_quote(request_id: str, payload: DoorQuoteUpdate, request: Request):
     _staff(request)
+    from datetime import date
+    if payload.follow_up_date:
+        try:
+            if date.fromisoformat(payload.follow_up_date).isoformat() != payload.follow_up_date:
+                raise ValueError('Invalid date')
+        except ValueError as exc:
+            raise HTTPException(422, 'Follow-up date must be YYYY-MM-DD') from exc
     with ws._lock:
         path = _records_path(request)
         rows = _read_existing(path)
         row = next((x for x in rows if isinstance(x, dict) and x.get("id") == request_id), None)
         if row is None:
             raise HTTPException(404, "Quote request not found")
-        row.update(status=payload.status, staff_notes=payload.staff_notes.strip(), updated_at=_utc().isoformat())
+        row.update(status=payload.status, staff_notes=payload.staff_notes.strip(),
+                   updated_at=_utc().isoformat())
+        if payload.follow_up_date is not None:
+            row['follow_up_date'] = payload.follow_up_date
         user = getattr(request.state, "auth_user", None)
         row["updated_by"] = str(user.get("id") or user.get("username") or "office_admin")[:80] if isinstance(user, dict) else "office_admin"
         _save(path, rows)
