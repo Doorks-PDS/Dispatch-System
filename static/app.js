@@ -10252,6 +10252,48 @@ Notes: ${job.parts_order.notes || ""}</div>`;
     controls.style.marginTop = "12px";
     controls.innerHTML = `<input class="input" id="parts_search" placeholder="Search manufacturer, part #, description, or supplier" /><button class="btn btn-orange" id="parts_add">Add Part</button>`;
 
+    // 5.92 PDS Parts Store: live catalog shares the saved PDS Parts List.
+    // Store order review is embedded under PDS; public shop opens separately.
+    const storeLink = document.createElement('button');
+    storeLink.className = 'btn';
+    storeLink.type = 'button';
+    storeLink.textContent = 'Open Parts Store';
+    storeLink.onclick = () => window.open('/pds-parts', '_blank', 'noopener');
+    controls.appendChild(storeLink);
+    const storeOrdersLink = document.createElement('button');
+    storeOrdersLink.className = 'btn';
+    storeOrdersLink.type = 'button';
+    storeOrdersLink.textContent = 'Store Sales & Orders';
+    storeOrdersLink.onclick = () => {
+      setNavActive(navPartsList);
+      clearWorkspaceActions();
+      setWorkspace('PDS — Parts Store Sales & Orders');
+      workspaceBody.replaceChildren();
+      const wrapper = document.createElement('div');
+      wrapper.style.cssText = 'max-width:1450px;margin:auto;width:100%;';
+      const back = document.createElement('button');
+      back.className = 'btn';
+      back.type = 'button';
+      back.textContent = '← PDS Parts List';
+      back.onclick = renderPartsListView;
+      const frame = document.createElement('iframe');
+      frame.title = 'PDS Parts Store orders and fulfillment';
+      frame.src = '/pds-parts/orders';
+      frame.style.cssText = 'width:100%;height:1050px;border:1px solid #dce5dd;border-radius:16px;background:#fff;display:block;margin-top:12px;';
+      wrapper.append(back, frame);
+      workspaceBody.append(wrapper);
+      frame.addEventListener('load', () => {
+        try {
+          const doc = frame.contentDocument;
+          if (!doc) return;
+          const resize = () => { frame.style.height = Math.min(Math.max(850, doc.documentElement.scrollHeight + 40), 12000) + 'px'; };
+          resize();
+          if (typeof ResizeObserver !== 'undefined') new ResizeObserver(resize).observe(doc.body);
+        } catch (_) {}
+      });
+    };
+    controls.appendChild(storeOrdersLink);
+
     const list = document.createElement("div");
     list.style.display = "grid";
     list.style.gap = "8px";
