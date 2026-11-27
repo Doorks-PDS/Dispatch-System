@@ -3974,6 +3974,9 @@
       image_url: payload.image_url || "",
       product_url: payload.product_url || "",
       supplier_rate: payload.supplier_rate ?? "",
+      core_return_required: payload.core_return_required === true,
+      core_charge: payload.core_charge ?? "",
+      store_inquiry_only: payload.store_inquiry_only === true,
       supplier_quote_number: payload.supplier_quote_number || "",
       supplier_quote_id: payload.supplier_quote_id || "",
       min_stock: payload.item_type === "service" ? null : (payload.min_stock ?? null),
@@ -10310,6 +10313,10 @@ Notes: ${job.parts_order.notes || ""}</div>`;
           <div style="margin-top:10px;"><div class="label">Customer Price</div><input class="input" id="part_price" type="number" step="0.01" min="0" value="${escapeHtml(String(part.Price || part.price || ""))}" /></div>
           <div style="margin-top:10px;"><div class="label">Warehouse Low-Stock Alert (optional)</div><input class="input" id="part_min_stock" type="number" min="0" step="1" placeholder="Leave blank to disable alerts" value="${escapeHtml(part.min_stock==null?'':String(part.min_stock))}" /></div>
           <div style="margin-top:10px;"><div class="label">Supplier Rate (optional)</div><input class="input" id="part_supplier_rate" type="number" step="0.01" min="0" value="${escapeHtml(String(part.supplier_rate??''))}" /></div>
+          <div style="margin-top:10px;"><label><input id="part_core_required" type="checkbox" ${part.core_return_required?'checked':''}/> Core return required</label></div>
+          <div style="margin-top:10px;"><div class="label">Core charge if not returned ($, internal only)</div><input class="input" id="part_core_charge" type="number" min="0" max="100000" step="0.01" placeholder="Optional" value="${escapeHtml(String(part.core_charge??''))}" /></div>
+          <div style="margin-top:10px;"><label><input id="part_store_inquiry_only" type="checkbox" ${part.store_inquiry_only?'checked':''}/> Inquiry only (disable shopping cart)</label></div>
+          <div style="margin-top:10px;"><div class="hint">Automatic door components are inquiry-only regardless of these settings.</div></div>
           <div style="margin-top:10px;"><div class="label">Supplier Quote # (optional)</div><input class="input" id="part_quote_number" placeholder="DCI Quote 12345" value="${escapeHtml(part.supplier_quote_number||'')}" /></div>
           <div style="margin-top:10px;"><div class="label">Product Website URL</div><input class="input" id="part_product_url" type="url" placeholder="https://supplier.com/product" value="${escapeHtml(part.product_url || "")}" /></div>
           <div style="margin-top:10px;"><div class="label">Photo URL</div><input class="input" id="part_image_url" placeholder="https://... or uploaded photo" value="${escapeHtml(part.image_url || "")}" /></div>
@@ -10369,6 +10376,9 @@ Notes: ${job.parts_order.notes || ""}</div>`;
             price: Number(wrap.querySelector("#part_price").value || 0),
             supplier: wrap.querySelector("#part_supplier").value.trim(),
             supplier_rate: wrap.querySelector("#part_supplier_rate").value.trim(),
+            core_return_required: wrap.querySelector("#part_core_required").checked,
+            core_charge: wrap.querySelector("#part_core_charge").value.trim(),
+            store_inquiry_only: wrap.querySelector("#part_store_inquiry_only").checked,
             supplier_quote_number: wrap.querySelector("#part_quote_number").value.trim(),
             supplier_quote_id: part.supplier_quote_id || "",
             min_stock: wrap.querySelector("#part_min_stock").value.trim()===""?null:Number(wrap.querySelector("#part_min_stock").value),

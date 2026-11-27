@@ -21,7 +21,7 @@ from pathlib import Path
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request as UrlRequest, urlopen
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
@@ -32,7 +32,7 @@ CATEGORIES = (
     "Locks & Latches", "Storefront & Glass", "Accessories & Hardware",
 )
 IMAGE_NAME = re.compile(r"^[0-9a-f]{32}\.(?:jpg|jpeg|png|webp)$")
-STATES = {"requested", "contacted", "cancelled", "paid", "supplier_ordered", "shipped", "completed", "needs_review"}
+STATES = {"requested", "needs_quote", "contacted", "cancelled", "paid", "supplier_ordered", "shipped", "completed", "needs_review"}
 
 
 def _now():
@@ -49,7 +49,7 @@ def _category(row):
         return "Exit Devices"
     if any(x in words for x in ("closer", "lcn ", "surface closer")):
         return "Door Closers"
-    if any(x in words for x in ("automatic", "operator", "presence sensor", "activation sensor", "motion sensor", "handicap opener", "actuator")):
+    if any(x in words for x in ("automatic", "operator", "presence sensor", "activation sensor", "motion sensor", "handicap opener", "actuator", "controller", "control board", "motor", "gearbox", "drive assembly")):
         return "Automatic Doors"
     if any(x in words for x in ("hinge", "pivot", "continuous hinge", "offset pivot")):
         return "Hinges & Pivots"
@@ -58,6 +58,43 @@ def _category(row):
     if any(x in words for x in ("storefront", "glass", "glazing", "threshold", "weatherstrip")):
         return "Storefront & Glass"
     return "Accessories & Hardware"
+
+
+
+def _auto_door_part(row):
+    """Conservative lockout: all automatic-door parts must be quoted first.
+
+    Even where a legacy item was categorized as a closer/exit device, an
+    automatic-door part still cannot reach a Stripe Checkout Session.
+    """
+    words = " ".join(str(row.get(k) or "") for k in
+                     ("description", "part_number", "manufacturer")).casefold()
+    if _category(row) == "Automatic Doors":
+        return True
+    return any(key in words for key in (
+        "automatic door", "automatic sliding", "automatic swing",
+        "operator", "controller", "control board", "motor", "gearbox",
+        "drive assembly", "drive unit", "activation sensor", "presence sensor",
+        "motion sensor", "handicap opener", "actuator", "pedestrian sensor",
+    ))
+
+
+def _has_core_charge(row):
+    value = str(row.get("core_charge") or '').strip()
+    if not value:
+        return False
+    try:
+        amount = Decimal(value)
+        return not amount.is_finite() or amount != 0
+    except (InvalidOperation, ValueError, TypeError):
+        return True  # Ambiguous legacy amounts must not flow to checkout.
+
+
+def _inquiry_only(row):
+    # Specialty/core flags fail closed: no automatic core billing or refunds.
+    return (row.get("store_inquiry_only") is True or
+            row.get("core_return_required") is True or
+            _has_core_charge(row) or _auto_door_part(row))
 
 
 def _cents(value):
@@ -107,7 +144,10 @@ def _public_item(row):
             image_url = src
     return {"id": part_id, "part_number": number, "description": title,
             "manufacturer": manufacturer, "category": _category(row),
-            "price_cents": _cents(row.get("price")), "image_url": image_url}
+            "price_cents": _cents(row.get("price")), "image_url": image_url,
+            "inquiry_only": _inquiry_only(row),
+            "core_review": (bool(row.get("core_return_required")) or
+                            _has_core_charge(row) or _auto_door_part(row))}
 
 
 def _catalog(request):
@@ -264,6 +304,10 @@ class Line(BaseModel):
 class Cart(BaseModel):
     lines: list[Line] = Field(min_length=1, max_length=15)
     token: uuid.UUID
+    name: str = Field(default='', max_length=120)
+    email: str = Field(default='', max_length=254)
+    phone: str = Field(default='', max_length=40)
+    postal_code: str = Field(default='', max_length=16)
 
 
 class OrderRequest(BaseModel):
@@ -275,6 +319,10 @@ class OrderRequest(BaseModel):
     postal_code: str = Field(default='', max_length=16)
     note: str = Field(default='', max_length=800)
     website: str = Field(default='', max_length=200)  # honeypot
+    shipping_line1: str = Field(default='', max_length=150)
+    shipping_line2: str = Field(default='', max_length=150)
+    shipping_city: str = Field(default='', max_length=100)
+    shipping_state: str = Field(default='', max_length=40)
 
 
 def _price_lines(request, entries):
@@ -286,10 +334,139 @@ def _price_lines(request, entries):
         p = products.get(entry.id)
         if p is None or p['price_cents'] is None:
             raise HTTPException(409, 'A selected item needs a current price review')
+        if p['inquiry_only']:
+            raise HTTPException(409, 'This part requires a direct quote and core review. Remove it from the cart.')
         lines.append({**{k: p[k] for k in ('id', 'description', 'part_number', 'manufacturer', 'price_cents')}, 'qty': entry.qty})
     if sum(x['price_cents'] * x['qty'] for x in lines) > 2000000:
         raise HTTPException(422, 'Large orders require a manual quote')
     return lines
+
+
+@router.post('/api/cart-quote')
+def cart_quote(request: Request, payload: Cart):
+    """Read-only, authoritative preview. Never trust browser prices or quantities."""
+    lines = _price_lines(request, payload.lines)
+    subtotal = sum(p['price_cents'] * p['qty'] for p in lines)
+    mode = _checkout_mode()
+    shipping = None
+    if mode != 'off':
+        try:
+            _, shipping, _ = _payment_settings()
+        except HTTPException:
+            mode = 'off'
+    return {
+        'lines': lines,
+        'subtotal_cents': subtotal,
+        'shipping_cents': shipping,
+        'before_tax_cents': subtotal + shipping if shipping is not None else None,
+        'tax_note': 'Calculated at secure Stripe checkout' if mode != 'off' else 'Confirmed before payment',
+        'checkout_mode': mode,
+    }
+
+
+
+class PartInquiry(BaseModel):
+    part_id: str = Field(min_length=1, max_length=100)
+    qty: int = Field(ge=1, le=20)
+    token: uuid.UUID
+    name: str = Field(min_length=1, max_length=120)
+    email: str = Field(min_length=5, max_length=254)
+    phone: str = Field(default='', max_length=40)
+    note: str = Field(default='', max_length=800)
+    website: str = Field(default='', max_length=200)
+
+
+@router.post('/api/part-inquiries', status_code=201)
+def part_inquiry(request: Request, payload: PartInquiry):
+    """Capture a specialty-part inquiry. Never bill for an unverified core."""
+    from datetime import timedelta
+    if payload.website:
+        return {'ok': True, 'message': 'Inquiry received'}
+    email = payload.email.strip().lower()
+    name = payload.name.strip()
+    if not name or not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        raise HTTPException(422, 'Enter a name and valid email')
+    if any(ord(c) < 32 and c not in '\t\r\n' for c in
+           (payload.note + payload.name + payload.phone)):
+        raise HTTPException(422, 'Invalid inquiry details')
+    row = next((p for p in _catalog(request) if p['id'] == payload.part_id), None)
+    if row is None:
+        raise HTTPException(404, 'Part not found')
+    # Inquiries are also supported for ordinary products where a buyer
+    # wants to confirm suitability before paying.
+    line = {k: row[k] for k in ('id', 'description', 'part_number',
+                                'manufacturer', 'price_cents')}
+    line['qty'] = payload.qty
+    token = str(payload.token)
+    path = _orders_path(request)
+    with _locked(path):
+        rows = _load(path)
+        existing = next((r for r in rows if r.get('token') == token), None)
+        if existing:
+            if (existing.get('customer_email') != email or
+                    existing.get('lines') != [line] or
+                    existing.get('kind') != 'part_inquiry'):
+                raise HTTPException(409, 'Inquiry reference was already used')
+            return {'ok': True, 'reference': existing['id'][:8], 'duplicate': True}
+        recent = 0
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        for previous in rows:
+            if str(previous.get('customer_email') or '').lower() != email:
+                continue
+            try:
+                when = datetime.fromisoformat(str(previous.get('created_at', '')).replace('Z', '+00:00'))
+                if when.tzinfo and when >= cutoff:
+                    recent += 1
+            except ValueError:
+                pass
+        if recent >= 5:
+            raise HTTPException(429, 'Too many inquiries. Please contact PDS directly.')
+        # Private reference for staff; NOT a billed line item or a quoted fee.
+        master = next((m for m in _raw_items(request) if str(m.get('id')) == row['id']), {})
+        core_estimate_cents = None
+        if str(master.get('core_charge') or '').strip():
+            try:
+                core_amount = Decimal(str(master['core_charge']))
+                if (core_amount.is_finite() and core_amount >= 0 and
+                        core_amount * 100 == (core_amount * 100).to_integral_value()):
+                    core_estimate_cents = int(core_amount * 100) * payload.qty
+            except (InvalidOperation, ValueError, TypeError):
+                pass
+        stamp = _now()
+        record = {'id': uuid.uuid4().hex, 'token': token, 'kind': 'part_inquiry',
+                  'created_at': stamp, 'updated_at': stamp, 'state': 'needs_quote',
+                  'lines': [line], 'subtotal_cents': None, 'shipping_cents': None,
+                  'currency': 'usd', 'customer_name': name, 'customer_email': email,
+                  'customer_phone': payload.phone.strip(),
+                  'customer_note': payload.note.strip(),
+                  'core_review_required': row['core_review'],
+                  'core_estimate_cents': core_estimate_cents,
+                  'core_return_status': 'unconfirmed' if row['core_review'] else 'not_applicable',
+                  'customer_price_estimate_cents': (
+                      (row['price_cents'] or 0) * payload.qty
+                      if row['price_cents'] is not None else None),
+                  'paid_at': None, 'test_mode': False}
+        rows.append(record)
+        _save(path, rows)
+    return {'ok': True, 'reference': record['id'][:8],
+            'payment_received': False, 'core_review_required': row['core_review']}
+
+
+@router.get('/api/checkout-status')
+def checkout_status(request: Request, session_id: str = Query(min_length=15, max_length=255)):
+    """Non-sensitive payment-return status; only signed webhooks mark orders paid."""
+    if not re.fullmatch(r'cs_(?:test|live)_[a-zA-Z0-9_]{5,250}', session_id):
+        raise HTTPException(404, 'Order not found')
+    path = _orders_path(request)
+    with _locked(path):
+        match = next((r for r in _load(path) if r.get('stripe_session_id') == session_id), None)
+    if not match:
+        raise HTTPException(404, 'Order not found')
+    state = str(match.get('state') or '')
+    return {'reference': str(match['id'])[:8],
+            'payment_status': 'paid' if match.get('paid_at') else 'pending',
+            'order_status': state if state in STATES else 'processing',
+            'test_mode': bool(match.get('test_mode'))}
 
 
 @router.post('/api/order-requests', status_code=201)
@@ -303,6 +480,14 @@ def request_order(request: Request, payload: OrderRequest):
         raise HTTPException(422, 'Enter your name and a valid email address')
     if any(ord(c) < 32 and c not in '\n\t\r' for c in payload.note):
         raise HTTPException(422, 'Invalid request note')
+    ship_fields = (payload.shipping_line1, payload.shipping_line2,
+                   payload.shipping_city, payload.shipping_state)
+    if any(ord(c) < 32 for f in ship_fields for c in f):
+        raise HTTPException(422, 'Invalid shipping address')
+    if (payload.shipping_line1 or payload.shipping_city or payload.shipping_state) and not (
+            payload.shipping_line1.strip() and payload.shipping_city.strip() and
+            payload.shipping_state.strip() and payload.postal_code.strip()):
+        raise HTTPException(422, 'Complete shipping address required')
     lines = _price_lines(request, payload.lines)
     token = str(payload.token)
     path = _orders_path(request)
@@ -334,6 +519,11 @@ def request_order(request: Request, payload: OrderRequest):
                   'customer_name': name, 'customer_email': email,
                   'customer_phone': payload.phone.strip(),
                   'postal_code': payload.postal_code.strip(), 'customer_note': payload.note.strip(),
+                  'shipping_address': {'line1': payload.shipping_line1.strip(),
+                                       'line2': payload.shipping_line2.strip(),
+                                       'city': payload.shipping_city.strip(),
+                                       'state': payload.shipping_state.strip(),
+                                       'postal_code': payload.postal_code.strip(), 'country': 'US'},
                   'paid_at': None}
         rows.append(record)
         _save(path, rows)
@@ -344,7 +534,7 @@ def _checkout_payload(order, origin, shipping):
     fields = {"mode": "payment", "payment_method_types[0]": "card",
               "client_reference_id": order["id"],
               "metadata[pds_parts_order_id]": order["id"],
-              "success_url": origin + "/pds-parts?payment=success",
+              "success_url": origin + "/pds-parts?payment=success&session_id={CHECKOUT_SESSION_ID}",
               "cancel_url": origin + "/pds-parts?payment=cancel",
               "shipping_address_collection[allowed_countries][0]": "US",
               "phone_number_collection[enabled]": "true",
@@ -356,6 +546,8 @@ def _checkout_payload(order, origin, shipping):
               "shipping_options[0][shipping_rate_data][fixed_amount][amount]": str(shipping),
               "shipping_options[0][shipping_rate_data][fixed_amount][currency]": "usd",
               "shipping_options[0][shipping_rate_data][display_name]": "Standard shipping"}
+    if order.get('customer_email'):
+        fields['customer_email'] = order['customer_email']
     for i, line in enumerate(order["lines"]):
         pre = f"line_items[{i}]"
         fields[f"{pre}[price_data][currency]"] = "usd"
@@ -379,18 +571,13 @@ def _stripe_session(key, order, origin, shipping):
 @router.post("/api/checkout")
 def checkout(request: Request, cart: Cart):
     key, shipping, origin = _payment_settings()
-    products = {p["id"]: p for p in _catalog(request)}
-    if len({l.id for l in cart.lines}) != len(cart.lines):
-        raise HTTPException(422, "Duplicate products in cart")
-    lines = []
-    for line in cart.lines:
-        p = products.get(line.id)
-        if p is None or p["price_cents"] is None:
-            raise HTTPException(409, "An item in the cart needs a price review")
-        lines.append({**{k: p[k] for k in ("id", "description", "part_number", "manufacturer", "price_cents")}, "qty": line.qty})
-    subtotal = sum(line["price_cents"] * line["qty"] for line in lines)
-    if subtotal > 2000000:
-        raise HTTPException(422, "Large orders require a manual quote")
+    lines = _price_lines(request, cart.lines)
+    subtotal = sum(line['price_cents'] * line['qty'] for line in lines)
+    name, email, phone = cart.name.strip(), cart.email.strip().lower(), cart.phone.strip()
+    if email and not re.fullmatch(r'[^\s@]+@[^\s@]+\.[^\s@]+', email):
+        raise HTTPException(422, 'Enter a valid email address')
+    if any(ord(ch) < 32 for field in (name, email, phone, cart.postal_code) for ch in field):
+        raise HTTPException(422, 'Invalid contact details')
     token = str(cart.token)
     path = _orders_path(request)
     # Lock held through provider response. A retried token cannot create a second session.
@@ -406,6 +593,8 @@ def checkout(request: Request, cart: Cart):
         record = {"id": uuid.uuid4().hex, "token": token, "created_at": _now(),
                   "updated_at": _now(), "state": "creating", "lines": lines,
                   "subtotal_cents": subtotal, "shipping_cents": shipping, "currency": "usd",
+                  "customer_name": name, "customer_email": email,
+                  "customer_phone": phone, "postal_code": cart.postal_code.strip(),
                   "test_mode": key.startswith("sk_test_")}
         orders.append(record)
         _save(path, orders)
@@ -477,7 +666,8 @@ async def stripe_webhook(request: Request):
         if (order.get("stripe_session_id") != session_id
                 or str(session.get("metadata", {}).get("pds_parts_order_id")) != order_id):
             raise HTTPException(409, "Payment does not match order")
-        if bool(event.get("livemode")) != session_id.startswith("cs_live_"):
+        if (bool(event.get("livemode")) != session_id.startswith("cs_live_")
+                or bool(order.get("test_mode")) == bool(event.get("livemode"))):
             raise HTTPException(409, "Stripe payment mode mismatch")
         # Check Stripe's authoritative breakdown, not the redirect URL or a
         # browser-supplied amount. Tax can vary by customer's shipping address.
@@ -502,8 +692,8 @@ async def stripe_webhook(request: Request):
         order.update(state="paid", paid_at=_now(), updated_at=_now(),
                      tax_cents=amount_tax, total_cents=total,
                      stripe_payment_intent=str(session.get("payment_intent") or ""),
-                     customer_email=str(details.get("email") or "")[:254],
-                     customer_phone=str(details.get("phone") or "")[:45],
+                     customer_email=str(details.get("email") or order.get("customer_email") or "")[:254],
+                     customer_phone=str(details.get("phone") or order.get("customer_phone") or "")[:45],
                      shipping_name=str(ship.get("name") or details.get("name") or "")[:150],
                      shipping_address=ship.get("address") or details.get("address") or {})
         _save(path, orders)
@@ -568,7 +758,7 @@ def _update_fulfillment(order_id, payload, request):
         if order['state'] not in STATES:
             raise HTTPException(409, 'Checkout is not confirmed')
         paid = bool(order.get('paid_at'))
-        statuses = ('paid', 'supplier_ordered', 'shipped', 'completed', 'needs_review') if paid else ('requested', 'contacted', 'needs_review', 'cancelled')
+        statuses = ('paid', 'supplier_ordered', 'shipped', 'completed', 'needs_review') if paid else ('requested', 'needs_quote', 'contacted', 'needs_review', 'cancelled')
         if payload.status not in statuses:
             raise HTTPException(409, 'Confirm payment before fulfillment')
         before = order['state']

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from decimal import Decimal, InvalidOperation
 
 from collections import defaultdict
 from datetime import datetime
@@ -356,6 +357,9 @@ def adjust_pds_part_stock(part_id: str, payload: PdsStockAdjustment, request: Re
 
 class PartPayload(BaseModel):
     id: str = ""
+    core_return_required: bool = False
+    core_charge: float | str = ""  # Internal only; not automatically charged
+    store_inquiry_only: bool = False
     manufacturer: str = ""
     part_number: str = ""
     description: str = ""
@@ -366,6 +370,23 @@ class PartPayload(BaseModel):
     supplier_rate: float | str = ""  # new optional field; legacy catalog prices retained
     min_stock: Optional[int] = Field(default=None, ge=0, le=100000)
     item_type: str = "part"  # part or service; services never represent stocked inventory
+    supplier_quote_number: str = Field(default="", max_length=160)
+    supplier_quote_id: str = Field(default="", max_length=100)
+
+
+def _core_amount(value: float | str) -> str:
+    """Private reference amount for core return handling, never auto-collected."""
+    if value is None or value == "":
+        return ""
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError) as exc:
+        raise HTTPException(422, "Invalid core charge") from exc
+    cents = amount * 100
+    if (not amount.is_finite() or amount < 0 or amount > 100000 or
+            cents != cents.to_integral_value()):
+        raise HTTPException(422, "Core charge must be $0–$100,000 with at most two decimals")
+    return format(amount, ".2f")
 
 
 def _part_https_url(value: str) -> str:
@@ -409,6 +430,8 @@ def list_parts(
             "description": _norm(item.get("description")),
             "price": item.get("price", ""),
             "supplier_rate": item.get("supplier_rate", ""),
+            "supplier_quote_number": _norm(item.get("supplier_quote_number")),
+            "supplier_quote_id": _norm(item.get("supplier_quote_id")),
             "stock_on_hand": balances.get(_norm(item.get("id"))),
             "stock_recorded": _norm(item.get("id")) in balances,
             "min_stock": item.get("min_stock") if item.get("item_type") != "service" else None,
@@ -419,7 +442,10 @@ def list_parts(
             "Price": item.get("price", ""),
             "Preferred Vendor": _norm(item.get("supplier") or item.get("manufacturer")),
         }
-        hay = " ".join([row["manufacturer"], row["part_number"], row["description"], row["supplier"], row["item_type"]]).lower()
+        row["core_return_required"] = item.get("core_return_required") is True
+        row["core_charge"] = item.get("core_charge", "")
+        row["store_inquiry_only"] = item.get("store_inquiry_only") is True
+        hay = " ".join([row["manufacturer"], row["part_number"], row["description"], row["supplier"], row["supplier_quote_number"], row["item_type"]]).lower()
         if qn and qn not in hay:
             continue
         out.append(row)
@@ -447,10 +473,15 @@ def create_part(request: Request, payload: PartPayload, x_api_key: Optional[str]
         "description": _norm(payload.description),
         "price": payload.price,
         "supplier_rate": payload.supplier_rate,
+        "supplier_quote_number": _norm(payload.supplier_quote_number),
+        "supplier_quote_id": _norm(payload.supplier_quote_id),
         "min_stock": payload.min_stock,
         "image_url": _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url,
         "product_url": _part_https_url(payload.product_url),
     }
+    item["core_return_required"] = payload.core_return_required
+    item["core_charge"] = _core_amount(payload.core_charge)
+    item["store_inquiry_only"] = payload.store_inquiry_only
     items.append(item)
     data = {"items": items}
     _write_json_file(path, data)
@@ -478,9 +509,19 @@ def update_part(request: Request, part_id: str, payload: PartPayload, x_api_key:
             item["description"] = _norm(payload.description)
             item["price"] = payload.price
             item["supplier_rate"] = payload.supplier_rate
+            item["supplier_quote_number"] = _norm(payload.supplier_quote_number)
+            item["supplier_quote_id"] = _norm(payload.supplier_quote_id)
             item["min_stock"] = payload.min_stock
             item["image_url"] = _part_https_url(payload.image_url) if not payload.image_url.startswith("/moses/part-image/pds/") else payload.image_url
             item["product_url"] = _part_https_url(payload.product_url)
+            # Preserve core settings when an older integration omits these optional fields.
+            fields_set = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+            if "core_return_required" in fields_set:
+                item["core_return_required"] = payload.core_return_required
+            if "core_charge" in fields_set:
+                item["core_charge"] = _core_amount(payload.core_charge)
+            if "store_inquiry_only" in fields_set:
+                item["store_inquiry_only"] = payload.store_inquiry_only
             items[i] = item
             _write_json_file(path, {"items": items})
             return {"ok": True, "item": item}
